@@ -69,24 +69,29 @@ Requires Node 18.18+.
 | Gemini     | Free tier           | Yes        | Google AI Studio, CORS-enabled, fast.             |
 | OpenRouter | Free models (`:free`)| Yes       | OpenAI-compatible, many free open models.         |
 | Claude     | Paid                | Yes        | Anthropic; uses official direct-browser-access.   |
-| Ollama     | Free & private      | No         | Runs on the visitor's own machine (setup below).  |
+| LM Studio  | Free & private      | No         | Local, OpenAI-compatible, CORS on by default — usually the smoothest local option. |
+| Ollama     | Free & private      | No         | Local; needs `OLLAMA_ORIGINS` set to your site.   |
 
 Calls run client-side so keys never touch the server, there is no serverless
 timeout on long analyses, streaming works everywhere, and Ollama works
 naturally.
 
-### Using your local Ollama
+### Using local models
 
-Ollama runs a model on your own computer. For the website (a different origin)
-to be allowed to call it, start Ollama with your app's address allowed:
+Two local options — both keep the model on your own machine, free and private:
+
+**LM Studio (recommended, easiest).** In LM Studio: load a model, open the **Developer** tab, and **Start Server** (default port 1234). CORS is on by default, so it typically works from the hosted site with no extra flags. In **Settings**, choose **Local (LM Studio)**, leave the address as `http://127.0.0.1:1234/v1`, and click **Test connection**.
+
+**Ollama.** For the website (a different origin) to be allowed to call Ollama, start it with your app's address allowed:
 
 ```bash
 ollama pull llama3.1:8b
 OLLAMA_ORIGINS="https://your-app.vercel.app" ollama serve
 ```
 
-Then in **Settings**, choose **Local (Ollama)**, set the model + address
-(`http://localhost:11434` by default), and click **Test connection**.
+Then in **Settings**, choose **Local (Ollama)**, set the model + address (`http://127.0.0.1:11434`), and click **Test connection**.
+
+> Note: on newer Chrome (142+), a hosted **https** site reaching `localhost` triggers a Local Network Access permission prompt — allow it when asked. If it's blocked, run the app locally (`npm run dev`, open `http://localhost:3000`) for a friction-free local-model experience.
 
 ---
 

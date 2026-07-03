@@ -39,38 +39,41 @@ export const worldBankSource: DataSource = {
     if (!code) return [];
 
     const out: NormalizedDatum[] = [];
-    for (const [indicator, [label, unit, hint]] of Object.entries(INDICATORS)) {
-      const url = buildUrl(`${BASE}/${code}/indicator/${indicator}`, {
-        format: "json",
-        per_page: 60,
-        mrnev: 1, // most recent non-empty value
-      });
-      let data: [unknown, WBRow[] | null] | unknown;
-      try {
-        data = await getJson(url, { timeoutMs: 20000, retries: 1 });
-      } catch {
-        continue;
-      }
-      // World Bank returns [metadata, [rows]]
-      if (!Array.isArray(data) || data.length < 2 || !Array.isArray(data[1]) || !data[1].length) {
-        continue;
-      }
-      const row = data[1][0] as WBRow;
-      if (row.value == null) continue;
-      out.push({
-        key: `wb_${indicator.toLowerCase().replace(/\./g, "_")}`,
-        label: `${label} (${row.date ?? "latest"}, national)`,
-        value: row.value,
-        unit,
-        essentialHint: hint,
-        provenance: provenance(
-          "World Bank",
-          "World Development Indicators",
-          `${indicator} for ${code}`,
-          url
-        ),
-      });
-    }
+    // Fetch all indicators in PARALLEL to stay within the serverless budget.
+    await Promise.all(
+      Object.entries(INDICATORS).map(async ([indicator, [label, unit, hint]]) => {
+        const url = buildUrl(`${BASE}/${code}/indicator/${indicator}`, {
+          format: "json",
+          per_page: 60,
+          mrnev: 1, // most recent non-empty value
+        });
+        let data: [unknown, WBRow[] | null] | unknown;
+        try {
+          data = await getJson(url, { timeoutMs: 8000, retries: 0 });
+        } catch {
+          return;
+        }
+        // World Bank returns [metadata, [rows]]
+        if (!Array.isArray(data) || data.length < 2 || !Array.isArray(data[1]) || !data[1].length) {
+          return;
+        }
+        const row = data[1][0] as WBRow;
+        if (row.value == null) return;
+        out.push({
+          key: `wb_${indicator.toLowerCase().replace(/\./g, "_")}`,
+          label: `${label} (${row.date ?? "latest"}, national)`,
+          value: row.value,
+          unit,
+          essentialHint: hint,
+          provenance: provenance(
+            "World Bank",
+            "World Development Indicators",
+            `${indicator} for ${code}`,
+            url
+          ),
+        });
+      })
+    );
     return out;
   },
 };

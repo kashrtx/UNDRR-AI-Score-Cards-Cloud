@@ -34,6 +34,17 @@ export function allSources(): DataSource[] {
   return [...CODE_SOURCES, ...loadConfigSources()];
 }
 
+/** Reject a promise if it doesn't settle within `ms` — bounds each source so
+ *  one slow API can't blow the serverless time budget. */
+function withTimeout<T>(p: Promise<T>, ms: number, label: string): Promise<T> {
+  return Promise.race([
+    p,
+    new Promise<T>((_, reject) =>
+      setTimeout(() => reject(new Error(`${label} timed out after ${ms / 1000}s`)), ms)
+    ),
+  ]);
+}
+
 /** Geocoding + every data source, for display / MCP list_sources. */
 export function listSources(): Array<{ id: string; name: string; requiresKey: boolean }> {
   const out = [
@@ -96,7 +107,7 @@ export async function buildDataPack(
   await Promise.all(
     allSources().map(async (source) => {
       try {
-        const items = await source.fetch(loc);
+        const items = await withTimeout(source.fetch(loc), 18000, source.name);
         allData.push(...items);
         sourceReport.push({ id: source.id, name: source.name, points: items.length });
         if (!items.length) warnings.push(`${source.name}: no data for this location.`);

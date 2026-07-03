@@ -10,7 +10,7 @@ import { uploadScorecard } from "@/lib/client/api";
 import type { NormalizedScorecard } from "@/lib/types";
 
 interface ScorecardUploadProps {
-  onUploaded: (scorecard: NormalizedScorecard) => void;
+  onUploaded: (scorecard: NormalizedScorecard, fileName: string) => void;
 }
 
 export function ScorecardUpload({ onUploaded }: ScorecardUploadProps) {
@@ -25,7 +25,7 @@ export function ScorecardUpload({ onUploaded }: ScorecardUploadProps) {
 
       try {
         const scorecard = await uploadScorecard(file);
-        onUploaded(scorecard);
+        onUploaded(scorecard, file.name);
       } catch (err) {
         setError(err instanceof Error ? err.message : "Upload failed");
       } finally {

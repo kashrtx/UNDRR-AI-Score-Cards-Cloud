@@ -5,7 +5,11 @@
 
 import { getSecret, hasSecret, setSecret, clearSecret } from "./crypto";
 
-export type ProviderId = "claude" | "gemini" | "openrouter" | "ollama";
+export type ProviderId = "claude" | "gemini" | "openrouter" | "ollama" | "lmstudio";
+/** Providers that require an API key (all cloud ones). */
+export type CloudProviderId = "claude" | "gemini" | "openrouter";
+/** Local providers run on the visitor's machine — no key. */
+export type LocalProviderId = "ollama" | "lmstudio";
 
 export interface AppSettings {
   provider: ProviderId;
@@ -14,6 +18,8 @@ export interface AppSettings {
   openrouterModel: string;
   ollamaModel: string;
   ollamaBaseUrl: string;
+  lmstudioModel: string;
+  lmstudioBaseUrl: string;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -23,16 +29,25 @@ export const DEFAULT_SETTINGS: AppSettings = {
   openrouterModel: "meta-llama/llama-3.3-70b-instruct:free",
   ollamaModel: "llama3.1:8b",
   ollamaBaseUrl: "http://127.0.0.1:11434",
+  lmstudioModel: "local-model",
+  lmstudioBaseUrl: "http://127.0.0.1:1234/v1",
 };
 
 const SETTINGS_KEY = "undrr.settings";
 
-// Each provider's API key is stored under its own secret name.
-export const SECRET_NAMES: Record<Exclude<ProviderId, "ollama">, string> = {
+// Each cloud provider's API key is stored under its own secret name.
+export const SECRET_NAMES: Record<CloudProviderId, string> = {
   claude: "claude_api_key",
   gemini: "gemini_api_key",
   openrouter: "openrouter_api_key",
 };
+
+export const CLOUD_PROVIDERS: CloudProviderId[] = ["gemini", "openrouter", "claude"];
+export const LOCAL_PROVIDERS: LocalProviderId[] = ["ollama", "lmstudio"];
+
+export function isCloudProvider(p: ProviderId): p is CloudProviderId {
+  return p === "claude" || p === "gemini" || p === "openrouter";
+}
 
 export function loadSettings(): AppSettings {
   if (typeof localStorage === "undefined") return { ...DEFAULT_SETTINGS };
@@ -50,15 +65,15 @@ export function saveSettings(s: AppSettings): void {
 }
 
 // ── API key helpers ─────────────────────────────────────────
-export async function setApiKey(provider: Exclude<ProviderId, "ollama">, key: string) {
+export async function setApiKey(provider: CloudProviderId, key: string) {
   await setSecret(SECRET_NAMES[provider], key);
 }
-export async function getApiKey(provider: Exclude<ProviderId, "ollama">): Promise<string | null> {
+export async function getApiKey(provider: CloudProviderId): Promise<string | null> {
   return getSecret(SECRET_NAMES[provider]);
 }
-export function hasApiKey(provider: Exclude<ProviderId, "ollama">): boolean {
+export function hasApiKey(provider: CloudProviderId): boolean {
   return hasSecret(SECRET_NAMES[provider]);
 }
-export function clearApiKey(provider: Exclude<ProviderId, "ollama">) {
+export function clearApiKey(provider: CloudProviderId) {
   clearSecret(SECRET_NAMES[provider]);
 }

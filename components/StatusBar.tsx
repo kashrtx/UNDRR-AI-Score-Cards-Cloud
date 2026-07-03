@@ -7,7 +7,7 @@
  * there's no backend to be "down".
  */
 
-import { CheckCircle2, AlertCircle, Cpu, Cloud, Sparkles, Boxes, FileSpreadsheet, ShieldCheck } from "lucide-react";
+import { CheckCircle2, AlertCircle, Cpu, Cloud, Sparkles, Boxes, MonitorSmartphone, FileSpreadsheet, ShieldCheck } from "lucide-react";
 import type { AppSettings, ProviderId } from "@/lib/settings/store";
 
 const LABEL: Record<ProviderId, string> = {
@@ -15,6 +15,7 @@ const LABEL: Record<ProviderId, string> = {
   gemini: "Gemini",
   openrouter: "OpenRouter",
   ollama: "Local (Ollama)",
+  lmstudio: "Local (LM Studio)",
 };
 
 function providerIcon(p: ProviderId, ready: boolean) {
@@ -28,6 +29,8 @@ function providerIcon(p: ProviderId, ready: boolean) {
       return <Boxes size={14} className={cls} />;
     case "ollama":
       return <Cpu size={14} className={cls} />;
+    case "lmstudio":
+      return <MonitorSmartphone size={14} className={cls} />;
   }
 }
 
@@ -47,14 +50,17 @@ export function StatusBar({
       ? settings.geminiModel
       : settings.provider === "openrouter"
       ? settings.openrouterModel
+      : settings.provider === "lmstudio"
+      ? settings.lmstudioModel
       : settings.ollamaModel;
 
+  const isLocal = settings.provider === "ollama" || settings.provider === "lmstudio";
   const readyDetail = providerReady
-    ? settings.provider === "ollama"
+    ? isLocal
       ? "Local model selected"
       : "API key saved"
-    : settings.provider === "ollama"
-    ? "Local model selected — make sure Ollama is running"
+    : isLocal
+    ? "Local model selected — make sure the local server is running"
     : "No API key yet — add one in Settings";
 
   return (

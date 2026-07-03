@@ -34,7 +34,7 @@ export async function getJson<T = unknown>(
   url: string,
   opts: { timeoutMs?: number; retries?: number; headers?: Record<string, string> } = {}
 ): Promise<T> {
-  const { timeoutMs = 20000, retries = 1, headers } = opts;
+  const { timeoutMs = 8000, retries = 0, headers } = opts;
   let lastErr: unknown;
   for (let attempt = 0; attempt <= retries; attempt++) {
     try {
@@ -56,7 +56,7 @@ export async function getJson<T = unknown>(
 export async function postForm<T = unknown>(
   url: string,
   body: string,
-  timeoutMs = 45000
+  timeoutMs = 12000
 ): Promise<T> {
   const res = await fetch(url, {
     method: "POST",

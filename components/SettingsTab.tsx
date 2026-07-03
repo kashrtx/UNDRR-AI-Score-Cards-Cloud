@@ -1,52 +1,37 @@
 "use client";
 
 /**
- * Settings — choose which AI writes the analysis and (for the cloud providers)
- * paste an API key. Everything here is stored in THIS browser only: the plain
- * settings in localStorage, and API keys encrypted with a device key
- * (WebCrypto AES-GCM). Nothing is ever sent to our server or stored in the repo.
+ * Settings — choose which AI writes the analysis and configure it. Everything
+ * here is stored in THIS browser only: plain settings in localStorage, and API
+ * keys encrypted with a device key (WebCrypto AES-GCM). Nothing is ever sent to
+ * our server or stored in the repo.
  */
 
 import { useEffect, useState, type ReactNode } from "react";
 import {
-  Cloud,
-  Cpu,
-  Sparkles,
-  Boxes,
-  Save,
-  Loader2,
-  CheckCircle2,
-  XCircle,
-  KeyRound,
-  Trash2,
-  Plug,
+  Cloud, Cpu, Sparkles, Boxes, MonitorSmartphone, Save, Loader2,
+  CheckCircle2, XCircle, KeyRound, Trash2, Plug,
 } from "lucide-react";
 import {
-  type AppSettings,
-  type ProviderId,
-  setApiKey,
-  hasApiKey,
-  clearApiKey,
-  getApiKey,
+  type AppSettings, type ProviderId, type CloudProviderId,
+  setApiKey, hasApiKey, clearApiKey, isCloudProvider,
 } from "@/lib/settings/store";
 import { createProvider } from "@/lib/llm";
 
 const MODELS: Record<ProviderId, string[]> = {
-  claude: ["claude-sonnet-4-6", "claude-opus-4-8", "claude-haiku-4-5", "claude-sonnet-5"],
-  gemini: ["gemini-2.0-flash", "gemini-2.0-flash-lite", "gemini-1.5-flash", "gemini-1.5-pro"],
+  gemini: ["gemini-2.0-flash", "gemini-3.5-flash", "gemini-2.0-flash-lite", "gemini-1.5-pro"],
   openrouter: [
     "meta-llama/llama-3.3-70b-instruct:free",
     "google/gemini-2.0-flash-exp:free",
     "deepseek/deepseek-chat:free",
     "mistralai/mistral-7b-instruct:free",
   ],
+  claude: ["claude-sonnet-4-6", "claude-opus-4-8", "claude-haiku-4-5", "claude-sonnet-5"],
+  lmstudio: ["local-model", "qwen2.5-7b-instruct", "llama-3.2-3b-instruct"],
   ollama: ["llama3.1:8b", "llama3.2", "qwen2.5", "mistral"],
 };
 
-const PROVIDER_META: Record<
-  ProviderId,
-  { title: string; subtitle: string; icon: ReactNode }
-> = {
+const PROVIDER_META: Record<ProviderId, { title: string; subtitle: string; icon: ReactNode }> = {
   gemini: {
     title: "Gemini (Google AI Studio)",
     subtitle: "Free tier, fast, high quality. The easiest starting point.",
@@ -62,14 +47,20 @@ const PROVIDER_META: Record<
     subtitle: "Top-quality analysis. Needs a paid Anthropic key.",
     icon: <Cloud size={18} className="text-accent-400" />,
   },
+  lmstudio: {
+    title: "Local (LM Studio)",
+    subtitle: "Free & private. OpenAI-compatible; usually works with no extra setup.",
+    icon: <MonitorSmartphone size={18} className="text-accent-400" />,
+  },
   ollama: {
-    title: "Local model (Ollama)",
-    subtitle: "Free & private. Runs on your own machine (needs setup).",
+    title: "Local (Ollama)",
+    subtitle: "Free & private. Runs on your machine (needs OLLAMA_ORIGINS).",
     icon: <Cpu size={18} className="text-accent-400" />,
   },
 };
 
-const CLOUD: Exclude<ProviderId, "ollama">[] = ["gemini", "openrouter", "claude"];
+// Display order — cloud first (the friction-free path), then local.
+const ORDER: ProviderId[] = ["gemini", "openrouter", "claude", "lmstudio", "ollama"];
 
 const inputCls =
   "mt-1 w-full px-3 py-2 rounded-lg bg-surface border border-border text-sm text-text-primary focus:border-accent-500/60 outline-none";
@@ -82,7 +73,7 @@ export function SettingsTab({
   onChange: (s: AppSettings) => void;
 }) {
   const [draft, setDraft] = useState<AppSettings>(settings);
-  const [keyInput, setKeyInput] = useState(""); // key typed for the currently-selected cloud provider
+  const [keyInput, setKeyInput] = useState("");
   const [keyPresence, setKeyPresence] = useState<Record<string, boolean>>({});
   const [saving, setSaving] = useState(false);
   const [saved, setSaved] = useState(false);
@@ -98,48 +89,35 @@ export function SettingsTab({
       claude: hasApiKey("claude"),
     });
   };
-  useEffect(() => {
-    refreshKeyPresence();
-  }, []);
-
-  // Reset the transient key input + test message whenever the provider changes.
-  useEffect(() => {
-    setKeyInput("");
-    setTestMsg(null);
-  }, [draft.provider]);
+  useEffect(() => { refreshKeyPresence(); }, []);
+  useEffect(() => { setKeyInput(""); setTestMsg(null); }, [draft.provider]);
 
   const provider = draft.provider;
-  const isCloud = provider !== "ollama";
+  const isCloud = isCloudProvider(provider);
+  const isLocal = !isCloud;
 
-  const setModel = (value: string) => {
-    const key =
-      provider === "claude"
-        ? "claudeModel"
-        : provider === "gemini"
-        ? "geminiModel"
-        : provider === "openrouter"
-        ? "openrouterModel"
-        : "ollamaModel";
-    setDraft({ ...draft, [key]: value } as AppSettings);
-  };
-  const currentModel =
-    provider === "claude"
-      ? draft.claudeModel
-      : provider === "gemini"
-      ? draft.geminiModel
-      : provider === "openrouter"
-      ? draft.openrouterModel
-      : draft.ollamaModel;
+  const modelField =
+    provider === "claude" ? "claudeModel"
+    : provider === "gemini" ? "geminiModel"
+    : provider === "openrouter" ? "openrouterModel"
+    : provider === "lmstudio" ? "lmstudioModel"
+    : "ollamaModel";
+  const currentModel = draft[modelField] as string;
+  const setModel = (value: string) => setDraft({ ...draft, [modelField]: value } as AppSettings);
+
+  const baseField = provider === "lmstudio" ? "lmstudioBaseUrl" : "ollamaBaseUrl";
+  const currentBase = draft[baseField] as string;
+  const setBase = (value: string) => setDraft({ ...draft, [baseField]: value } as AppSettings);
 
   const save = async () => {
     setSaving(true);
     setSaved(false);
     try {
       if (isCloud && keyInput.trim()) {
-        await setApiKey(provider as Exclude<ProviderId, "ollama">, keyInput.trim());
+        await setApiKey(provider as CloudProviderId, keyInput.trim());
         setKeyInput("");
       }
-      onChange(draft); // persists settings in the page
+      onChange(draft);
       refreshKeyPresence();
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
@@ -152,15 +130,13 @@ export function SettingsTab({
     setTesting(true);
     setTestMsg(null);
     try {
-      // If a key was just typed but not saved, encrypt it first so the test uses it.
       if (isCloud && keyInput.trim()) {
-        await setApiKey(provider as Exclude<ProviderId, "ollama">, keyInput.trim());
+        await setApiKey(provider as CloudProviderId, keyInput.trim());
         setKeyInput("");
         refreshKeyPresence();
       }
       const p = await createProvider(draft);
-      const result = await p.test();
-      setTestMsg(result);
+      setTestMsg(await p.test());
     } catch (err) {
       setTestMsg({ ok: false, message: err instanceof Error ? err.message : String(err) });
     } finally {
@@ -168,11 +144,13 @@ export function SettingsTab({
     }
   };
 
-  const clearKey = (p: Exclude<ProviderId, "ollama">) => {
+  const clearKey = (p: CloudProviderId) => {
     clearApiKey(p);
     refreshKeyPresence();
     setTestMsg(null);
   };
+
+  const origin = typeof window !== "undefined" ? window.location.origin : "https://your-app.vercel.app";
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
@@ -186,10 +164,11 @@ export function SettingsTab({
 
       {/* Provider selection */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        {(Object.keys(PROVIDER_META) as ProviderId[]).map((id) => {
+        {ORDER.map((id) => {
           const meta = PROVIDER_META[id];
           const active = provider === id;
-          const keyed = id === "ollama" ? true : keyPresence[id];
+          const cloud = isCloudProvider(id);
+          const keyed = cloud ? keyPresence[id] : true;
           return (
             <button
               key={id}
@@ -206,12 +185,8 @@ export function SettingsTab({
                 {active && <CheckCircle2 size={15} className="text-accent-400 ml-auto" />}
               </div>
               <p className="text-xs text-text-secondary">{meta.subtitle}</p>
-              {id !== "ollama" && (
-                <p
-                  className={`text-[11px] mt-1.5 flex items-center gap-1 ${
-                    keyed ? "text-accent-400" : "text-text-secondary"
-                  }`}
-                >
+              {cloud && (
+                <p className={`text-[11px] mt-1.5 flex items-center gap-1 ${keyed ? "text-accent-400" : "text-text-secondary"}`}>
                   <KeyRound size={11} /> {keyed ? "Key saved" : "No key yet"}
                 </p>
               )}
@@ -222,7 +197,7 @@ export function SettingsTab({
 
       {/* Provider-specific configuration */}
       <div className="glass-card p-5 space-y-4">
-        {/* Model picker (all providers) */}
+        {/* Model picker */}
         <label className="block">
           <span className="text-sm text-text-primary">Model</span>
           <input
@@ -233,12 +208,12 @@ export function SettingsTab({
             placeholder={MODELS[provider][0]}
           />
           <datalist id="model-presets">
-            {MODELS[provider].map((m) => (
-              <option key={m} value={m} />
-            ))}
+            {MODELS[provider].map((m) => <option key={m} value={m} />)}
           </datalist>
           <span className="text-xs text-text-secondary">
-            Pick a preset or type any model id the provider supports.
+            {provider === "lmstudio"
+              ? "Should match a model loaded in LM Studio (it also uses the loaded model if unsure)."
+              : "Pick a preset or type any model id the provider supports."}
           </span>
         </label>
 
@@ -256,35 +231,27 @@ export function SettingsTab({
               placeholder={
                 keyPresence[provider]
                   ? "A key is saved — type to replace it, or leave blank to keep"
-                  : provider === "claude"
-                  ? "sk-ant-…"
-                  : provider === "openrouter"
-                  ? "sk-or-…"
+                  : provider === "claude" ? "sk-ant-…"
+                  : provider === "openrouter" ? "sk-or-…"
                   : "AIza…"
               }
             />
             <span className="text-xs text-text-secondary">
               Encrypted in this browser (AES-GCM). Get a free key at{" "}
               {provider === "gemini" && (
-                <a className="text-primary-300 underline" href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">
-                  aistudio.google.com/apikey
-                </a>
+                <a className="text-primary-300 underline" href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">aistudio.google.com/apikey</a>
               )}
               {provider === "openrouter" && (
-                <a className="text-primary-300 underline" href="https://openrouter.ai/keys" target="_blank" rel="noreferrer">
-                  openrouter.ai/keys
-                </a>
+                <a className="text-primary-300 underline" href="https://openrouter.ai/keys" target="_blank" rel="noreferrer">openrouter.ai/keys</a>
               )}
               {provider === "claude" && (
-                <a className="text-primary-300 underline" href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer">
-                  console.anthropic.com
-                </a>
+                <a className="text-primary-300 underline" href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer">console.anthropic.com</a>
               )}
               .
             </span>
             {keyPresence[provider] && (
               <button
-                onClick={() => clearKey(provider as Exclude<ProviderId, "ollama">)}
+                onClick={() => clearKey(provider as CloudProviderId)}
                 className="mt-2 inline-flex items-center gap-1.5 text-xs text-danger-400 hover:text-danger-500"
               >
                 <Trash2 size={12} /> Remove saved key
@@ -293,30 +260,34 @@ export function SettingsTab({
           </label>
         )}
 
-        {/* Ollama: base URL + CORS help */}
-        {provider === "ollama" && (
+        {/* Local: base URL + setup help */}
+        {isLocal && (
           <>
             <label className="block">
-              <span className="text-sm text-text-primary">Ollama address</span>
+              <span className="text-sm text-text-primary">Local server address</span>
               <input
-                value={draft.ollamaBaseUrl}
-                onChange={(e) => setDraft({ ...draft, ollamaBaseUrl: e.target.value })}
+                value={currentBase}
+                onChange={(e) => setBase(e.target.value)}
                 className={inputCls}
-                placeholder="http://127.0.0.1:11434"
+                placeholder={provider === "lmstudio" ? "http://127.0.0.1:1234/v1" : "http://127.0.0.1:11434"}
               />
             </label>
-            <div className="text-xs text-text-secondary bg-surface-overlay/40 border border-border rounded-lg p-3 space-y-1">
-              <p className="text-text-primary font-medium">Local setup (one-time)</p>
-              <p>1. Install Ollama and pull a model: <code className="text-primary-300">ollama pull {draft.ollamaModel || "llama3.1:8b"}</code></p>
-              <p>
-                2. Let this website talk to it by starting Ollama with your site allowed:
-              </p>
-              <p>
-                <code className="text-primary-300">
-                  OLLAMA_ORIGINS=&quot;{typeof window !== "undefined" ? window.location.origin : "https://your-app.vercel.app"}&quot; ollama serve
-                </code>
-              </p>
-            </div>
+            {provider === "lmstudio" ? (
+              <div className="text-xs text-text-secondary bg-surface-overlay/40 border border-border rounded-lg p-3 space-y-1">
+                <p className="text-text-primary font-medium">LM Studio setup</p>
+                <p>1. In LM Studio, load a model (the little chat icon).</p>
+                <p>2. Open the <span className="text-primary-300">Developer</span> tab → <span className="text-primary-300">Start Server</span> (default port 1234). CORS is on by default.</p>
+                <p>3. Keep the address as <code className="text-primary-300">http://127.0.0.1:1234/v1</code>, then hit Test.</p>
+              </div>
+            ) : (
+              <div className="text-xs text-text-secondary bg-surface-overlay/40 border border-border rounded-lg p-3 space-y-1">
+                <p className="text-text-primary font-medium">Ollama setup (one-time)</p>
+                <p>1. Pull a model: <code className="text-primary-300">ollama pull {draft.ollamaModel || "llama3.1:8b"}</code></p>
+                <p>2. Allow this site to reach it:</p>
+                <p><code className="text-primary-300">OLLAMA_ORIGINS=&quot;{origin}&quot; ollama serve</code></p>
+                <p className="text-warn-400">Note: on newer Chrome, a hosted (https) site reaching localhost may need the Local Network Access permission prompt to be allowed. LM Studio is often smoother.</p>
+              </div>
+            )}
           </>
         )}
 
@@ -331,11 +302,7 @@ export function SettingsTab({
             Test connection
           </button>
           {testMsg && (
-            <span
-              className={`flex items-center gap-1.5 text-sm ${
-                testMsg.ok ? "text-accent-400" : "text-danger-400"
-              }`}
-            >
+            <span className={`flex items-center gap-1.5 text-sm ${testMsg.ok ? "text-accent-400" : "text-danger-400"}`}>
               {testMsg.ok ? <CheckCircle2 size={15} /> : <XCircle size={15} />}
               {testMsg.message}
             </span>

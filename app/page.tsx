@@ -26,10 +26,11 @@ import { GettingStarted } from "@/components/GettingStarted";
 import { AnalysisProgress } from "@/components/AnalysisProgress";
 import { DataSourcesPanel } from "@/components/DataSourcesPanel";
 import { SettingsTab } from "@/components/SettingsTab";
+import { SystemStatus } from "@/components/SystemStatus";
 
 import { runAnalysis } from "@/lib/analysis/analyze";
 import {
-  loadSettings, saveSettings as persistSettings, hasApiKey,
+  loadSettings, saveSettings as persistSettings, hasApiKey, isCloudProvider,
   type AppSettings,
 } from "@/lib/settings/store";
 import type { NormalizedScorecard } from "@/lib/scorecard/schema";
@@ -40,10 +41,11 @@ type AppState = "empty" | "ready" | "analyzing" | "results" | "error";
 type Tab = "dashboard" | "settings";
 
 const SCORECARD_KEY = "undrr.scorecard";
+const SCORECARD_NAME_KEY = "undrr.scorecard.name";
 
 function computeReady(s: AppSettings): boolean {
-  if (s.provider === "ollama") return true;
-  return hasApiKey(s.provider);
+  // Local providers (Ollama, LM Studio) need no key; cloud providers need one.
+  return isCloudProvider(s.provider) ? hasApiKey(s.provider) : true;
 }
 
 export default function Page() {
@@ -52,6 +54,7 @@ export default function Page() {
   const [providerReady, setProviderReady] = useState(false);
 
   const [scorecard, setScorecard] = useState<NormalizedScorecard | null>(null);
+  const [scFileName, setScFileName] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
   const [state, setState] = useState<AppState>("empty");
 
@@ -72,6 +75,7 @@ export default function Page() {
       if (raw) {
         const sc = JSON.parse(raw) as NormalizedScorecard;
         setScorecard(sc);
+        setScFileName(localStorage.getItem(SCORECARD_NAME_KEY));
         setState("ready");
       }
     } catch {
@@ -86,15 +90,35 @@ export default function Page() {
     setProviderReady(computeReady(s));
   }, []);
 
-  const handleUpload = useCallback((sc: NormalizedScorecard) => {
+  const handleUpload = useCallback((sc: NormalizedScorecard, fileName: string) => {
     setScorecard(sc);
+    setScFileName(fileName);
     setAnalysis(null);
     setError(null);
     setState("ready");
     try {
       localStorage.setItem(SCORECARD_KEY, JSON.stringify(sc));
+      localStorage.setItem(SCORECARD_NAME_KEY, fileName);
     } catch {
       /* quota — non-fatal */
+    }
+  }, []);
+
+  const handleRemove = useCallback(() => {
+    abortRef.current?.abort();
+    setScorecard(null);
+    setScFileName(null);
+    setAnalysis(null);
+    setProgress(null);
+    setDataReport(null);
+    setNarration("");
+    setError(null);
+    setState("empty");
+    try {
+      localStorage.removeItem(SCORECARD_KEY);
+      localStorage.removeItem(SCORECARD_NAME_KEY);
+    } catch {
+      /* ignore */
     }
   }, []);
 
@@ -147,6 +171,12 @@ export default function Page() {
   }
 
   const pct = scorecard ? Math.round((scorecard.total / scorecard.totalMax) * 100) : 0;
+  const modelName =
+    settings.provider === "claude" ? settings.claudeModel
+    : settings.provider === "gemini" ? settings.geminiModel
+    : settings.provider === "openrouter" ? settings.openrouterModel
+    : settings.provider === "lmstudio" ? settings.lmstudioModel
+    : settings.ollamaModel;
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -233,6 +263,16 @@ export default function Page() {
 
         {tab === "dashboard" && (
           <>
+            <div className="mb-6">
+              <SystemStatus
+                scorecard={scorecard}
+                fileName={scFileName}
+                onRemove={handleRemove}
+                settings={settings}
+                providerReady={providerReady}
+                modelName={modelName}
+              />
+            </div>
             {state === "error" && (
               <div className="flex items-center justify-center py-24">
                 <div className="glass-card p-8 max-w-md text-center">

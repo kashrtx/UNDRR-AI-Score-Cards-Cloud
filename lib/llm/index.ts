@@ -8,6 +8,7 @@ import { ClaudeProvider } from "./claude";
 import { GeminiProvider } from "./gemini";
 import { OpenRouterProvider } from "./openrouter";
 import { OllamaProvider } from "./ollama";
+import { LMStudioProvider } from "./lmstudio";
 import { AppSettings, getApiKey } from "@/lib/settings/store";
 
 export type { LLMProvider, LLMStreamHandlers } from "./types";
@@ -28,6 +29,8 @@ export async function createProvider(settings: AppSettings): Promise<LLMProvider
     }
     case "ollama":
       return new OllamaProvider(settings.ollamaModel, settings.ollamaBaseUrl);
+    case "lmstudio":
+      return new LMStudioProvider(settings.lmstudioModel, settings.lmstudioBaseUrl);
     default:
       throw new Error(`Unknown provider: ${settings.provider}`);
   }

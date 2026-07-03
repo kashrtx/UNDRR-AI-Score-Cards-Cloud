@@ -51,10 +51,18 @@ export const overpassOsmSource: DataSource = {
     const out: NormalizedDatum[] = [];
     let anySucceeded = false;
 
-    for (const [key, [filt, hint]] of Object.entries(FEATURES)) {
-      const q = `[out:json][timeout:60];(node${filt}(${bboxStr});way${filt}(${bboxStr});relation${filt}(${bboxStr}););out count;`;
-      const count = await runCount(q);
-      if (count === null) continue; // skip this feature, keep going
+    // Run all feature counts in PARALLEL (serverless has a strict time budget).
+    const entries = Object.entries(FEATURES);
+    const counts = await Promise.all(
+      entries.map(([key, [filt]]) => {
+        const q = `[out:json][timeout:25];(node${filt}(${bboxStr});way${filt}(${bboxStr});relation${filt}(${bboxStr}););out count;`;
+        return runCount(q);
+      })
+    );
+
+    entries.forEach(([key, [, hint]], i) => {
+      const count = counts[i];
+      if (count === null) return; // this feature failed; keep the others
       anySucceeded = true;
       out.push({
         key: `osm_${key}`,
@@ -69,7 +77,7 @@ export const overpassOsmSource: DataSource = {
           ENDPOINT
         ),
       });
-    }
+    });
 
     if (!anySucceeded) {
       return [
