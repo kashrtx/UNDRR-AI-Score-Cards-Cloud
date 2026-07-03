@@ -25,7 +25,7 @@ export interface AppSettings {
 export const DEFAULT_SETTINGS: AppSettings = {
   provider: "gemini",
   claudeModel: "claude-sonnet-4-6",
-  geminiModel: "gemini-2.0-flash",
+  geminiModel: "gemini-3.5-flash",
   openrouterModel: "meta-llama/llama-3.3-70b-instruct:free",
   ollamaModel: "llama3.1:8b",
   ollamaBaseUrl: "http://127.0.0.1:11434",

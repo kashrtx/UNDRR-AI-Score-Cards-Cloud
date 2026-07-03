@@ -3,18 +3,20 @@
 /**
  * Main app — UNDRR ARISE Scorecard Analyzer.
  *
- * Everything runs client-side: upload parses on a stateless API route, open
- * data is fetched from a stateless API route, and the AI analysis streams
- * directly from the provider you chose (key stays in your browser). Scorecard
- * and settings persist in localStorage so a refresh doesn't lose your place.
+ * Everything runs client-side. Scorecard, settings, AND the finished analysis
+ * persist in localStorage, so a refresh restores the full dashboard. Results can
+ * be exported (printable HTML report or JSON) and cleared; attaching a new file
+ * warns first and offers to download the current results.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
-  Shield, Play, Loader2, AlertTriangle, MapPin, Users, Calendar, Zap,
+  Play, Loader2, AlertTriangle, MapPin, Users, Calendar, Zap,
   CheckCircle2, XCircle, Info, Settings as SettingsIcon, LayoutDashboard, RotateCcw,
+  Download, FileJson, Eraser,
 } from "lucide-react";
 
+import { Logo } from "@/components/Logo";
 import { RadarChart } from "@/components/RadarChart";
 import { ImpactDifficultyMatrix } from "@/components/ImpactDifficultyMatrix";
 import { ActionPlan } from "@/components/ActionPlan";
@@ -27,11 +29,13 @@ import { AnalysisProgress } from "@/components/AnalysisProgress";
 import { DataSourcesPanel } from "@/components/DataSourcesPanel";
 import { SettingsTab } from "@/components/SettingsTab";
 import { SystemStatus } from "@/components/SystemStatus";
+import { ConfirmModal } from "@/components/ConfirmModal";
 
 import { runAnalysis } from "@/lib/analysis/analyze";
+import { downloadReport, downloadJson, type ExportMeta, type ExportPayload } from "@/lib/export/report";
 import {
   loadSettings, saveSettings as persistSettings, hasApiKey, isCloudProvider,
-  type AppSettings,
+  type AppSettings, type ProviderId,
 } from "@/lib/settings/store";
 import type { NormalizedScorecard } from "@/lib/scorecard/schema";
 import type { AnalysisResult } from "@/lib/analysis/schema";
@@ -42,10 +46,22 @@ type Tab = "dashboard" | "settings";
 
 const SCORECARD_KEY = "undrr.scorecard";
 const SCORECARD_NAME_KEY = "undrr.scorecard.name";
+const ANALYSIS_KEY = "undrr.analysis";
+
+const PROVIDER_LABEL: Record<ProviderId, string> = {
+  claude: "Claude", gemini: "Gemini", openrouter: "OpenRouter",
+  ollama: "Ollama (local)", lmstudio: "LM Studio (local)",
+};
 
 function computeReady(s: AppSettings): boolean {
-  // Local providers (Ollama, LM Studio) need no key; cloud providers need one.
   return isCloudProvider(s.provider) ? hasApiKey(s.provider) : true;
+}
+function modelOf(s: AppSettings): string {
+  return s.provider === "claude" ? s.claudeModel
+    : s.provider === "gemini" ? s.geminiModel
+    : s.provider === "openrouter" ? s.openrouterModel
+    : s.provider === "lmstudio" ? s.lmstudioModel
+    : s.ollamaModel;
 }
 
 export default function Page() {
@@ -56,6 +72,7 @@ export default function Page() {
   const [scorecard, setScorecard] = useState<NormalizedScorecard | null>(null);
   const [scFileName, setScFileName] = useState<string | null>(null);
   const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
+  const [analysisMeta, setAnalysisMeta] = useState<ExportMeta | null>(null);
   const [state, setState] = useState<AppState>("empty");
 
   const [progress, setProgress] = useState<ProgressEvent | null>(null);
@@ -63,9 +80,12 @@ export default function Page() {
   const [narration, setNarration] = useState("");
   const [error, setError] = useState<string | null>(null);
 
+  // Pending upload awaiting confirmation (because it would clear results)
+  const [pendingUpload, setPendingUpload] = useState<{ sc: NormalizedScorecard; name: string } | null>(null);
+
   const abortRef = useRef<AbortController | null>(null);
 
-  // ── Load persisted settings + scorecard on mount ──────────
+  // ── Load persisted state on mount ─────────────────────────
   useEffect(() => {
     const s = loadSettings();
     setSettings(s);
@@ -76,7 +96,23 @@ export default function Page() {
         const sc = JSON.parse(raw) as NormalizedScorecard;
         setScorecard(sc);
         setScFileName(localStorage.getItem(SCORECARD_NAME_KEY));
-        setState("ready");
+        // Restore a saved analysis if present.
+        const rawA = localStorage.getItem(ANALYSIS_KEY);
+        if (rawA) {
+          const saved = JSON.parse(rawA) as {
+            result: AnalysisResult; dataReport: DataReport | null; meta: ExportMeta;
+          };
+          if (saved?.result) {
+            setAnalysis(saved.result);
+            setDataReport(saved.dataReport ?? null);
+            setAnalysisMeta(saved.meta ?? null);
+            setState("results");
+          } else {
+            setState("ready");
+          }
+        } else {
+          setState("ready");
+        }
       }
     } catch {
       /* ignore corrupt cache */
@@ -90,25 +126,73 @@ export default function Page() {
     setProviderReady(computeReady(s));
   }, []);
 
-  const handleUpload = useCallback((sc: NormalizedScorecard, fileName: string) => {
+  // Commit a scorecard (replaces any current one + clears results).
+  const commitUpload = useCallback((sc: NormalizedScorecard, name: string) => {
     setScorecard(sc);
-    setScFileName(fileName);
+    setScFileName(name);
     setAnalysis(null);
+    setAnalysisMeta(null);
+    setDataReport(null);
+    setNarration("");
     setError(null);
     setState("ready");
     try {
       localStorage.setItem(SCORECARD_KEY, JSON.stringify(sc));
-      localStorage.setItem(SCORECARD_NAME_KEY, fileName);
+      localStorage.setItem(SCORECARD_NAME_KEY, name);
+      localStorage.removeItem(ANALYSIS_KEY);
     } catch {
       /* quota — non-fatal */
     }
   }, []);
+
+  // Called by the upload widget. If results would be lost, ask first.
+  const handleUpload = useCallback(
+    (sc: NormalizedScorecard, name: string) => {
+      if (analysis) {
+        setPendingUpload({ sc, name });
+      } else {
+        commitUpload(sc, name);
+      }
+    },
+    [analysis, commitUpload]
+  );
+
+  const buildPayload = useCallback((): ExportPayload | null => {
+    if (!scorecard || !analysis) return null;
+    const meta: ExportMeta =
+      analysisMeta ??
+      { provider: settings ? PROVIDER_LABEL[settings.provider] : "AI", model: settings ? modelOf(settings) : "", generatedAt: new Date().toISOString() };
+    return { scorecard, analysis, dataReport, meta };
+  }, [scorecard, analysis, dataReport, analysisMeta, settings]);
+
+  const handleExportReport = useCallback(() => {
+    const p = buildPayload();
+    if (p) downloadReport(p);
+  }, [buildPayload]);
+  const handleExportJson = useCallback(() => {
+    const p = buildPayload();
+    if (p) downloadJson(p);
+  }, [buildPayload]);
+
+  const handleClearResults = useCallback(() => {
+    setAnalysis(null);
+    setAnalysisMeta(null);
+    setDataReport(null);
+    setNarration("");
+    setState(scorecard ? "ready" : "empty");
+    try {
+      localStorage.removeItem(ANALYSIS_KEY);
+    } catch {
+      /* ignore */
+    }
+  }, [scorecard]);
 
   const handleRemove = useCallback(() => {
     abortRef.current?.abort();
     setScorecard(null);
     setScFileName(null);
     setAnalysis(null);
+    setAnalysisMeta(null);
     setProgress(null);
     setDataReport(null);
     setNarration("");
@@ -117,6 +201,7 @@ export default function Page() {
     try {
       localStorage.removeItem(SCORECARD_KEY);
       localStorage.removeItem(SCORECARD_NAME_KEY);
+      localStorage.removeItem(ANALYSIS_KEY);
     } catch {
       /* ignore */
     }
@@ -138,15 +223,26 @@ export default function Page() {
     abortRef.current = controller;
 
     try {
-      const { result, dataReport } = await runAnalysis(scorecard, settings, {
+      const { result, dataReport: dr } = await runAnalysis(scorecard, settings, {
         onProgress: setProgress,
         onDataReport: setDataReport,
         onNarration: setNarration,
         signal: controller.signal,
       });
+      const meta: ExportMeta = {
+        provider: PROVIDER_LABEL[settings.provider],
+        model: modelOf(settings),
+        generatedAt: new Date().toISOString(),
+      };
       setAnalysis(result);
-      setDataReport(dataReport);
+      setDataReport(dr);
+      setAnalysisMeta(meta);
       setState("results");
+      try {
+        localStorage.setItem(ANALYSIS_KEY, JSON.stringify({ result, dataReport: dr, meta }));
+      } catch {
+        /* quota — non-fatal */
+      }
     } catch (err) {
       if (controller.signal.aborted) {
         setState(scorecard ? "ready" : "empty");
@@ -171,56 +267,49 @@ export default function Page() {
   }
 
   const pct = scorecard ? Math.round((scorecard.total / scorecard.totalMax) * 100) : 0;
-  const modelName =
-    settings.provider === "claude" ? settings.claudeModel
-    : settings.provider === "gemini" ? settings.geminiModel
-    : settings.provider === "openrouter" ? settings.openrouterModel
-    : settings.provider === "lmstudio" ? settings.lmstudioModel
-    : settings.ollamaModel;
+  const modelName = modelOf(settings);
 
   return (
     <div className="min-h-screen flex flex-col">
       {/* ── Header ─────────────────────────────── */}
       <header className="sticky top-0 z-40 backdrop-blur-xl bg-surface/80 border-b border-border">
-        <div className="max-w-[1600px] mx-auto px-6 py-3 flex items-center justify-between gap-4">
-          <div className="flex items-center gap-3">
-            <div className="p-2 rounded-xl bg-gradient-to-br from-accent-500/20 to-primary-500/20 border border-accent-500/20">
-              <Shield size={22} className="text-accent-400" />
-            </div>
-            <div>
-              <h1 className="text-base font-bold tracking-tight text-text-primary">
+        <div className="max-w-[1600px] mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-2 sm:gap-4 flex-wrap">
+          <div className="flex items-center gap-2.5 min-w-0">
+            <Logo size={34} />
+            <div className="min-w-0">
+              <h1 className="text-sm sm:text-base font-bold tracking-tight text-text-primary truncate">
                 UNDRR ARISE Scorecard Analyzer
               </h1>
-              <p className="text-xs text-text-secondary">
+              <p className="hidden sm:block text-xs text-text-secondary">
                 Disaster Resilience Assessment &amp; Action Planning
               </p>
             </div>
           </div>
 
-          <nav className="hidden sm:flex items-center gap-1 bg-surface-overlay/40 rounded-xl p-1">
-            <button
-              onClick={() => setTab("dashboard")}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                tab === "dashboard" ? "bg-primary-700 text-text-primary" : "text-text-secondary hover:text-text-primary"
-              }`}
-            >
-              <LayoutDashboard size={15} /> Dashboard
-            </button>
-            <button
-              onClick={() => setTab("settings")}
-              className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                tab === "settings" ? "bg-primary-700 text-text-primary" : "text-text-secondary hover:text-text-primary"
-              }`}
-            >
-              <SettingsIcon size={15} /> Settings
-            </button>
-          </nav>
+          <div className="flex items-center gap-2 order-3 sm:order-none w-full sm:w-auto justify-between sm:justify-normal">
+            <nav className="flex items-center gap-1 bg-surface-overlay/40 rounded-xl p-1">
+              <button
+                onClick={() => setTab("dashboard")}
+                className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                  tab === "dashboard" ? "bg-primary-700 text-text-primary" : "text-text-secondary hover:text-text-primary"
+                }`}
+              >
+                <LayoutDashboard size={15} /> <span className="hidden sm:inline">Dashboard</span>
+              </button>
+              <button
+                onClick={() => setTab("settings")}
+                className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                  tab === "settings" ? "bg-primary-700 text-text-primary" : "text-text-secondary hover:text-text-primary"
+                }`}
+              >
+                <SettingsIcon size={15} /> <span className="hidden sm:inline">Settings</span>
+              </button>
+            </nav>
 
-          <div className="flex items-center gap-2">
             {tab === "dashboard" && (state === "ready" || state === "results") && scorecard && (
               <button
                 onClick={handleAnalyze}
-                className="flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-semibold bg-gradient-to-r from-accent-500 to-accent-400 text-surface hover:from-accent-400 hover:to-accent-500 transition-all shadow-lg shadow-accent-500/25 active:scale-95"
+                className="flex items-center gap-2 px-3.5 sm:px-5 py-2 rounded-xl text-sm font-semibold bg-gradient-to-r from-accent-500 to-accent-400 text-surface hover:from-accent-400 hover:to-accent-500 transition-all shadow-lg shadow-accent-500/25 active:scale-95 shrink-0"
               >
                 {state === "results" ? <RotateCcw size={16} /> : <Play size={16} />}
                 {state === "results" ? "Re-run" : "Run Analysis"}
@@ -229,34 +318,35 @@ export default function Page() {
             {tab === "dashboard" && state === "analyzing" && (
               <button
                 onClick={cancelAnalyze}
-                className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold bg-surface-overlay text-accent-400 border border-accent-500/30"
+                className="flex items-center gap-2 px-3 sm:px-4 py-2 rounded-xl text-sm font-semibold bg-surface-overlay text-accent-400 border border-accent-500/30 shrink-0"
               >
-                <Loader2 size={16} className="animate-spin" /> Analysing… (cancel)
+                <Loader2 size={16} className="animate-spin" /> <span className="hidden sm:inline">Analysing… (cancel)</span><span className="sm:hidden">Cancel</span>
               </button>
             )}
           </div>
         </div>
 
         <div className="border-t border-border/60 bg-surface/60">
-          <div className="max-w-[1600px] mx-auto px-6 py-1.5">
+          <div className="max-w-[1600px] mx-auto px-4 sm:px-6 py-1.5">
             <StatusBar settings={settings} providerReady={providerReady} city={scorecard?.city.name ?? null} />
           </div>
         </div>
       </header>
 
       {/* ── Disclaimer ─────────────────────────── */}
-      <div className="bg-warn-500/10 border-b border-warn-500/20 px-6 py-2">
-        <div className="max-w-[1600px] mx-auto flex items-center gap-2 text-xs text-warn-400">
-          <Info size={14} className="shrink-0" />
+      <div className="bg-warn-500/10 border-b border-warn-500/20 px-4 sm:px-6 py-2">
+        <div className="max-w-[1600px] mx-auto flex items-start gap-2 text-xs text-warn-400">
+          <Info size={14} className="shrink-0 mt-0.5" />
           <span>
-            <strong>Decision-support tool.</strong> Outputs are illustrative and AI-generated. All
-            recommendations require review by qualified disaster-resilience professionals before implementation.
+            <strong>Decision-support tool.</strong> Outputs are illustrative and AI-generated, and
+            <strong> depend on the AI model used</strong> — review by qualified disaster-resilience
+            professionals is required before implementation.
           </span>
         </div>
       </div>
 
       {/* ── Main ───────────────────────────────── */}
-      <main className="flex-1 max-w-[1600px] w-full mx-auto px-6 py-6">
+      <main className="flex-1 max-w-[1600px] w-full mx-auto px-4 sm:px-6 py-5 sm:py-6">
         {tab === "settings" && (
           <SettingsTab settings={settings} onChange={handleSettingsChange} />
         )}
@@ -274,8 +364,8 @@ export default function Page() {
               />
             </div>
             {state === "error" && (
-              <div className="flex items-center justify-center py-24">
-                <div className="glass-card p-8 max-w-md text-center">
+              <div className="flex items-center justify-center py-16 sm:py-24">
+                <div className="glass-card p-6 sm:p-8 max-w-md text-center">
                   <AlertTriangle size={40} className="text-danger-400 mx-auto mb-4" />
                   <h2 className="text-lg font-semibold text-text-primary mb-2">Analysis failed</h2>
                   <p className="text-sm text-text-secondary mb-4">{error}</p>
@@ -316,14 +406,14 @@ export default function Page() {
                 {/* City overview + upload */}
                 <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
                   <div className="glass-card p-5 lg:col-span-2">
-                    <div className="flex items-start justify-between">
-                      <div>
-                        <h2 className="text-xl font-bold text-text-primary">{scorecard.city.name}</h2>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <h2 className="text-xl font-bold text-text-primary truncate">{scorecard.city.name}</h2>
                         <p className="text-sm text-text-secondary flex items-center gap-1 mt-0.5">
                           <MapPin size={13} /> {scorecard.city.country}
                         </p>
                       </div>
-                      <div className="text-right">
+                      <div className="text-right shrink-0">
                         <p className="text-3xl font-bold text-accent-400">
                           {scorecard.total}
                           <span className="text-lg text-text-secondary font-normal">/{scorecard.totalMax}</span>
@@ -332,23 +422,23 @@ export default function Page() {
                       </div>
                     </div>
 
-                    <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 mt-4">
+                    <div className="grid grid-cols-2 sm:grid-cols-3 gap-3 mt-4">
                       {scorecard.profile.population && (
                         <div className="flex items-center gap-2 text-sm">
-                          <Users size={14} className="text-primary-300" />
-                          <span className="text-text-secondary">{scorecard.profile.population.toLocaleString()}</span>
+                          <Users size={14} className="text-primary-300 shrink-0" />
+                          <span className="text-text-secondary truncate">{scorecard.profile.population.toLocaleString()}</span>
                         </div>
                       )}
                       {scorecard.assessedDate && (
                         <div className="flex items-center gap-2 text-sm">
-                          <Calendar size={14} className="text-primary-300" />
-                          <span className="text-text-secondary">{scorecard.assessedDate}</span>
+                          <Calendar size={14} className="text-primary-300 shrink-0" />
+                          <span className="text-text-secondary truncate">{scorecard.assessedDate}</span>
                         </div>
                       )}
                       {scorecard.profile.incomeUsd && (
                         <div className="flex items-center gap-2 text-sm">
-                          <Zap size={14} className="text-primary-300" />
-                          <span className="text-text-secondary">${scorecard.profile.incomeUsd.toLocaleString()} avg income</span>
+                          <Zap size={14} className="text-primary-300 shrink-0" />
+                          <span className="text-text-secondary truncate">${scorecard.profile.incomeUsd.toLocaleString()}</span>
                         </div>
                       )}
                     </div>
@@ -415,10 +505,45 @@ export default function Page() {
                 {/* Results */}
                 {state === "results" && analysis && (
                   <div className="space-y-6">
+                    {/* Results toolbar: export + clear */}
+                    <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        onClick={handleExportReport}
+                        className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold bg-gradient-to-r from-accent-500 to-accent-400 text-surface hover:from-accent-400 hover:to-accent-500 transition-all active:scale-95"
+                      >
+                        <Download size={15} /> Export report
+                      </button>
+                      <button
+                        onClick={handleExportJson}
+                        className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-medium border border-border text-text-primary hover:border-accent-500/50 transition-all"
+                      >
+                        <FileJson size={15} /> Data (JSON)
+                      </button>
+                      <button
+                        onClick={handleClearResults}
+                        className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-medium border border-border text-text-secondary hover:text-danger-400 hover:border-danger-500/40 transition-all sm:ml-auto"
+                      >
+                        <Eraser size={15} /> Clear results
+                      </button>
+                    </div>
+
                     <DataSourcesPanel report={dataReport} />
-                    <div className="glass-card p-6">
-                      <h2 className="text-lg font-semibold text-text-primary mb-3">Analysis Summary</h2>
+                    <div className="glass-card p-5 sm:p-6">
+                      <div className="flex items-center justify-between gap-3 flex-wrap mb-3">
+                        <h2 className="text-lg font-semibold text-text-primary">Analysis Summary</h2>
+                        {analysisMeta && (
+                          <span className="text-xs text-text-secondary bg-surface-overlay/50 border border-border rounded-full px-2.5 py-1">
+                            by {analysisMeta.provider} · <span className="font-mono">{analysisMeta.model}</span>
+                          </span>
+                        )}
+                      </div>
                       <p className="text-sm text-text-secondary leading-relaxed">{analysis.summary}</p>
+                      <p className="mt-3 text-xs text-text-secondary flex items-start gap-1.5 bg-surface-overlay/40 border border-border rounded-lg px-3 py-2">
+                        <Info size={13} className="shrink-0 mt-0.5 text-primary-300" />
+                        This analysis reflects the judgement of the AI model above. A different model
+                        (or a re-run) may surface different strengths, gaps and recommendations —
+                        compare models for important decisions.
+                      </p>
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-5">
                         <div>
@@ -470,12 +595,45 @@ export default function Page() {
       </main>
 
       {/* ── Footer ─────────────────────────────── */}
-      <footer className="border-t border-border py-4 px-6">
-        <div className="max-w-[1600px] mx-auto flex items-center justify-between text-xs text-text-secondary">
+      <footer className="border-t border-border py-4 px-4 sm:px-6">
+        <div className="max-w-[1600px] mx-auto flex flex-col sm:flex-row items-start sm:items-center justify-between gap-1 text-xs text-text-secondary">
           <span>UNDRR ARISE · Disaster Resilience Scorecard Analyzer</span>
           <span>Runs entirely in your browser · Deployed on Vercel</span>
         </div>
       </footer>
+
+      {/* ── New-file warning modal ─────────────── */}
+      <ConfirmModal
+        open={!!pendingUpload}
+        title="Replace the current scorecard?"
+        onClose={() => setPendingUpload(null)}
+        actions={[
+          {
+            label: "Download results, then replace",
+            variant: "primary",
+            onClick: () => {
+              const p = buildPayload();
+              if (p) downloadReport(p);
+              if (pendingUpload) commitUpload(pendingUpload.sc, pendingUpload.name);
+              setPendingUpload(null);
+            },
+          },
+          {
+            label: "Replace & discard",
+            variant: "danger",
+            onClick: () => {
+              if (pendingUpload) commitUpload(pendingUpload.sc, pendingUpload.name);
+              setPendingUpload(null);
+            },
+          },
+          { label: "Cancel", variant: "ghost", onClick: () => setPendingUpload(null) },
+        ]}
+      >
+        Loading <strong className="text-text-primary">{pendingUpload?.name}</strong> will clear the
+        current analysis results for{" "}
+        <strong className="text-text-primary">{scorecard?.city.name}</strong>. You can download the
+        current results first — otherwise they&apos;ll be discarded.
+      </ConfirmModal>
     </div>
   );
 }

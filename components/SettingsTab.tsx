@@ -19,7 +19,7 @@ import {
 import { createProvider } from "@/lib/llm";
 
 const MODELS: Record<ProviderId, string[]> = {
-  gemini: ["gemini-2.0-flash", "gemini-3.5-flash", "gemini-2.0-flash-lite", "gemini-1.5-pro"],
+  gemini: ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.1-pro-preview", "gemini-2.5-pro", "gemini-2.5-flash-lite"],
   openrouter: [
     "meta-llama/llama-3.3-70b-instruct:free",
     "google/gemini-2.0-flash-exp:free",
@@ -263,6 +263,11 @@ export function SettingsTab({
         {/* Local: base URL + setup help */}
         {isLocal && (
           <>
+            <div className="text-xs text-warn-400 bg-warn-500/10 border border-warn-500/20 rounded-lg p-3">
+              <strong>On a phone or tablet?</strong> Local models won&apos;t work — the browser can
+              only reach a model server running on the same computer. On mobile, pick a cloud
+              provider (Gemini, OpenRouter or Claude) instead.
+            </div>
             <label className="block">
               <span className="text-sm text-text-primary">Local server address</span>
               <input

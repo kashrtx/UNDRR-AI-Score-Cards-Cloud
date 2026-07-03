@@ -93,7 +93,7 @@ export class GeminiProvider implements LLMProvider {
         throw new Error(
           "Gemini reached its output-token limit before finishing the answer" +
             (sawThinking ? " (a thinking model used the budget reasoning)" : "") +
-            ". Try again, or pick a lighter model such as gemini-2.0-flash."
+            ". Try again, or pick a lighter model such as gemini-3.1-flash-lite."
         );
       }
       // The stream yielded nothing usable — fall back to a single non-streaming
@@ -106,7 +106,7 @@ export class GeminiProvider implements LLMProvider {
       throw new Error(
         `Gemini returned no answer text${
           fallback.finishReason ? ` (finishReason: ${fallback.finishReason})` : ""
-        }. Try again or choose another model (e.g. gemini-2.0-flash).`
+        }. Try again or choose another model (e.g. gemini-3.1-flash-lite).`
       );
     }
     return full;
