@@ -25,24 +25,39 @@ export const reliefWebSource: DataSource = {
     const country = loc.country;
     if (!country) return [];
 
-    const params = new URLSearchParams({
-      appname: "undrr-arise-scorecard",
-      profile: "list",
-      preset: "latest",
-      limit: "15",
-      "filter[field]": "country.name",
-      "filter[value]": country,
-    });
-    const url = `${BASE}?${params.toString()}`;
+    // `country` is the reference field; filtering it by name is the documented
+    // way to get a country's disasters (country.name is NOT a valid filter field
+    // — that was the bug that returned nothing).
+    const build = (extra: Record<string, string>) => {
+      const params = new URLSearchParams({
+        appname: "undrr-arise-scorecard",
+        profile: "list",
+        limit: "15",
+        "sort[]": "date:desc",
+        ...extra,
+      });
+      return `${BASE}?${params.toString()}`;
+    };
+    const attempts = [
+      build({ "filter[field]": "country", "filter[value]": country }),
+      // Fallback: full-text search on the country name (tolerates naming diffs).
+      build({ "query[value]": country, "query[fields][]": "country.name" }),
+    ];
 
-    let data: { data?: RWItem[] };
-    try {
-      data = await getJson(url, { timeoutMs: 20000, retries: 1 });
-    } catch {
-      return [];
+    let items: RWItem[] = [];
+    let usedUrl = attempts[0];
+    for (const url of attempts) {
+      try {
+        const data = await getJson<{ data?: RWItem[] }>(url, { timeoutMs: 8000, retries: 0 });
+        if (data?.data?.length) {
+          items = data.data;
+          usedUrl = url;
+          break;
+        }
+      } catch {
+        /* try the next form */
+      }
     }
-
-    const items = data?.data ?? [];
     if (!items.length) return [];
 
     const events: string[] = [];
@@ -60,7 +75,7 @@ export const reliefWebSource: DataSource = {
       "ReliefWeb (UN OCHA)",
       "Disasters API",
       `recent disasters in ${country}`,
-      url
+      usedUrl
     );
     const out: NormalizedDatum[] = [
       {

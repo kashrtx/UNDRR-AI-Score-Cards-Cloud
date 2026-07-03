@@ -18,12 +18,15 @@ import { overpassOsmSource } from "./overpassOsm";
 import { usgsSource } from "./usgs";
 import { worldBankSource } from "./worldBank";
 import { reliefWebSource } from "./reliefWeb";
+import { hazardRiskSource } from "./hazardRisk";
+import { resolveIso2 } from "./countries";
 import { loadConfigSources } from "./configSources";
 import type { DataSource, LocationContext } from "./types";
 import type { DataPack, NormalizedDatum } from "@/lib/types";
 
 const CODE_SOURCES: DataSource[] = [
   openMeteoSource,
+  hazardRiskSource,
   overpassOsmSource,
   usgsSource,
   worldBankSource,
@@ -93,7 +96,7 @@ export async function buildDataPack(
   const loc: LocationContext = {
     name: city,
     country: location.country || country,
-    country_code: location.country_code ?? null,
+    country_code: resolveIso2(location.country || country, location.country_code),
     lat: location.lat,
     lon: location.lon,
     bbox: location.bbox,

@@ -147,6 +147,16 @@ export function buildUserPrompt(
     parts.push(`\n## ENRICHMENT DATA: None available. Base your analysis on the scorecard data alone and note which data gaps should be filled.`);
   }
 
+  if (enrichmentData.length > 0) {
+    parts.push(
+      `\n### How to read the enrichment data\n` +
+        `- Climate (precipitation/temperature extremes), flood (river discharge) and elevation figures are specific to the city's coordinates — use them to corroborate or challenge the self-reported hazard scores.\n` +
+        `- A very low ground elevation signals coastal-flood / sea-level-rise exposure; high river discharge signals riverine-flood exposure.\n` +
+        `- OpenStreetMap infrastructure counts reflect how completely the area is mapped in OSM and may UNDERCOUNT facilities in less-mapped cities — treat them as a floor, not a census, and don't infer a critical gap from a low OSM count alone.\n` +
+        `- World Bank figures and disaster history are NATIONAL, not city-level — use them as context.`
+    );
+  }
+
   // ── Instructions ──
   parts.push(`\n## INSTRUCTIONS`);
   parts.push(`Analyze this city's scorecard and produce a comprehensive resilience action plan.`);
