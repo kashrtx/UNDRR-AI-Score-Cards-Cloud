@@ -81,9 +81,10 @@ export function AnalysisProgress({ progress }: { progress: ProgressEvent | null 
         })}
       </ul>
 
-      <p className="text-xs text-text-secondary mt-5">
-        The AI step usually takes 1–3 minutes with the local model (much faster with Claude). You can
-        leave this running.
+      <p className="text-sm text-text-secondary mt-5">
+        This usually takes <strong className="text-text-primary">about 5 minutes or less</strong>,
+        depending on the AI model. It can take longer with a local model, or when a cloud provider is
+        busy or under heavy demand. You can leave this running.
       </p>
     </div>
   );

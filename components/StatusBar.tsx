@@ -64,7 +64,7 @@ export function StatusBar({
     : "No API key yet — add one in Settings";
 
   return (
-    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
       <div className="flex items-center gap-1.5 text-text-secondary" title={readyDetail}>
         {providerIcon(settings.provider, providerReady)}
         <span>

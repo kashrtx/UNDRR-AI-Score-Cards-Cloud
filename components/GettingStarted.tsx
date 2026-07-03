@@ -42,11 +42,11 @@ export function GettingStarted({ onOpenSettings }: { onOpenSettings: () => void 
               {s.icon}
               <h3 className="text-sm font-semibold text-text-primary">{s.title}</h3>
             </div>
-            <p className="text-xs text-text-secondary leading-relaxed">{s.body}</p>
+            <p className="text-sm text-text-secondary leading-relaxed">{s.body}</p>
           </div>
         ))}
       </div>
-      <p className="text-xs text-text-secondary mt-3">
+      <p className="text-sm text-text-secondary mt-3">
         The status bar at the top shows whether your AI provider is ready. If it isn&apos;t, open{" "}
         <span className="text-primary-300">Settings</span> to pick a provider (Gemini and OpenRouter
         have free tiers) and paste a key — or select your local Ollama model.

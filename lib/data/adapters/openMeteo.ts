@@ -15,7 +15,7 @@ const BASE = "https://archive-api.open-meteo.com/v1/archive";
 
 export const openMeteoSource: DataSource = {
   id: "open_meteo",
-  name: "Open-Meteo (historical climate)",
+  name: "Open-Meteo (climate & elevation)",
 
   async fetch(loc: LocationContext): Promise<NormalizedDatum[]> {
     if (loc.lat == null || loc.lon == null) return [];
@@ -37,6 +37,7 @@ export const openMeteoSource: DataSource = {
       provenance("Open-Meteo", "Historical Weather API", desc, url);
 
     let data: {
+      elevation?: number;
       daily?: {
         time?: string[];
         precipitation_sum?: (number | null)[];
@@ -58,11 +59,35 @@ export const openMeteoSource: DataSource = {
       ];
     }
 
+    const out: NormalizedDatum[] = [];
+
+    // Ground elevation comes back in the same response — a reliable coastal /
+    // sea-level-rise exposure signal (no separate, flaky call needed).
+    if (typeof data?.elevation === "number") {
+      const e = Math.round(data.elevation);
+      out.push({
+        key: "ground_elevation",
+        label: "Ground elevation at city center",
+        value: e,
+        unit: "m",
+        essentialHint: 5,
+        provenance: prov(`Ground elevation at ${loc.name}`),
+      });
+      if (data.elevation < 10) {
+        out.push({
+          key: "coastal_exposure",
+          label: "Low-lying coastal exposure",
+          value: `Very low elevation (${e} m) — high exposure to coastal flooding, storm surge and sea-level rise`,
+          essentialHint: 5,
+          provenance: prov(`Coastal exposure at ${loc.name}`),
+        });
+      }
+    }
+
     const daily = data?.daily ?? {};
     const times = daily.time ?? [];
-    if (!times.length) return [];
+    if (!times.length) return out;
 
-    const out: NormalizedDatum[] = [];
     const precip = (daily.precipitation_sum ?? []).filter(
       (v): v is number => v != null
     );

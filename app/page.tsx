@@ -82,6 +82,7 @@ export default function Page() {
 
   // Pending upload awaiting confirmation (because it would clear results)
   const [pendingUpload, setPendingUpload] = useState<{ sc: NormalizedScorecard; name: string } | null>(null);
+  const [confirmRemove, setConfirmRemove] = useState(false);
 
   const abortRef = useRef<AbortController | null>(null);
 
@@ -206,6 +207,12 @@ export default function Page() {
       /* ignore */
     }
   }, []);
+
+  // Removing while results exist should warn first (and offer a download).
+  const requestRemove = useCallback(() => {
+    if (analysis) setConfirmRemove(true);
+    else handleRemove();
+  }, [analysis, handleRemove]);
 
   const handleAnalyze = useCallback(async () => {
     if (!scorecard || !settings) return;
@@ -335,7 +342,7 @@ export default function Page() {
 
       {/* ── Disclaimer ─────────────────────────── */}
       <div className="bg-warn-500/10 border-b border-warn-500/20 px-4 sm:px-6 py-2">
-        <div className="max-w-[1600px] mx-auto flex items-start gap-2 text-xs text-warn-400">
+        <div className="max-w-[1600px] mx-auto flex items-start gap-2 text-sm text-warn-400">
           <Info size={14} className="shrink-0 mt-0.5" />
           <span>
             <strong>Decision-support tool.</strong> Outputs are illustrative and AI-generated, and
@@ -357,7 +364,7 @@ export default function Page() {
               <SystemStatus
                 scorecard={scorecard}
                 fileName={scFileName}
-                onRemove={handleRemove}
+                onRemove={requestRemove}
                 settings={settings}
                 providerReady={providerReady}
                 modelName={modelName}
@@ -596,7 +603,7 @@ export default function Page() {
 
       {/* ── Footer ─────────────────────────────── */}
       <footer className="border-t border-border py-4 px-4 sm:px-6">
-        <div className="max-w-[1600px] mx-auto flex flex-col sm:flex-row items-start sm:items-center justify-between gap-1 text-xs text-text-secondary">
+        <div className="max-w-[1600px] mx-auto flex flex-col sm:flex-row items-start sm:items-center justify-between gap-1 text-sm text-text-secondary">
           <span>UNDRR ARISE · Disaster Resilience Scorecard Analyzer</span>
           <span>Runs entirely in your browser · Deployed on Vercel</span>
         </div>
@@ -634,6 +641,39 @@ export default function Page() {
         <strong className="text-text-primary">{scorecard?.city.name}</strong>. You can download the
         current results first — otherwise they&apos;ll be discarded.
       </ConfirmModal>
+
+      {/* ── Remove-scorecard warning modal ─────── */}
+      <ConfirmModal
+        open={confirmRemove}
+        title="Remove this scorecard?"
+        onClose={() => setConfirmRemove(false)}
+        actions={[
+          {
+            label: "Download results, then remove",
+            variant: "primary",
+            onClick: () => {
+              const p = buildPayload();
+              if (p) downloadReport(p);
+              setConfirmRemove(false);
+              handleRemove();
+            },
+          },
+          {
+            label: "Remove & discard",
+            variant: "danger",
+            onClick: () => {
+              setConfirmRemove(false);
+              handleRemove();
+            },
+          },
+          { label: "Cancel", variant: "ghost", onClick: () => setConfirmRemove(false) },
+        ]}
+      >
+        Removing <strong className="text-text-primary">{scorecard?.city.name}</strong> will erase its
+        completed analysis results. This can&apos;t be undone — download them first if you want to
+        keep a copy.
+      </ConfirmModal>
+
     </div>
   );
 }

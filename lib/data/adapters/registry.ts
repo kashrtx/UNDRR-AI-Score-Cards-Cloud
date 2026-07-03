@@ -17,19 +17,17 @@ import { openMeteoSource } from "./openMeteo";
 import { overpassOsmSource } from "./overpassOsm";
 import { usgsSource } from "./usgs";
 import { worldBankSource } from "./worldBank";
-import { hazardRiskSource } from "./hazardRisk";
 import { resolveIso2 } from "./countries";
 import { loadConfigSources } from "./configSources";
 import type { DataSource, LocationContext } from "./types";
 import type { DataPack, NormalizedDatum } from "@/lib/types";
 
-// NOTE: ReliefWeb (lib/data/adapters/reliefWeb.ts) is intentionally NOT included:
-// as of 1 Nov 2025 its API requires a *pre-approved* appname (org registration),
-// so it can't run out-of-the-box. Register an appname at
-// https://apidoc.reliefweb.int/ and re-add reliefWebSource here to enable it.
+// Coastal/elevation exposure now rides along with the climate call (Open-Meteo
+// returns elevation in the same response), which is far more reliable than a
+// separate elevation/flood endpoint. ReliefWeb is omitted (needs a pre-approved
+// appname since Nov 2025 — see reliefWeb.ts).
 const CODE_SOURCES: DataSource[] = [
   openMeteoSource,
-  hazardRiskSource,
   overpassOsmSource,
   usgsSource,
   worldBankSource,
