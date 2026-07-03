@@ -96,12 +96,62 @@ export class GeminiProvider implements LLMProvider {
             ". Try again, or pick a lighter model such as gemini-2.0-flash."
         );
       }
+      // The stream yielded nothing usable — fall back to a single non-streaming
+      // request, which avoids any SSE-framing quirks entirely.
+      const fallback = await this.generateOnce(system, user, signal);
+      if (fallback.text.trim()) return fallback.text;
+      if (fallback.blockReason) {
+        throw new Error(`Gemini blocked the request (${fallback.blockReason}). Try a different model.`);
+      }
       throw new Error(
-        `Gemini returned no answer text${finishReason ? ` (finishReason: ${finishReason})` : ""}. ` +
-          "Try again or choose another model."
+        `Gemini returned no answer text${
+          fallback.finishReason ? ` (finishReason: ${fallback.finishReason})` : ""
+        }. Try again or choose another model (e.g. gemini-2.0-flash).`
       );
     }
     return full;
+  }
+
+  /** Non-streaming request — used as a fallback and immune to SSE framing. */
+  private async generateOnce(
+    system: string,
+    user: string,
+    signal?: AbortSignal
+  ): Promise<{ text: string; finishReason?: string; blockReason?: string }> {
+    const url = `${BASE}/models/${encodeURIComponent(
+      this.model
+    )}:generateContent?key=${encodeURIComponent(this.apiKey)}`;
+    const res = await fetch(url, {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      signal,
+      body: JSON.stringify({
+        systemInstruction: { parts: [{ text: system }] },
+        contents: [{ role: "user", parts: [{ text: user }] }],
+        generationConfig: { temperature: 0.3, maxOutputTokens: 65536 },
+      }),
+    });
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "");
+      throw new Error(`Gemini API error ${res.status}: ${truncate(detail)}`);
+    }
+    const data = (await res.json()) as {
+      candidates?: Array<{
+        content?: { parts?: Array<{ text?: string; thought?: boolean }> };
+        finishReason?: string;
+      }>;
+      promptFeedback?: { blockReason?: string };
+    };
+    const parts = data.candidates?.[0]?.content?.parts ?? [];
+    const text = parts
+      .filter((p) => p.text && !p.thought)
+      .map((p) => p.text)
+      .join("");
+    return {
+      text,
+      finishReason: data.candidates?.[0]?.finishReason,
+      blockReason: data.promptFeedback?.blockReason,
+    };
   }
 
   async test(signal?: AbortSignal) {
