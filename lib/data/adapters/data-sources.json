@@ -1,0 +1,17 @@
+[
+  {
+    "id": "restcountries",
+    "name": "REST Countries",
+    "enabled": true,
+    "needs": ["country_code"],
+    "url": "https://restcountries.com/v3.1/alpha/{country_code}?fields=region,subregion,population,capital,area",
+    "dataset": "REST Countries API",
+    "records_path": "0",
+    "mode": "fields",
+    "fields": [
+      { "key": "country_region", "label": "World region", "path": "region", "essentialHint": 2 },
+      { "key": "country_subregion", "label": "Sub-region", "path": "subregion", "essentialHint": 2 },
+      { "key": "country_area_km2", "label": "Country area", "path": "area", "unit": "km²", "essentialHint": 4 }
+    ]
+  }
+]

@@ -1,0 +1,91 @@
+"use client";
+
+/**
+ * Status bar — a live, plain-language read-out of what's ready: which AI
+ * provider is active, whether it has what it needs (an API key, or Ollama for
+ * local), and whether a scorecard is loaded. Everything is client-side, so
+ * there's no backend to be "down".
+ */
+
+import { CheckCircle2, AlertCircle, Cpu, Cloud, Sparkles, Boxes, FileSpreadsheet, ShieldCheck } from "lucide-react";
+import type { AppSettings, ProviderId } from "@/lib/settings/store";
+
+const LABEL: Record<ProviderId, string> = {
+  claude: "Claude",
+  gemini: "Gemini",
+  openrouter: "OpenRouter",
+  ollama: "Local (Ollama)",
+};
+
+function providerIcon(p: ProviderId, ready: boolean) {
+  const cls = ready ? "text-accent-400" : "text-warn-400";
+  switch (p) {
+    case "claude":
+      return <Cloud size={14} className={cls} />;
+    case "gemini":
+      return <Sparkles size={14} className={cls} />;
+    case "openrouter":
+      return <Boxes size={14} className={cls} />;
+    case "ollama":
+      return <Cpu size={14} className={cls} />;
+  }
+}
+
+export function StatusBar({
+  settings,
+  providerReady,
+  city,
+}: {
+  settings: AppSettings;
+  providerReady: boolean;
+  city: string | null;
+}) {
+  const model =
+    settings.provider === "claude"
+      ? settings.claudeModel
+      : settings.provider === "gemini"
+      ? settings.geminiModel
+      : settings.provider === "openrouter"
+      ? settings.openrouterModel
+      : settings.ollamaModel;
+
+  const readyDetail = providerReady
+    ? settings.provider === "ollama"
+      ? "Local model selected"
+      : "API key saved"
+    : settings.provider === "ollama"
+    ? "Local model selected — make sure Ollama is running"
+    : "No API key yet — add one in Settings";
+
+  return (
+    <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs">
+      <div className="flex items-center gap-1.5 text-text-secondary" title={readyDetail}>
+        {providerIcon(settings.provider, providerReady)}
+        <span>
+          {LABEL[settings.provider]} · <span className="font-mono">{model}</span>
+        </span>
+      </div>
+
+      <div className="flex items-center gap-1.5" title={readyDetail}>
+        {providerReady ? (
+          <CheckCircle2 size={14} className="text-accent-400" />
+        ) : (
+          <AlertCircle size={14} className="text-warn-400" />
+        )}
+        <span className={providerReady ? "text-text-secondary" : "text-warn-400"}>
+          {providerReady ? "Ready" : "Needs a key"}
+        </span>
+      </div>
+
+      <div className="flex items-center gap-1.5 text-text-secondary" title="Open data runs server-side (no setup needed)">
+        <ShieldCheck size={14} className="text-accent-400" />
+        <span>Open data ready</span>
+      </div>
+
+      <div className="flex items-center gap-1.5 text-text-secondary">
+        <FileSpreadsheet size={14} className="text-primary-300" />
+        <span>{city ? city : "No scorecard loaded"}</span>
+      </div>
+    </div>
+  );
+}

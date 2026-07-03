@@ -1,0 +1,198 @@
+# UNDRR ARISE Scorecard Analyzer
+
+Analyze a city's **UNDRR Disaster Resilience Scorecard** and generate a grounded,
+prioritized action plan — entirely from a web browser. No terminals, no local
+servers, no subscriptions.
+
+It is a single **Next.js** app deployed on **Vercel**. Upload a completed
+scorecard (`.xlsm`/`.xlsx`), the app pulls free open data about the city
+(climate, infrastructure, seismic history, national indicators, recent
+disasters), and an AI provider of your choice writes a plain-language summary,
+strengths/weaknesses, an impact-vs-difficulty matrix, a costed action plan, and
+a projected score.
+
+> **Decision-support tool.** Outputs are illustrative and AI-generated. All
+> recommendations require review by qualified disaster-resilience professionals
+> before implementation.
+
+---
+
+## For the non-technical user (e.g. trying it out)
+
+1. Open the app's URL in a browser.
+2. Click **Settings** and pick an AI provider. The easiest free options:
+   - **Gemini (Google AI Studio)** — get a free key at
+     <https://aistudio.google.com/apikey>, paste it in, click **Test connection**.
+   - **OpenRouter (free models)** — get a free key at
+     <https://openrouter.ai/keys>; the default model id ends in `:free`.
+   - **Claude (Anthropic)** — highest quality; needs a paid key from
+     <https://console.anthropic.com>.
+   - **Local (Ollama)** — free & private, runs on your own machine (see below).
+3. Go back to **Dashboard**, drag your completed scorecard onto the upload box.
+4. Click **Run Analysis** and watch the steps run. Read the results.
+
+Your API key is **encrypted and stored only in your browser** (WebCrypto
+AES-GCM, with a non-extractable device key in IndexedDB). It is never sent to
+this site's server and never stored in the code. Keys must be re-entered on a
+new browser or device — that is the intended trade-off for "never stored on a
+server."
+
+---
+
+## Deploy your own (one click, free)
+
+1. Push this repository to GitHub.
+2. In [Vercel](https://vercel.com), **New Project → Import** the repo. Framework
+   is auto-detected as **Next.js**. No environment variables are required.
+3. Click **Deploy**. When it finishes you'll get a URL like
+   `https://your-app.vercel.app`. Share it.
+
+There are **no server secrets** — nothing to configure in env vars. All AI calls
+happen in the visitor's browser using the key they paste into Settings.
+
+Local development:
+
+```bash
+npm install
+npm run dev      # http://localhost:3000
+npm run build    # production build
+```
+
+Requires Node 18.18+.
+
+---
+
+## AI providers (all run in the browser)
+
+| Provider   | Cost                | Key needed | Notes                                             |
+|------------|---------------------|------------|---------------------------------------------------|
+| Gemini     | Free tier           | Yes        | Google AI Studio, CORS-enabled, fast.             |
+| OpenRouter | Free models (`:free`)| Yes       | OpenAI-compatible, many free open models.         |
+| Claude     | Paid                | Yes        | Anthropic; uses official direct-browser-access.   |
+| Ollama     | Free & private      | No         | Runs on the visitor's own machine (setup below).  |
+
+Calls run client-side so keys never touch the server, there is no serverless
+timeout on long analyses, streaming works everywhere, and Ollama works
+naturally.
+
+### Using your local Ollama
+
+Ollama runs a model on your own computer. For the website (a different origin)
+to be allowed to call it, start Ollama with your app's address allowed:
+
+```bash
+ollama pull llama3.1:8b
+OLLAMA_ORIGINS="https://your-app.vercel.app" ollama serve
+```
+
+Then in **Settings**, choose **Local (Ollama)**, set the model + address
+(`http://localhost:11434` by default), and click **Test connection**.
+
+---
+
+## MCP endpoint (for Claude Desktop / other MCP clients)
+
+The app exposes its open-data engine over the **Model Context Protocol**
+(Streamable HTTP) at:
+
+```
+https://your-app.vercel.app/api/mcp
+```
+
+Tools:
+
+- `list_sources` — list every open-data source the engine can query.
+- `fetch_location_data` — geocode a city and return a full, provenance-tagged
+  evidence bundle (climate, infrastructure, seismic history, national
+  indicators, recent disasters).
+
+Example Claude Desktop config entry:
+
+```json
+{
+  "mcpServers": {
+    "undrr-arise": {
+      "type": "streamable-http",
+      "url": "https://your-app.vercel.app/api/mcp"
+    }
+  }
+}
+```
+
+---
+
+## How it works
+
+```
+app/
+  page.tsx                      Main app (Dashboard + Settings tabs)
+  layout.tsx, globals.css
+  api/
+    health/route.ts             Health + list of data sources
+    scorecard/parse/route.ts    .xlsm upload → parsed scorecard JSON (stateless)
+    data/fetch/route.ts         Run all data adapters for a city → evidence bundle
+    mcp/[transport]/route.ts    MCP server (JSON-RPC over Streamable HTTP)
+components/                     UI (upload, radar, action plan, matrix, settings, …)
+lib/
+  scorecard/                    parseXlsm.ts, schema.ts
+  data/adapters/                geocode, openMeteo, overpassOsm, usgs, worldBank,
+                                reliefWeb, configSources (+ data-sources.json), registry
+  analysis/                     prompt.ts, schema.ts, analyze.ts (client orchestrator)
+  llm/                          claude, gemini, openrouter, ollama (one streaming interface)
+  settings/                     crypto.ts (encrypted keys), store.ts
+  client/                       api.ts (calls the two stateless routes)
+```
+
+- **Stateless server.** The server holds nothing between requests. The parse
+  route returns JSON; the client keeps all state (React + localStorage).
+- **Data fetch runs server-side** so open APIs that dislike browser CORS
+  (Nominatim, Overpass) work and we can send polite, rate-limit-friendly
+  requests. Each source fails independently — one bad source never stops the
+  rest.
+- **Add a data source without code:** edit `lib/data/adapters/data-sources.json`.
+  A "simple" source is one URL plus which fields to pick out of the JSON.
+
+### Adding a REST data source (no code)
+
+Append an object to `lib/data/adapters/data-sources.json`:
+
+```json
+{
+  "id": "my_source",
+  "name": "My Source",
+  "enabled": true,
+  "needs": ["country_code"],
+  "url": "https://api.example.com/{country_code}",
+  "dataset": "Example API",
+  "records_path": "0",
+  "mode": "fields",
+  "fields": [
+    { "key": "some_value", "label": "Some value", "path": "field.path", "essentialHint": 4 }
+  ]
+}
+```
+
+Placeholders usable in `url`/`label`: `{name} {country} {country_code} {lat}
+{lon} {bbox_south} {bbox_north} {bbox_west} {bbox_east} {today} {start_5y}`.
+
+---
+
+## Data sources (all free, no key)
+
+Geocoding (OpenStreetMap Nominatim / Open-Meteo), historical climate
+(Open-Meteo), infrastructure counts (OpenStreetMap Overpass), earthquake
+history (USGS FDSN), national indicators (World Bank Open Data), recent
+disasters (ReliefWeb / UN OCHA), and any config-driven REST sources you add.
+
+## Notes & limits
+
+- **Large uploads:** Vercel's request body limit is ~4.5 MB; typical scorecards
+  are well under this.
+- **Overpass/Nominatim rate limits:** requests are server-side with a polite
+  User-Agent and per-source timeouts; sources degrade gracefully.
+- **RAG scaffold** from the original prototype (Ollama embeddings + ChromaDB)
+  was local-only and is intentionally not included here — noted as future work.
+
+## License
+
+Provided as-is for evaluation and decision support.

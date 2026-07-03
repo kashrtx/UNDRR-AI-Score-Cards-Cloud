@@ -1,0 +1,64 @@
+@import "tailwindcss";
+
+/* ── Design tokens (Tailwind v4 @theme) ───────────────────────
+   These generate utilities like bg-surface, text-text-primary,
+   text-accent-400, border-border, bg-primary-700, etc. */
+@theme {
+  --color-primary-50: oklch(0.97 0.01 250);
+  --color-primary-100: oklch(0.93 0.03 250);
+  --color-primary-200: oklch(0.86 0.06 250);
+  --color-primary-300: oklch(0.76 0.10 250);
+  --color-primary-400: oklch(0.65 0.15 250);
+  --color-primary-500: oklch(0.55 0.20 250);
+  --color-primary-600: oklch(0.47 0.20 250);
+  --color-primary-700: oklch(0.40 0.18 250);
+  --color-primary-800: oklch(0.33 0.14 250);
+  --color-primary-900: oklch(0.27 0.10 250);
+
+  --color-accent-400: oklch(0.75 0.18 160);
+  --color-accent-500: oklch(0.65 0.20 160);
+
+  --color-warn-400: oklch(0.78 0.16 60);
+  --color-warn-500: oklch(0.70 0.18 60);
+
+  --color-danger-400: oklch(0.70 0.20 25);
+  --color-danger-500: oklch(0.60 0.22 25);
+
+  --color-surface: oklch(0.14 0.01 250);
+  --color-surface-raised: oklch(0.18 0.015 250);
+  --color-surface-overlay: oklch(0.22 0.02 250);
+  --color-text-primary: oklch(0.95 0.005 250);
+  --color-text-secondary: oklch(0.70 0.01 250);
+  --color-border: oklch(0.28 0.02 250);
+
+  --font-sans: "Inter", "Outfit", system-ui, sans-serif;
+}
+
+/* ── Base ─────────────────────────────────────────────────── */
+body {
+  @apply bg-surface text-text-primary font-sans antialiased;
+  min-height: 100dvh;
+}
+
+/* ── Glassmorphism card ───────────────────────────────────── */
+.glass-card {
+  @apply bg-surface-raised/70 backdrop-blur-xl border border-border rounded-2xl;
+  box-shadow: 0 8px 32px oklch(0 0 0 / 0.3);
+}
+
+/* ── Smooth colour transitions ────────────────────────────── */
+* {
+  @apply transition-colors duration-200;
+}
+
+/* ── Scrollbar styling ────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+::-webkit-scrollbar-track {
+  @apply bg-transparent;
+}
+::-webkit-scrollbar-thumb {
+  @apply bg-border rounded-full;
+}
