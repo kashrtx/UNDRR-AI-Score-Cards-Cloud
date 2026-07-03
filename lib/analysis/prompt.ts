@@ -87,7 +87,9 @@ export function buildUserPrompt(
 
   // ── City profile ──
   parts.push(`## CITY: ${scorecard.city.name}, ${scorecard.city.country}`);
-  parts.push(`Coordinates: ${scorecard.city.lat}, ${scorecard.city.lon}`);
+  if (typeof scorecard.city.lat === "number" && typeof scorecard.city.lon === "number") {
+    parts.push(`Coordinates: ${scorecard.city.lat}, ${scorecard.city.lon}`);
+  }
   parts.push(`Assessed: ${scorecard.assessedDate || "unknown date"}`);
 
   if (scorecard.profile.population) {

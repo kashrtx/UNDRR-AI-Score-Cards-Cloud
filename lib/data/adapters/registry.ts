@@ -17,20 +17,22 @@ import { openMeteoSource } from "./openMeteo";
 import { overpassOsmSource } from "./overpassOsm";
 import { usgsSource } from "./usgs";
 import { worldBankSource } from "./worldBank";
-import { reliefWebSource } from "./reliefWeb";
 import { hazardRiskSource } from "./hazardRisk";
 import { resolveIso2 } from "./countries";
 import { loadConfigSources } from "./configSources";
 import type { DataSource, LocationContext } from "./types";
 import type { DataPack, NormalizedDatum } from "@/lib/types";
 
+// NOTE: ReliefWeb (lib/data/adapters/reliefWeb.ts) is intentionally NOT included:
+// as of 1 Nov 2025 its API requires a *pre-approved* appname (org registration),
+// so it can't run out-of-the-box. Register an appname at
+// https://apidoc.reliefweb.int/ and re-add reliefWebSource here to enable it.
 const CODE_SOURCES: DataSource[] = [
   openMeteoSource,
   hazardRiskSource,
   overpassOsmSource,
   usgsSource,
   worldBankSource,
-  reliefWebSource,
 ];
 
 export function allSources(): DataSource[] {
@@ -110,7 +112,7 @@ export async function buildDataPack(
   await Promise.all(
     allSources().map(async (source) => {
       try {
-        const items = await withTimeout(source.fetch(loc), 18000, source.name);
+        const items = await withTimeout(source.fetch(loc), 24000, source.name);
         allData.push(...items);
         sourceReport.push({ id: source.id, name: source.name, points: items.length });
         if (!items.length) warnings.push(`${source.name}: no data for this location.`);

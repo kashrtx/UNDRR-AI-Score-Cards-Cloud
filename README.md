@@ -185,9 +185,15 @@ Placeholders usable in `url`/`label`: `{name} {country} {country_code} {lat}
 ## Data sources (all free, no key)
 
 Geocoding (OpenStreetMap Nominatim / Open-Meteo), historical climate
-(Open-Meteo), infrastructure counts (OpenStreetMap Overpass), earthquake
-history (USGS FDSN), national indicators (World Bank Open Data), recent
-disasters (ReliefWeb / UN OCHA), and any config-driven REST sources you add.
+(Open-Meteo), river-flood discharge & coastal ground elevation
+(Open-Meteo Flood + Copernicus DEM), infrastructure counts (OpenStreetMap
+Overpass), earthquake history (USGS FDSN), national indicators (World Bank
+Open Data), and any config-driven REST sources you add.
+
+> ReliefWeb (UN OCHA) disaster history is included as code but off by default:
+> since 1 Nov 2025 its API needs a pre-approved appname (a quick org
+> registration at apidoc.reliefweb.int). Register one and re-add `reliefWebSource`
+> in `lib/data/adapters/registry.ts` to enable it.
 
 ## Notes & limits
 

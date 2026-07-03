@@ -49,7 +49,7 @@ export const worldBankSource: DataSource = {
         });
         let data: [unknown, WBRow[] | null] | unknown;
         try {
-          data = await getJson(url, { timeoutMs: 8000, retries: 0 });
+          data = await getJson(url, { timeoutMs: 9000, retries: 1 });
         } catch {
           return;
         }
