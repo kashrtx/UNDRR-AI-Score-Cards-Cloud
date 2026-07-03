@@ -62,22 +62,39 @@ export const openMeteoSource: DataSource = {
     const out: NormalizedDatum[] = [];
 
     // Ground elevation comes back in the same response — a reliable coastal /
-    // sea-level-rise exposure signal (no separate, flaky call needed).
+    // sea-level-rise exposure signal (no separate, flaky call needed). BUT it's
+    // a coarse global-grid value: on small islands/coastlines it often reads 0 m
+    // even when real ground is a few metres up, so we present it as approximate
+    // and add an explicit caveat rather than stating a precise "0 m".
     if (typeof data?.elevation === "number") {
       const e = Math.round(data.elevation);
+      const nearSeaLevel = data.elevation <= 2;
       out.push({
         key: "ground_elevation",
-        label: "Ground elevation at city center",
+        label: nearSeaLevel
+          ? "Ground elevation, city center (coarse grid estimate — under-reads on small islands/coasts)"
+          : "Ground elevation, city center (coarse grid estimate)",
         value: e,
-        unit: "m",
+        unit: "m (approx.)",
         essentialHint: 5,
         provenance: prov(`Ground elevation at ${loc.name}`),
       });
+      if (nearSeaLevel) {
+        out.push({
+          key: "elevation_caveat",
+          label: "How to read the elevation figure",
+          value:
+            "This is a coarse global-grid estimate. For small islands and coastlines it frequently reads 0 m even when the real ground sits a few metres above sea level. Treat it as 'low-lying / at or near sea level' — NOT a precise 0 m.",
+          essentialHint: 5,
+          provenance: prov(`Elevation caveat for ${loc.name}`),
+        });
+      }
       if (data.elevation < 10) {
         out.push({
           key: "coastal_exposure",
           label: "Low-lying coastal exposure",
-          value: `Very low elevation (${e} m) — high exposure to coastal flooding, storm surge and sea-level rise`,
+          value:
+            "At or near sea level (low-lying) — elevated exposure to coastal flooding, storm surge and sea-level rise",
           essentialHint: 5,
           provenance: prov(`Coastal exposure at ${loc.name}`),
         });

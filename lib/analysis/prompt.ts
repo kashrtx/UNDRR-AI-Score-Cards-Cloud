@@ -51,6 +51,8 @@ Analyze a city's Disaster Resilience Scorecard and produce a structured action p
    - Chapter 3: How to engage with the community
    - Chapter 4: How to finance projects
 
+9. **SANITY-CHECK THE DATA**: The enrichment figures come from automated open sources and can contain artifacts or coarse approximations. Before repeating a number as fact, ask whether it is plausible. If a value is clearly an artifact or implausible, describe it qualitatively or caveat it rather than stating it as precise fact. Concrete example: a grid-derived ground elevation of 0 m for an inhabited island almost always means the coarse grid cell fell on water/coastline — say "low-lying / near sea level" rather than "0 metres elevation". You MAY point out a likely data artifact when you are confident from general knowledge, but ONLY when confident, and you must NEVER invent a precise replacement figure — if unsure, state the uncertainty and lean on the scorecard. Correct obvious errors; do not manufacture new ones.
+
 ## THE TEN ESSENTIALS
 ${Object.entries(ESSENTIAL_NAMES).map(([n, name]) => `${n}. ${name}`).join("\n")}
 
@@ -152,10 +154,10 @@ export function buildUserPrompt(
   if (enrichmentData.length > 0) {
     parts.push(
       `\n### How to read the enrichment data\n` +
-        `- Climate (precipitation/temperature extremes), flood (river discharge) and elevation figures are specific to the city's coordinates — use them to corroborate or challenge the self-reported hazard scores.\n` +
-        `- A very low ground elevation signals coastal-flood / sea-level-rise exposure; high river discharge signals riverine-flood exposure.\n` +
+        `- Climate figures (precipitation and temperature extremes) are specific to the city's coordinates — use them to corroborate or challenge the self-reported hazard scores.\n` +
+        `- The ground-elevation figure is a COARSE global-grid estimate. On small islands and coastlines it frequently reads 0 m even though the real ground is a few metres higher — read a near-zero value as "low-lying / near sea level", and NEVER state a literal, precise "0 m elevation" as fact. A low elevation still signals coastal-flood and sea-level-rise exposure.\n` +
         `- OpenStreetMap infrastructure counts reflect how completely the area is mapped in OSM and may UNDERCOUNT facilities in less-mapped cities — treat them as a floor, not a census, and don't infer a critical gap from a low OSM count alone.\n` +
-        `- World Bank figures and disaster history are NATIONAL, not city-level — use them as context.`
+        `- World Bank figures are NATIONAL, not city-level — use them as context, not as the city's own numbers.`
     );
   }
 
