@@ -2,6 +2,10 @@
  * Claude (Anthropic) — direct browser calls, officially supported via the
  * `anthropic-dangerous-direct-browser-access` header. The key stays in the
  * browser and is sent only to Anthropic.
+ *
+ * Thinking-model aware: if a model streams extended-thinking blocks, those
+ * `thinking_delta` chunks go to the live narration, never the answer, and the
+ * final `stop_reason` is surfaced if no answer text arrives.
  */
 
 import { LLMProvider, LLMStreamHandlers, readSSE } from "./types";
@@ -36,7 +40,7 @@ export class ClaudeProvider implements LLMProvider {
       signal,
       body: JSON.stringify({
         model: this.model,
-        max_tokens: 4096,
+        max_tokens: 8192,
         temperature: 0.3,
         system,
         stream: true,
@@ -50,11 +54,14 @@ export class ClaudeProvider implements LLMProvider {
     }
 
     let full = "";
+    let sawThinking = false;
+    let stopReason: string | undefined;
+
     await readSSE(res, (data) => {
       if (data === "[DONE]") return;
       let evt: {
         type?: string;
-        delta?: { type?: string; text?: string };
+        delta?: { type?: string; text?: string; thinking?: string; stop_reason?: string };
         error?: { message?: string };
       };
       try {
@@ -62,15 +69,35 @@ export class ClaudeProvider implements LLMProvider {
       } catch {
         return;
       }
-      if (evt.type === "content_block_delta" && evt.delta?.type === "text_delta" && evt.delta.text) {
-        full += evt.delta.text;
-        handlers?.onToken?.(evt.delta.text);
-      } else if (evt.type === "error") {
+      if (evt.type === "error") {
         throw new Error(`Claude stream error: ${evt.error?.message ?? "unknown"}`);
+      }
+      if (evt.type === "content_block_delta") {
+        if (evt.delta?.type === "text_delta" && evt.delta.text) {
+          full += evt.delta.text;
+          handlers?.onToken?.(evt.delta.text);
+        } else if (evt.delta?.type === "thinking_delta" && evt.delta.thinking) {
+          // Extended thinking — show it live, keep it out of the answer.
+          sawThinking = true;
+          handlers?.onToken?.(evt.delta.thinking);
+        }
+      } else if (evt.type === "message_delta" && evt.delta?.stop_reason) {
+        stopReason = evt.delta.stop_reason;
       }
     });
 
-    if (!full.trim()) throw new Error("Claude returned an empty response.");
+    if (!full.trim()) {
+      if (stopReason === "max_tokens") {
+        throw new Error(
+          "Claude reached its output-token limit before finishing the answer" +
+            (sawThinking ? " (extended thinking used the budget)" : "") +
+            ". Try again or pick a lighter model."
+        );
+      }
+      throw new Error(
+        `Claude returned no answer text${stopReason ? ` (stop_reason: ${stopReason})` : ""}.`
+      );
+    }
     return full;
   }
 

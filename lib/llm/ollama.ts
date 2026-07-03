@@ -1,11 +1,16 @@
 /**
  * Ollama — the visitor's own local model. The browser calls
- * http://localhost:11434 directly (on the visitor's machine, not our server),
+ * http://127.0.0.1:11434 directly (on the visitor's machine, not our server),
  * so the model stays fully private and free.
  *
  * For the browser to be allowed to call Ollama, the visitor must start it with
  * their app origin allowed, e.g.:
  *   OLLAMA_ORIGINS="https://your-deployment.vercel.app" ollama serve
+ *
+ * Thinking-model aware: newer Ollama returns reasoning in a separate
+ * `message.thinking` field (streamed to the live narration, kept out of the
+ * answer); older thinking models embed <think>…</think> inside the content,
+ * which the analysis layer strips before parsing.
  */
 
 import { LLMProvider, LLMStreamHandlers, readNdjson } from "./types";
@@ -14,7 +19,7 @@ export class OllamaProvider implements LLMProvider {
   readonly name = "ollama";
   constructor(
     readonly model: string,
-    private baseUrl: string = "http://localhost:11434"
+    private baseUrl: string = "http://127.0.0.1:11434"
   ) {}
 
   private base() {
@@ -37,7 +42,8 @@ export class OllamaProvider implements LLMProvider {
         body: JSON.stringify({
           model: this.model,
           stream: true,
-          options: { temperature: 0.3, num_predict: 4096 },
+          // -1 = no cap, so a thinking model can reason AND finish the answer.
+          options: { temperature: 0.3, num_predict: -1 },
           messages: [
             { role: "system", content: system },
             { role: "user", content: user },
@@ -61,17 +67,29 @@ export class OllamaProvider implements LLMProvider {
     }
 
     let full = "";
+    let sawThinking = false;
     await readNdjson(res, (obj) => {
-      const o = obj as { message?: { content?: string }; error?: string };
+      const o = obj as {
+        message?: { content?: string; thinking?: string };
+        error?: string;
+      };
       if (o.error) throw new Error(`Ollama error: ${o.error}`);
-      const c = o.message?.content;
-      if (c) {
-        full += c;
-        handlers?.onToken?.(c);
+      if (o.message?.thinking) {
+        sawThinking = true;
+        handlers?.onToken?.(o.message.thinking);
+      }
+      if (o.message?.content) {
+        full += o.message.content;
+        handlers?.onToken?.(o.message.content);
       }
     });
 
-    if (!full.trim()) throw new Error("Ollama returned an empty response.");
+    if (!full.trim()) {
+      throw new Error(
+        "Ollama returned no answer text" +
+          (sawThinking ? " (the model produced only reasoning). Try again or use a non-thinking model." : ".")
+      );
+    }
     return full;
   }
 

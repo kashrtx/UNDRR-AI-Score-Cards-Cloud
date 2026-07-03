@@ -37,11 +37,16 @@ function toReport(pack: DataPack, serviceUp: boolean): DataReport {
 }
 
 function extractJson(text: string): string {
-  const fenced = text.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+  // Thinking models sometimes embed reasoning in <think>…</think> blocks —
+  // strip them so we parse the answer, not the reasoning.
+  const cleaned = text.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+  const fenced = cleaned.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
   if (fenced) return fenced[1].trim();
-  const brace = text.match(/\{[\s\S]*\}/);
-  if (brace) return brace[0];
-  return text.trim();
+  // Greedy match from the first "{" to the last "}" — the JSON object.
+  const first = cleaned.indexOf("{");
+  const last = cleaned.lastIndexOf("}");
+  if (first !== -1 && last !== -1 && last > first) return cleaned.slice(first, last + 1);
+  return cleaned;
 }
 
 export async function runAnalysis(

@@ -2,6 +2,12 @@
  * Gemini (Google AI Studio) — direct browser calls to
  * generativelanguage.googleapis.com, which is CORS-enabled. Free API keys are
  * available at https://aistudio.google.com/apikey .
+ *
+ * Thinking-model aware: Gemini "thinking" models (2.5/3.x Flash & Pro) spend
+ * output tokens on internal reasoning. We therefore (a) request a large output
+ * budget so reasoning doesn't starve the answer, (b) route any "thought" parts
+ * to the live narration instead of the answer, and (c) surface finishReason /
+ * safety blocks in errors instead of a bare "empty response".
  */
 
 import { LLMProvider, LLMStreamHandlers, readSSE } from "./types";
@@ -31,7 +37,8 @@ export class GeminiProvider implements LLMProvider {
       body: JSON.stringify({
         systemInstruction: { parts: [{ text: system }] },
         contents: [{ role: "user", parts: [{ text: user }] }],
-        generationConfig: { temperature: 0.3, maxOutputTokens: 8192 },
+        // Large budget so a thinking model has room to reason AND answer.
+        generationConfig: { temperature: 0.3, maxOutputTokens: 65536 },
       }),
     });
 
@@ -41,10 +48,18 @@ export class GeminiProvider implements LLMProvider {
     }
 
     let full = "";
+    let sawThinking = false;
+    let finishReason: string | undefined;
+    let blockReason: string | undefined;
+
     await readSSE(res, (data) => {
       if (!data || data === "[DONE]") return;
       let evt: {
-        candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+        candidates?: Array<{
+          content?: { parts?: Array<{ text?: string; thought?: boolean }> };
+          finishReason?: string;
+        }>;
+        promptFeedback?: { blockReason?: string };
         error?: { message?: string };
       };
       try {
@@ -53,16 +68,39 @@ export class GeminiProvider implements LLMProvider {
         return;
       }
       if (evt.error) throw new Error(`Gemini error: ${evt.error.message ?? "unknown"}`);
-      const parts = evt.candidates?.[0]?.content?.parts ?? [];
-      for (const p of parts) {
-        if (p.text) {
+      if (evt.promptFeedback?.blockReason) blockReason = evt.promptFeedback.blockReason;
+
+      const cand = evt.candidates?.[0];
+      if (cand?.finishReason) finishReason = cand.finishReason;
+      for (const p of cand?.content?.parts ?? []) {
+        if (!p.text) continue;
+        if (p.thought) {
+          // Internal reasoning — show it live, but keep it out of the answer.
+          sawThinking = true;
+          handlers?.onToken?.(p.text);
+        } else {
           full += p.text;
           handlers?.onToken?.(p.text);
         }
       }
     });
 
-    if (!full.trim()) throw new Error("Gemini returned an empty response.");
+    if (!full.trim()) {
+      if (blockReason) {
+        throw new Error(`Gemini blocked the request (${blockReason}). Try a different model.`);
+      }
+      if (finishReason === "MAX_TOKENS") {
+        throw new Error(
+          "Gemini reached its output-token limit before finishing the answer" +
+            (sawThinking ? " (a thinking model used the budget reasoning)" : "") +
+            ". Try again, or pick a lighter model such as gemini-2.0-flash."
+        );
+      }
+      throw new Error(
+        `Gemini returned no answer text${finishReason ? ` (finishReason: ${finishReason})` : ""}. ` +
+          "Try again or choose another model."
+      );
+    }
     return full;
   }
 

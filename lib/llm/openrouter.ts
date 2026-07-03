@@ -1,6 +1,11 @@
 /**
  * OpenRouter — OpenAI-compatible, CORS-enabled, with a catalogue of free models
  * (their id ends in ":free"). Free keys at https://openrouter.ai/keys .
+ *
+ * Thinking-model aware: reasoning models expose their chain-of-thought in a
+ * separate `delta.reasoning` field; we stream that to the live narration and
+ * keep only `delta.content` as the answer. A generous max_tokens leaves room
+ * for reasoning + answer, and finish_reason is surfaced on empty output.
  */
 
 import { LLMProvider, LLMStreamHandlers, readSSE } from "./types";
@@ -16,7 +21,6 @@ export class OpenRouterProvider implements LLMProvider {
       "content-type": "application/json",
       authorization: `Bearer ${this.apiKey}`,
     };
-    // Optional attribution headers (safe in the browser).
     if (typeof window !== "undefined") {
       h["HTTP-Referer"] = window.location.origin;
       h["X-Title"] = "UNDRR ARISE Scorecard Analyzer";
@@ -39,7 +43,7 @@ export class OpenRouterProvider implements LLMProvider {
       body: JSON.stringify({
         model: this.model,
         temperature: 0.3,
-        max_tokens: 4096,
+        max_tokens: 16384, // headroom for reasoning models
         stream: true,
         messages: [
           { role: "system", content: system },
@@ -54,10 +58,16 @@ export class OpenRouterProvider implements LLMProvider {
     }
 
     let full = "";
+    let sawReasoning = false;
+    let finishReason: string | undefined;
+
     await readSSE(res, (data) => {
       if (data === "[DONE]") return;
       let evt: {
-        choices?: Array<{ delta?: { content?: string } }>;
+        choices?: Array<{
+          delta?: { content?: string; reasoning?: string; reasoning_content?: string };
+          finish_reason?: string;
+        }>;
         error?: { message?: string };
       };
       try {
@@ -66,14 +76,33 @@ export class OpenRouterProvider implements LLMProvider {
         return;
       }
       if (evt.error) throw new Error(`OpenRouter error: ${evt.error.message ?? "unknown"}`);
-      const delta = evt.choices?.[0]?.delta?.content;
-      if (delta) {
-        full += delta;
-        handlers?.onToken?.(delta);
+      const choice = evt.choices?.[0];
+      if (choice?.finish_reason) finishReason = choice.finish_reason;
+      const delta = choice?.delta;
+      const reasoning = delta?.reasoning ?? delta?.reasoning_content;
+      if (reasoning) {
+        sawReasoning = true;
+        handlers?.onToken?.(reasoning);
+      }
+      if (delta?.content) {
+        full += delta.content;
+        handlers?.onToken?.(delta.content);
       }
     });
 
-    if (!full.trim()) throw new Error("OpenRouter returned an empty response.");
+    if (!full.trim()) {
+      if (finishReason === "length") {
+        throw new Error(
+          "OpenRouter hit its output-token limit before finishing the answer" +
+            (sawReasoning ? " (a reasoning model used the budget)" : "") +
+            ". Try again or choose another model."
+        );
+      }
+      throw new Error(
+        `OpenRouter returned no answer text${finishReason ? ` (finish_reason: ${finishReason})` : ""}. ` +
+          "Some free models are rate-limited or busy — try again or switch model."
+      );
+    }
     return full;
   }
 

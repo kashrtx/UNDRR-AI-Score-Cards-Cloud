@@ -22,7 +22,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   geminiModel: "gemini-2.0-flash",
   openrouterModel: "meta-llama/llama-3.3-70b-instruct:free",
   ollamaModel: "llama3.1:8b",
-  ollamaBaseUrl: "http://localhost:11434",
+  ollamaBaseUrl: "http://127.0.0.1:11434",
 };
 
 const SETTINGS_KEY = "undrr.settings";

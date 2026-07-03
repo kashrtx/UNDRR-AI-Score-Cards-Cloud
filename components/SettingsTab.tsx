@@ -302,7 +302,7 @@ export function SettingsTab({
                 value={draft.ollamaBaseUrl}
                 onChange={(e) => setDraft({ ...draft, ollamaBaseUrl: e.target.value })}
                 className={inputCls}
-                placeholder="http://localhost:11434"
+                placeholder="http://127.0.0.1:11434"
               />
             </label>
             <div className="text-xs text-text-secondary bg-surface-overlay/40 border border-border rounded-lg p-3 space-y-1">
