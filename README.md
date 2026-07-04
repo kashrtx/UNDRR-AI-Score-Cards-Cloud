@@ -1,260 +1,196 @@
 # UNDRR ARISE Scorecard Analyzer
 
-Analyze a city's **UNDRR Disaster Resilience Scorecard** and generate a grounded,
-prioritized action plan — entirely from a web browser. No terminals, no local
-servers, no subscriptions.
+Upload a completed disaster resilience scorecard for a city, and this app turns it into a clear, readable analysis: what the city is doing well, where it is weak, and a prioritized list of actions that would raise its score the most.
 
-It is a single **Next.js** app deployed on **Vercel**. Upload a completed
-scorecard (`.xlsm`/`.xlsx`), the app pulls free open data about the city
-(climate, infrastructure, seismic history, national indicators, recent
-disasters), and an AI provider of your choice writes a plain-language summary,
-strengths/weaknesses, an impact-vs-difficulty matrix, a costed action plan, and
-a projected score.
-
-> **Decision-support tool.** Outputs are illustrative and AI-generated. All
-> recommendations require review by qualified disaster-resilience professionals
-> before implementation.
+It is built to be genuinely useful for a city planner, and genuinely cheap to run (it can live on a free Vercel account). If you are new to the project, this page should get you from "no idea" to "I understand what we built" in about ten minutes.
 
 ---
 
-## For the non-technical user (e.g. trying it out)
+## What it actually does
 
-1. Open the app's URL in a browser.
-2. Click **Settings** and pick an AI provider. The easiest free options:
-   - **Gemini (Google AI Studio)** — get a free key at
-     <https://aistudio.google.com/apikey>, paste it in, click **Test connection**.
-   - **OpenRouter (free models)** — get a free key at
-     <https://openrouter.ai/keys>; the default model id ends in `:free`.
-   - **Claude (Anthropic)** — highest quality; needs a paid key from
-     <https://console.anthropic.com>.
-   - **Local (Ollama)** — free & private, runs on your own machine (see below).
-3. Go back to **Dashboard**, drag your completed scorecard onto the upload box.
-4. Click **Run Analysis** and watch the steps run. Read the results.
+Someone fills out the official UNDRR ARISE "Disaster Resilience Scorecard for Cities" in Excel. That file has dozens of questions, each scored 0 to 3, grouped under the "Ten Essentials" of resilience.
 
-Your API key is **encrypted and stored only in your browser** (WebCrypto
-AES-GCM, with a non-extractable device key in IndexedDB). It is never sent to
-this site's server and never stored in the code. Keys must be re-entered on a
-new browser or device — that is the intended trade-off for "never stored on a
-server."
+You drop that file into the app. Then it:
+
+1. Reads the scores out of the spreadsheet.
+2. Gathers free public data about the city (its climate, elevation, infrastructure, earthquake history, and some country level indicators).
+3. Researches the city on the web for extra context.
+4. Asks an AI model to write the analysis, using the scorecard as the source of truth and the gathered data as supporting evidence.
+5. Shows the result as a summary, a radar chart, an impact-vs-difficulty map of the suggested actions, a full action plan, and a "what if we did these" score projection you can toggle.
+
+The person using it never has to touch code, a terminal, or a spreadsheet formula.
 
 ---
 
-## Deploy your own (one click, free)
+## The three ideas that shape the whole project
 
-1. Push this repository to GitHub.
-2. In [Vercel](https://vercel.com), **New Project → Import** the repo. Framework
-   is auto-detected as **Next.js**. No environment variables are required.
-3. Click **Deploy**. When it finishes you'll get a URL like
-   `https://your-app.vercel.app`. Share it.
+Understanding these three choices explains almost every file you will read later.
 
-There are **no server secrets** — nothing to configure in env vars. All AI calls
-happen in the visitor's browser using the key they paste into Settings.
+**1. The AI runs in your browser, not on our server.**
+When you pick a model and paste an API key, the request goes straight from your browser to that AI provider. Your key is stored on your own device (encrypted), never on ours. This also means a long analysis will not time out, because it is not waiting on a small serverless function.
 
-Local development:
+**2. The boring data work runs on tiny server routes.**
+Some public data APIs refuse requests that come straight from a browser. So the open-data gathering and the web research run on small stateless server routes instead. They hold no database and remember nothing between requests.
+
+**3. Everything favors the free tier.**
+Free hosting, free data sources, and free or bring-your-own AI keys. You can run the whole thing without paying for anything.
+
+---
+
+## How a single analysis flows
+
+Here is the life of one "Run Analysis" click, in order:
+
+1. **Parse.** The Excel file is read into a clean, predictable shape (the Ten Essentials, each indicator, and the totals).
+2. **Open data.** The app geocodes the city, then asks each data source for what it knows (climate, infrastructure counts, quakes, and so on). If one source fails, the others still run.
+3. **Web research.** It pulls a few paragraphs of context about the city. If Tavily (a web search tool) is switched on, it trusts Tavily alone. If not, it falls back to Wikipedia and Wikidata plus a light web search.
+4. **Prompt.** All of that is packed into instructions for the AI. The scorecard is treated as fact; the research is there to cross-check and enrich, not to override it.
+5. **Stream.** Your chosen model writes the analysis, and you watch it appear live.
+6. **Check and show.** The app validates the AI's answer against a strict format. If the answer is malformed it tries one repair, and if that fails it shows a basic built-in fallback so you are never left with a blank screen. Then it renders the charts and the action plan.
+
+---
+
+## The tech, in one minute
+
+It is a single [Next.js](https://nextjs.org) app (the App Router style) written in TypeScript and React, styled with Tailwind CSS, with charts drawn by Recharts. It deploys to Vercel with no configuration. There is no database and no login. State you care about (your settings and your last result) is saved in your browser's local storage.
+
+You do not need to know all of these to help. If you know a little React, you can already be useful in the `components` folder.
+
+---
+
+## Project map (where things live)
+
+| Folder | What is inside | Think of it as |
+|---|---|---|
+| `app/` | The page you see, plus the small server routes under `app/api` | The front door |
+| `app/page.tsx` | The whole dashboard screen and the app's state | The main screen |
+| `app/api/` | Server routes: parse the file, fetch data, do research, proxy some AI calls | The back office |
+| `components/` | The visual building blocks (charts, panels, the settings screen, buttons) | The furniture |
+| `lib/` | The actual logic, with no UI in it | The brains |
+
+Inside `lib/`, the brains are split by job:
+
+| Folder | Job |
+|---|---|
+| `lib/scorecard/` | Turn the messy Excel file into clean, typed data |
+| `lib/data/` | Fetch open data (each source is its own small file) and do web research |
+| `lib/llm/` | One file per AI provider, plus a factory that picks the right one |
+| `lib/analysis/` | Build the prompt, run the model, and validate the result |
+| `lib/settings/` | Save your choices and encrypt your API keys |
+| `lib/export/` | Build the downloadable report and JSON |
+| `lib/theme.ts` | Light and dark mode |
+
+A nice detail worth knowing: the AI providers all share one small interface, so adding a new one is mostly copying a pattern, not inventing anything.
+
+---
+
+## The AI models you can choose
+
+You pick a provider in Settings and paste a key. The friendliest starting points are Gemini (free tier) and NVIDIA NIM (free credits, lots of open models).
+
+| Provider | Cost | Notes |
+|---|---|---|
+| Gemini | Free tier | Fast and easy. The default. |
+| OpenRouter | Free open models | One key, many models. |
+| NVIDIA NIM | Free credits | Over 100 open models, including Llama, DeepSeek, Kimi, and GLM. |
+| z.AI | Free flash models, paid rest | The GLM family, including GLM 5.2. |
+| Claude | Paid | Anthropic's models, high quality. |
+| OpenAI | Paid | The GPT-5 family. |
+| xAI | Paid | Grok models. |
+| Meta | Paid (experimental) | Llama via Meta's own API. Llama is also free on NVIDIA NIM. |
+| Ollama or LM Studio | Free and private | Runs a model on your own computer, no key needed. |
+
+**One thing to know about the last group of cloud providers.** Gemini, OpenRouter, Claude, and the local options can be called straight from your browser. OpenAI, xAI, z.AI, NVIDIA, and Meta block browser calls, so those requests hop through a tiny same-origin route in this app (`/api/llm`) that just forwards them. Your key is used once for that request and is never stored on the server. On Vercel's free plan that route can run for up to 60 seconds, so a very slow "reasoning" model can occasionally get cut off. If that happens, pick a faster model or use a provider that runs directly in the browser.
+
+---
+
+## Where the data comes from
+
+**Open data** (always gathered, no key needed):
+
+- Open-Meteo for climate and elevation.
+- OpenStreetMap (via Overpass) for counts of local infrastructure like hospitals and shelters.
+- USGS for recent earthquake history near the city.
+- World Bank for a few country-level indicators.
+
+**Web research** (for extra context):
+
+- If you turn on Tavily and add its free key, Tavily does the searching and is trusted on its own.
+- If not, the app uses Wikipedia and Wikidata plus a light keyless web search.
+
+The AI is always told to treat the scorecard as the truth and to cross-check these extras rather than trust any single number.
+
+---
+
+## Run it on your own computer
+
+You will need [Node.js](https://nodejs.org) version 18.18 or newer.
 
 ```bash
+# 1. get the code, then from the project folder:
 npm install
-npm run dev      # http://localhost:3000
-npm run build    # production build
+
+# 2. start it
+npm run dev
 ```
 
-Requires Node 18.18+.
+Now open `http://localhost:3000`. Go to **Settings**, pick a provider, paste a key, and hit **Test connection**. Then go back to **Dashboard**, upload a completed scorecard, and click **Run Analysis**.
+
+That is the entire local setup.
 
 ---
 
-## AI providers (all run in the browser)
+## Put it online (Vercel)
 
-| Provider   | Cost                | Key needed | Notes                                             |
-|------------|---------------------|------------|---------------------------------------------------|
-| Gemini     | Free tier           | Yes        | Google AI Studio, CORS-enabled, fast.             |
-| OpenRouter | Free models (`:free`)| Yes       | OpenAI-compatible, many free open models.         |
-| NVIDIA NIM | Free (1,000 credits)| Yes        | 100+ open models: Llama, DeepSeek, Kimi, GLM.     |
-| z.AI       | Free flash + paid   | Yes        | GLM 5.2 / 5.1 / 4.7; two flash models are free.   |
-| Claude     | Paid                | Yes        | Anthropic; uses official direct-browser-access.   |
-| OpenAI     | Paid                | Yes        | GPT-5.5 and the GPT-5 family.                     |
-| xAI        | Paid                | Yes        | Grok 4.3 and fast Grok models.                    |
-| Meta       | Paid (experimental) | Yes        | Llama 4 via Meta's API. Llama is also free on NIM.|
-| LM Studio  | Free & private      | No         | Local, OpenAI-compatible, CORS on by default — usually the smoothest local option. |
-| Ollama     | Free & private      | No         | Local; needs `OLLAMA_ORIGINS` set to your site.   |
+1. Push this project to a GitHub repository.
+2. In [Vercel](https://vercel.com), choose "Add New Project" and import that repository.
+3. Click Deploy. There is nothing to configure.
 
-Gemini, OpenRouter, Claude, and the local options run fully in the browser, so
-keys never touch any server and long streams don't hit a serverless timeout.
-OpenAI, xAI, z.AI, NVIDIA NIM, and Meta block direct browser calls, so those go
-through a thin same-origin proxy route (`/api/llm`) on your own app: the key is
-used once per request and never stored or logged. Reasoning ("thinking") models
-are handled uniformly, their chain-of-thought streams to the live view while
-only the final answer is parsed, so there's no empty-answer bug.
+Two optional environment variables exist if you want them:
 
-> Proxy note: on the Vercel free plan a request can run up to 60s, so a very
-> slow reasoning model routed through the proxy could be cut off. Pick a faster
-> model, or use Vercel Pro (up to 300s), for heavy reasoning workloads.
+- `TAVILY_API_KEY` lets everyone using your deployment get web search without pasting their own key.
+- `SEARXNG_URL` points at your own private search server instead.
 
-### Using local models
+Neither is required.
 
-Two local options — both keep the model on your own machine, free and private:
+---
 
-**LM Studio (recommended, easiest).** In LM Studio: load a model, open the **Developer** tab, and **Start Server** (default port 1234). CORS is on by default, so it typically works from the hosted site with no extra flags. In **Settings**, choose **Local (LM Studio)**, leave the address as `http://127.0.0.1:1234/v1`, and click **Test connection**.
+## Is it private and safe?
 
-**Ollama.** For the website (a different origin) to be allowed to call Ollama, start it with your app's address allowed:
+Yes, by design. Your API keys are encrypted and kept in your own browser, and they are never sent to this app's server or saved in the code. The only things that ever reach a server are the open-data and research lookups (which are about the city, not about you) and, for the few providers that need it, the one forwarded AI request whose key is used immediately and then dropped.
+
+---
+
+## Bonus: connect it to Claude Desktop
+
+The app also exposes its open-data engine as a small [Model Context Protocol](https://modelcontextprotocol.io) endpoint at `/api/mcp`. That lets Claude Desktop (or any MCP client) pull disaster-resilience evidence for any city directly. It is optional and separate from the main app.
+
+---
+
+## Want to change something? Start here
+
+A quick map so you do not have to go hunting:
+
+- **Ask the AI something different, or change its tone:** edit `lib/analysis/prompt.ts`.
+- **Change the shape of the result (new fields, new sections):** edit `lib/analysis/schema.ts`, then use them in `components/`.
+- **Add a new AI provider:** add a file in `lib/llm/`, wire it into `lib/llm/index.ts`, and register it in `lib/settings/store.ts` and `components/SettingsTab.tsx`.
+- **Add a simple new data source:** often you only edit `lib/data/adapters/data-sources.json`, no code needed. For a trickier source, add a small adapter next to the others.
+- **Change how the web research behaves:** edit `lib/data/research.ts`.
+- **Change the look, colors, or charts:** the pieces are in `components/`, and the color and theme tokens live in `app/globals.css`.
+
+---
+
+## Handy commands
 
 ```bash
-ollama pull llama3.1:8b
-OLLAMA_ORIGINS="https://your-app.vercel.app" ollama serve
-```
-
-Then in **Settings**, choose **Local (Ollama)**, set the model + address (`http://127.0.0.1:11434`), and click **Test connection**.
-
-> Note: on newer Chrome (142+), a hosted **https** site reaching `localhost` triggers a Local Network Access permission prompt — allow it when asked. If it's blocked, run the app locally (`npm run dev`, open `http://localhost:3000`) for a friction-free local-model experience.
-
----
-
-## MCP endpoint (for Claude Desktop / other MCP clients)
-
-The app exposes its open-data engine over the **Model Context Protocol**
-(Streamable HTTP) at:
-
-```
-https://your-app.vercel.app/api/mcp
-```
-
-Tools:
-
-- `list_sources` — list every open-data source the engine can query.
-- `fetch_location_data` — geocode a city and return a full, provenance-tagged
-  evidence bundle (climate, infrastructure, seismic history, national
-  indicators, recent disasters).
-
-Example Claude Desktop config entry:
-
-```json
-{
-  "mcpServers": {
-    "undrr-arise": {
-      "type": "streamable-http",
-      "url": "https://your-app.vercel.app/api/mcp"
-    }
-  }
-}
+npm run dev     # run locally with live reload
+npm run build   # make a production build
+npm run start   # run that production build
+npm run lint    # check the code style
 ```
 
 ---
 
-## How it works
+## A note on the analysis itself
 
-```
-app/
-  page.tsx                      Main app (Dashboard + Settings tabs)
-  layout.tsx, globals.css
-  api/
-    health/route.ts             Health + list of data sources
-    scorecard/parse/route.ts    .xlsm upload → parsed scorecard JSON (stateless)
-    data/fetch/route.ts         Run all data adapters for a city → evidence bundle
-    mcp/[transport]/route.ts    MCP server (JSON-RPC over Streamable HTTP)
-components/                     UI (upload, radar, action plan, matrix, settings, …)
-lib/
-  scorecard/                    parseXlsm.ts, schema.ts
-  data/adapters/                geocode, openMeteo, overpassOsm, usgs, worldBank,
-                                reliefWeb, configSources (+ data-sources.json), registry
-  analysis/                     prompt.ts, schema.ts, analyze.ts (client orchestrator)
-  llm/                          claude, gemini, openrouter, ollama (one streaming interface)
-  settings/                     crypto.ts (encrypted keys), store.ts
-  client/                       api.ts (calls the two stateless routes)
-```
-
-- **Stateless server.** The server holds nothing between requests. The parse
-  route returns JSON; the client keeps all state (React + localStorage).
-- **Data fetch runs server-side** so open APIs that dislike browser CORS
-  (Nominatim, Overpass) work and we can send polite, rate-limit-friendly
-  requests. Each source fails independently — one bad source never stops the
-  rest.
-- **Add a data source without code:** edit `lib/data/adapters/data-sources.json`.
-  A "simple" source is one URL plus which fields to pick out of the JSON.
-
-### Adding a REST data source (no code)
-
-Append an object to `lib/data/adapters/data-sources.json`:
-
-```json
-{
-  "id": "my_source",
-  "name": "My Source",
-  "enabled": true,
-  "needs": ["country_code"],
-  "url": "https://api.example.com/{country_code}",
-  "dataset": "Example API",
-  "records_path": "0",
-  "mode": "fields",
-  "fields": [
-    { "key": "some_value", "label": "Some value", "path": "field.path", "essentialHint": 4 }
-  ]
-}
-```
-
-Placeholders usable in `url`/`label`: `{name} {country} {country_code} {lat}
-{lon} {bbox_south} {bbox_north} {bbox_west} {bbox_east} {today} {start_5y}`.
-
----
-
-## Data sources (all free, no key)
-
-Geocoding (OpenStreetMap Nominatim / Open-Meteo), historical climate &
-coastal ground elevation (Open-Meteo — elevation returned with the climate
-response), infrastructure counts (OpenStreetMap Overpass), earthquake history
-(USGS FDSN), national indicators (World Bank Open Data), and any config-driven
-REST sources you add.
-
-## Web-search research (RAG) — keyless, no setup
-
-Before the AI writes anything, a research step retrieves real, citable evidence
-about the city and feeds it to the model as cross-checked context (never a
-single "verified" number — that's what produced a bogus island elevation
-before). It works for every provider, including local models that can't browse,
-and needs **no API key**:
-
-- **Wikipedia** (keyless core): a multi-article search plus full-article
-  geography/hazard/climate extraction, bot-friendly and reliable from Vercel.
-- **Wikidata**: population and area only. Elevation is intentionally not surfaced
-  from Wikidata, since it's unreliable for islands and coastal cities.
-- **DuckDuckGo** (keyless, best-effort): a little general-web coverage. It can be
-  rate-limited or blocked from datacenter IPs, so it degrades quietly.
-
-Whichever web search runs, it covers several angles for a rounded picture: the
-city's geography and climate, its hazards and past disasters, recent resilience
-initiatives and successes, and current challenges.
-
-### Appearance
-
-Light and dark themes are both built in. Light is the default; use the sun/moon
-button in the header to switch, and your choice is remembered.
-
-Optional, no-code upgrades for broader/higher-quality web results (set once in
-your Vercel environment — still no per-query hassle):
-
-- `SEARXNG_URL` — point at an open-source [SearXNG](https://searxng.org) instance
-  (self-hosted or your own) to use its JSON API. No API key.
-- `TAVILY_API_KEY` — a managed RAG search API (free tier available). Or paste a
-  key under **Settings → Web-search grounding**.
-
-> Note: SearXNG is a standalone service and can't run *inside* a Vercel function;
-> host it separately and point `SEARXNG_URL` at it. Cloud providers can also use
-> their own native web search (Gemini/Claude/OpenRouter) via the Settings
-> toggle, but that's model-decided, so the keyless server-side research above is
-> the primary path.
-
-> ReliefWeb (UN OCHA) disaster history is included as code but off by default:
-> since 1 Nov 2025 its API needs a pre-approved appname (a quick org
-> registration at apidoc.reliefweb.int). Register one and re-add `reliefWebSource`
-> in `lib/data/adapters/registry.ts` to enable it.
-
-## Notes & limits
-
-- **Large uploads:** Vercel's request body limit is ~4.5 MB; typical scorecards
-  are well under this.
-- **Overpass/Nominatim rate limits:** requests are server-side with a polite
-  User-Agent and per-source timeouts; sources degrade gracefully.
-- **Accuracy:** AI output is decision-support and depends on the model; the RAG
-  step reduces hallucination but the model can still err — always review.
-
-## License
-
-Provided as-is for evaluation and decision support.
+The AI is a helpful assistant, not an oracle. Different models, and even repeated runs of the same model, can surface different strengths, gaps, and recommendations. Treat the output as a strong first draft to review with your team, not as a final verdict. For important decisions, it is worth comparing a couple of models.
