@@ -51,6 +51,7 @@ const ANALYSIS_KEY = "undrr.analysis";
 
 const PROVIDER_LABEL: Record<ProviderId, string> = {
   claude: "Claude", gemini: "Gemini", openrouter: "OpenRouter",
+  openai: "OpenAI", xai: "xAI Grok", zai: "z.AI GLM", nvidia: "NVIDIA NIM", meta: "Meta Llama",
   ollama: "Ollama (local)", lmstudio: "LM Studio (local)",
 };
 
@@ -61,6 +62,11 @@ function modelOf(s: AppSettings): string {
   return s.provider === "claude" ? s.claudeModel
     : s.provider === "gemini" ? s.geminiModel
     : s.provider === "openrouter" ? s.openrouterModel
+    : s.provider === "openai" ? s.openaiModel
+    : s.provider === "xai" ? s.xaiModel
+    : s.provider === "zai" ? s.zaiModel
+    : s.provider === "nvidia" ? s.nvidiaModel
+    : s.provider === "meta" ? s.metaModel
     : s.provider === "lmstudio" ? s.lmstudioModel
     : s.ollamaModel;
 }

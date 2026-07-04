@@ -28,6 +28,11 @@ const MODELS: Record<ProviderId, string[]> = {
     "mistralai/mistral-7b-instruct:free",
   ],
   claude: ["claude-sonnet-4-6", "claude-opus-4-8", "claude-haiku-4-5", "claude-sonnet-5"],
+  openai: ["gpt-5.5", "gpt-5.4", "gpt-5.1"],
+  xai: ["grok-4.3", "grok-4.1-fast-reasoning", "grok-4.1-fast-non-reasoning", "grok-code-fast-1"],
+  zai: ["glm-4.7", "glm-5.2", "glm-5.1", "glm-4.7-flash", "glm-4.5-flash"],
+  nvidia: ["meta/llama-3.3-70b-instruct", "meta/llama-3.1-405b-instruct", "deepseek-ai/deepseek-r1", "moonshotai/kimi-k2-instruct", "qwen/qwen3-coder-480b-a35b-instruct", "zai-org/glm-4.7"],
+  meta: ["Llama-4-Maverick-17B-128E-Instruct-FP8", "Llama-4-Scout-17B-16E-Instruct-FP8"],
   lmstudio: ["local-model", "qwen2.5-7b-instruct", "llama-3.2-3b-instruct"],
   ollama: ["llama3.1:8b", "llama3.2", "qwen2.5", "mistral"],
 };
@@ -48,6 +53,31 @@ const PROVIDER_META: Record<ProviderId, { title: string; subtitle: string; icon:
     subtitle: "Top-quality analysis. Needs a paid Anthropic key.",
     icon: <Cloud size={18} className="text-accent-400" />,
   },
+  openai: {
+    title: "OpenAI (GPT)",
+    subtitle: "GPT-5.5 and the GPT-5 family. Needs a paid OpenAI key.",
+    icon: <Sparkles size={18} className="text-accent-400" />,
+  },
+  xai: {
+    title: "xAI (Grok)",
+    subtitle: "Grok 4.3 and the fast Grok models. Needs an xAI key.",
+    icon: <Boxes size={18} className="text-accent-400" />,
+  },
+  zai: {
+    title: "z.AI (GLM)",
+    subtitle: "GLM 5.2, 5.1 and 4.7. Two flash models are free to use.",
+    icon: <Boxes size={18} className="text-accent-400" />,
+  },
+  nvidia: {
+    title: "NVIDIA NIM (free)",
+    subtitle: "100+ open models free, including Llama, DeepSeek, Kimi and GLM.",
+    icon: <Cpu size={18} className="text-accent-400" />,
+  },
+  meta: {
+    title: "Meta (Llama)",
+    subtitle: "Llama 4 via Meta's API (experimental). Llama is also free on NVIDIA NIM.",
+    icon: <Cloud size={18} className="text-accent-400" />,
+  },
   lmstudio: {
     title: "Local (LM Studio)",
     subtitle: "Free & private. OpenAI-compatible; usually works with no extra setup.",
@@ -61,7 +91,7 @@ const PROVIDER_META: Record<ProviderId, { title: string; subtitle: string; icon:
 };
 
 // Display order, cloud first (the friction-free path), then local.
-const ORDER: ProviderId[] = ["gemini", "openrouter", "claude", "lmstudio", "ollama"];
+const ORDER: ProviderId[] = ["gemini", "openrouter", "nvidia", "zai", "claude", "openai", "xai", "meta", "lmstudio", "ollama"];
 
 const inputCls =
   "mt-1 w-full px-3 py-2 rounded-lg bg-surface border border-border text-sm text-text-primary focus:border-accent-500/60 outline-none";
@@ -90,6 +120,11 @@ export function SettingsTab({
       gemini: hasApiKey("gemini"),
       openrouter: hasApiKey("openrouter"),
       claude: hasApiKey("claude"),
+      openai: hasApiKey("openai"),
+      xai: hasApiKey("xai"),
+      zai: hasApiKey("zai"),
+      nvidia: hasApiKey("nvidia"),
+      meta: hasApiKey("meta"),
     });
   };
   useEffect(() => { refreshKeyPresence(); setSearchKeyPresent(hasSearchKey()); }, []);
@@ -103,6 +138,11 @@ export function SettingsTab({
     provider === "claude" ? "claudeModel"
     : provider === "gemini" ? "geminiModel"
     : provider === "openrouter" ? "openrouterModel"
+    : provider === "openai" ? "openaiModel"
+    : provider === "xai" ? "xaiModel"
+    : provider === "zai" ? "zaiModel"
+    : provider === "nvidia" ? "nvidiaModel"
+    : provider === "meta" ? "metaModel"
     : provider === "lmstudio" ? "lmstudioModel"
     : "ollamaModel";
   const currentModel = draft[modelField] as string;
@@ -241,6 +281,11 @@ export function SettingsTab({
                   ? "A key is saved, type to replace it, or leave blank to keep"
                   : provider === "claude" ? "sk-ant-…"
                   : provider === "openrouter" ? "sk-or-…"
+                  : provider === "openai" ? "sk-…"
+                  : provider === "xai" ? "xai-…"
+                  : provider === "nvidia" ? "nvapi-…"
+                  : provider === "zai" ? "your z.AI key"
+                  : provider === "meta" ? "LLM|… (Meta API key)"
                   : "AIza…"
               }
             />
@@ -255,8 +300,33 @@ export function SettingsTab({
               {provider === "claude" && (
                 <a className="text-primary-300 underline" href="https://console.anthropic.com/settings/keys" target="_blank" rel="noreferrer">console.anthropic.com</a>
               )}
+              {provider === "openai" && (
+                <a className="text-primary-300 underline" href="https://platform.openai.com/api-keys" target="_blank" rel="noreferrer">platform.openai.com</a>
+              )}
+              {provider === "xai" && (
+                <a className="text-primary-300 underline" href="https://console.x.ai" target="_blank" rel="noreferrer">console.x.ai</a>
+              )}
+              {provider === "zai" && (
+                <a className="text-primary-300 underline" href="https://z.ai/manage-apikey/apikey-list" target="_blank" rel="noreferrer">z.ai</a>
+              )}
+              {provider === "nvidia" && (
+                <a className="text-primary-300 underline" href="https://build.nvidia.com" target="_blank" rel="noreferrer">build.nvidia.com</a>
+              )}
+              {provider === "meta" && (
+                <a className="text-primary-300 underline" href="https://llama.developer.meta.com" target="_blank" rel="noreferrer">llama.developer.meta.com</a>
+              )}
               .
             </span>
+            {(provider === "openai" || provider === "xai" || provider === "zai" || provider === "nvidia" || provider === "meta") && (
+              <span className="text-xs text-text-secondary block mt-1.5 bg-surface-overlay/40 border border-border rounded-lg p-2.5">
+                These providers block direct browser calls, so requests go through
+                your own app&apos;s server (your key is used once and never stored there).
+                Very slow reasoning models may hit Vercel&apos;s 60s limit on the free
+                plan, if so, pick a faster model or use Vercel Pro.
+                {provider === "nvidia" && " NVIDIA NIM is free (1,000 credits) and includes Llama, DeepSeek, Kimi and GLM."}
+                {provider === "meta" && " Meta's direct API is experimental here; Llama also runs free on NVIDIA NIM."}
+              </span>
+            )}
             {keyPresence[provider] && (
               <button
                 onClick={() => clearKey(provider as CloudProviderId)}

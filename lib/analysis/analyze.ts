@@ -16,7 +16,7 @@ import { buildSystemPrompt, buildUserPrompt } from "./prompt";
 import { createProvider } from "@/lib/llm";
 import { fetchDataPack, fetchReferenceFacts } from "@/lib/client/api";
 import type { NormalizedScorecard } from "@/lib/scorecard/schema";
-import { isCloudProvider, getSearchKey, type AppSettings } from "@/lib/settings/store";
+import { providerSupportsWebSearch, getSearchKey, type AppSettings } from "@/lib/settings/store";
 import type { DataPack, DataReport, NormalizedDatum, ProgressEvent, ReferenceFacts } from "@/lib/types";
 
 export interface AnalyzeHandlers {
@@ -122,7 +122,7 @@ export async function runAnalysis(
   const provider = await createProvider(settings);
   onProgress?.({
     step: "llm",
-    label: `${provider.name} is analysing${settings.webSearch && isCloudProvider(settings.provider) ? " (with web search)" : ""}…`,
+    label: `${provider.name} is analysing${settings.webSearch && providerSupportsWebSearch(settings.provider) ? " (with web search)" : ""}…`,
     pct: 45,
     indeterminate: true,
   });
@@ -142,7 +142,7 @@ export async function runAnalysis(
     if (
       !signal?.aborted &&
       settings.webSearch &&
-      isCloudProvider(settings.provider)
+      providerSupportsWebSearch(settings.provider)
     ) {
       onProgress?.({
         step: "llm",

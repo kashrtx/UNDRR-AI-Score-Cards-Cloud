@@ -7,9 +7,10 @@ import type { LLMProvider } from "./types";
 import { ClaudeProvider } from "./claude";
 import { GeminiProvider } from "./gemini";
 import { OpenRouterProvider } from "./openrouter";
+import { OpenAICompatibleProvider } from "./openaiCompatible";
 import { OllamaProvider } from "./ollama";
 import { LMStudioProvider } from "./lmstudio";
-import { AppSettings, getApiKey, isCloudProvider } from "@/lib/settings/store";
+import { AppSettings, getApiKey, providerSupportsWebSearch } from "@/lib/settings/store";
 
 export type { LLMProvider, LLMStreamHandlers } from "./types";
 
@@ -17,10 +18,10 @@ export async function createProvider(
   settings: AppSettings,
   opts?: { webSearch?: boolean }
 ): Promise<LLMProvider> {
-  // Web search only applies to cloud providers with the toggle on. The
-  // orchestrator can force it off (opts.webSearch=false) for a safe retry.
+  // Native web search only applies to providers that actually implement it.
+  // The orchestrator can force it off (opts.webSearch=false) for a safe retry.
   const web =
-    (opts?.webSearch ?? settings.webSearch ?? false) && isCloudProvider(settings.provider);
+    (opts?.webSearch ?? settings.webSearch ?? false) && providerSupportsWebSearch(settings.provider);
   switch (settings.provider) {
     case "claude": {
       const key = (await getApiKey("claude")) ?? "";
@@ -33,6 +34,26 @@ export async function createProvider(
     case "openrouter": {
       const key = (await getApiKey("openrouter")) ?? "";
       return new OpenRouterProvider(settings.openrouterModel, key, web);
+    }
+    case "openai": {
+      const key = (await getApiKey("openai")) ?? "";
+      return new OpenAICompatibleProvider("openai", settings.openaiModel, key);
+    }
+    case "xai": {
+      const key = (await getApiKey("xai")) ?? "";
+      return new OpenAICompatibleProvider("xai", settings.xaiModel, key);
+    }
+    case "zai": {
+      const key = (await getApiKey("zai")) ?? "";
+      return new OpenAICompatibleProvider("zai", settings.zaiModel, key);
+    }
+    case "nvidia": {
+      const key = (await getApiKey("nvidia")) ?? "";
+      return new OpenAICompatibleProvider("nvidia", settings.nvidiaModel, key);
+    }
+    case "meta": {
+      const key = (await getApiKey("meta")) ?? "";
+      return new OpenAICompatibleProvider("meta", settings.metaModel, key);
     }
     case "ollama":
       return new OllamaProvider(settings.ollamaModel, settings.ollamaBaseUrl);

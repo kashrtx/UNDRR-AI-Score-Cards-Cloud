@@ -68,13 +68,26 @@ Requires Node 18.18+.
 |------------|---------------------|------------|---------------------------------------------------|
 | Gemini     | Free tier           | Yes        | Google AI Studio, CORS-enabled, fast.             |
 | OpenRouter | Free models (`:free`)| Yes       | OpenAI-compatible, many free open models.         |
+| NVIDIA NIM | Free (1,000 credits)| Yes        | 100+ open models: Llama, DeepSeek, Kimi, GLM.     |
+| z.AI       | Free flash + paid   | Yes        | GLM 5.2 / 5.1 / 4.7; two flash models are free.   |
 | Claude     | Paid                | Yes        | Anthropic; uses official direct-browser-access.   |
+| OpenAI     | Paid                | Yes        | GPT-5.5 and the GPT-5 family.                     |
+| xAI        | Paid                | Yes        | Grok 4.3 and fast Grok models.                    |
+| Meta       | Paid (experimental) | Yes        | Llama 4 via Meta's API. Llama is also free on NIM.|
 | LM Studio  | Free & private      | No         | Local, OpenAI-compatible, CORS on by default — usually the smoothest local option. |
 | Ollama     | Free & private      | No         | Local; needs `OLLAMA_ORIGINS` set to your site.   |
 
-Calls run client-side so keys never touch the server, there is no serverless
-timeout on long analyses, streaming works everywhere, and Ollama works
-naturally.
+Gemini, OpenRouter, Claude, and the local options run fully in the browser, so
+keys never touch any server and long streams don't hit a serverless timeout.
+OpenAI, xAI, z.AI, NVIDIA NIM, and Meta block direct browser calls, so those go
+through a thin same-origin proxy route (`/api/llm`) on your own app: the key is
+used once per request and never stored or logged. Reasoning ("thinking") models
+are handled uniformly, their chain-of-thought streams to the live view while
+only the final answer is parsed, so there's no empty-answer bug.
+
+> Proxy note: on the Vercel free plan a request can run up to 60s, so a very
+> slow reasoning model routed through the proxy could be cut off. Pick a faster
+> model, or use Vercel Pro (up to 300s), for heavy reasoning workloads.
 
 ### Using local models
 

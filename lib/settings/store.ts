@@ -5,9 +5,14 @@
 
 import { getSecret, hasSecret, setSecret, clearSecret } from "./crypto";
 
-export type ProviderId = "claude" | "gemini" | "openrouter" | "ollama" | "lmstudio";
+export type ProviderId =
+  | "claude" | "gemini" | "openrouter"
+  | "openai" | "xai" | "zai" | "nvidia" | "meta"
+  | "ollama" | "lmstudio";
 /** Providers that require an API key (all cloud ones). */
-export type CloudProviderId = "claude" | "gemini" | "openrouter";
+export type CloudProviderId =
+  | "claude" | "gemini" | "openrouter"
+  | "openai" | "xai" | "zai" | "nvidia" | "meta";
 /** Local providers run on the visitor's machine — no key. */
 export type LocalProviderId = "ollama" | "lmstudio";
 
@@ -16,6 +21,11 @@ export interface AppSettings {
   claudeModel: string;
   geminiModel: string;
   openrouterModel: string;
+  openaiModel: string;
+  xaiModel: string;
+  zaiModel: string;
+  nvidiaModel: string;
+  metaModel: string;
   ollamaModel: string;
   ollamaBaseUrl: string;
   lmstudioModel: string;
@@ -31,6 +41,11 @@ export const DEFAULT_SETTINGS: AppSettings = {
   claudeModel: "claude-sonnet-4-6",
   geminiModel: "gemini-3.5-flash",
   openrouterModel: "meta-llama/llama-3.3-70b-instruct:free",
+  openaiModel: "gpt-5.5",
+  xaiModel: "grok-4.3",
+  zaiModel: "glm-4.7",
+  nvidiaModel: "meta/llama-3.3-70b-instruct",
+  metaModel: "Llama-4-Maverick-17B-128E-Instruct-FP8",
   ollamaModel: "llama3.1:8b",
   ollamaBaseUrl: "http://127.0.0.1:11434",
   lmstudioModel: "local-model",
@@ -46,9 +61,14 @@ export const SECRET_NAMES: Record<CloudProviderId, string> = {
   claude: "claude_api_key",
   gemini: "gemini_api_key",
   openrouter: "openrouter_api_key",
+  openai: "openai_api_key",
+  xai: "xai_api_key",
+  zai: "zai_api_key",
+  nvidia: "nvidia_api_key",
+  meta: "meta_api_key",
 };
 
-export const CLOUD_PROVIDERS: CloudProviderId[] = ["gemini", "openrouter", "claude"];
+export const CLOUD_PROVIDERS: CloudProviderId[] = ["gemini", "openrouter", "claude", "openai", "xai", "zai", "nvidia", "meta"];
 
 /** Optional web-search (Tavily) key for the research/RAG step. */
 export const SEARCH_SECRET_NAME = "tavily_api_key";
@@ -59,7 +79,13 @@ export function clearSearchKey() { clearSecret(SEARCH_SECRET_NAME); }
 export const LOCAL_PROVIDERS: LocalProviderId[] = ["ollama", "lmstudio"];
 
 export function isCloudProvider(p: ProviderId): p is CloudProviderId {
-  return p === "claude" || p === "gemini" || p === "openrouter";
+  return p !== "ollama" && p !== "lmstudio";
+}
+
+/** Providers whose model can search the web natively (built-in tool). */
+export const WEBSEARCH_PROVIDERS: ProviderId[] = ["claude", "gemini", "openrouter"];
+export function providerSupportsWebSearch(p: ProviderId): boolean {
+  return WEBSEARCH_PROVIDERS.includes(p);
 }
 
 export function loadSettings(): AppSettings {

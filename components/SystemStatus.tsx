@@ -18,6 +18,7 @@ import type { AppSettings, ProviderId } from "@/lib/settings/store";
 
 const LABEL: Record<ProviderId, string> = {
   claude: "Claude", gemini: "Gemini", openrouter: "OpenRouter",
+  openai: "OpenAI", xai: "xAI Grok", zai: "z.AI GLM", nvidia: "NVIDIA NIM", meta: "Meta Llama",
   ollama: "Local (Ollama)", lmstudio: "Local (LM Studio)",
 };
 function icon(p: ProviderId, cls: string) {
@@ -25,6 +26,11 @@ function icon(p: ProviderId, cls: string) {
     case "claude": return <Cloud size={15} className={cls} />;
     case "gemini": return <Sparkles size={15} className={cls} />;
     case "openrouter": return <Boxes size={15} className={cls} />;
+    case "openai": return <Sparkles size={15} className={cls} />;
+    case "xai": return <Boxes size={15} className={cls} />;
+    case "zai": return <Boxes size={15} className={cls} />;
+    case "nvidia": return <Cpu size={15} className={cls} />;
+    case "meta": return <Cloud size={15} className={cls} />;
     case "ollama": return <Cpu size={15} className={cls} />;
     case "lmstudio": return <MonitorSmartphone size={15} className={cls} />;
   }

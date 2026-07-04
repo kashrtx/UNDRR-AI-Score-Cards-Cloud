@@ -14,6 +14,11 @@ const LABEL: Record<ProviderId, string> = {
   claude: "Claude",
   gemini: "Gemini",
   openrouter: "OpenRouter",
+  openai: "OpenAI",
+  xai: "xAI Grok",
+  zai: "z.AI GLM",
+  nvidia: "NVIDIA NIM",
+  meta: "Meta Llama",
   ollama: "Local (Ollama)",
   lmstudio: "Local (LM Studio)",
 };
@@ -26,7 +31,15 @@ function providerIcon(p: ProviderId, ready: boolean) {
     case "gemini":
       return <Sparkles size={14} className={cls} />;
     case "openrouter":
+    case "xai":
+    case "zai":
       return <Boxes size={14} className={cls} />;
+    case "openai":
+      return <Sparkles size={14} className={cls} />;
+    case "nvidia":
+      return <Cpu size={14} className={cls} />;
+    case "meta":
+      return <Cloud size={14} className={cls} />;
     case "ollama":
       return <Cpu size={14} className={cls} />;
     case "lmstudio":
