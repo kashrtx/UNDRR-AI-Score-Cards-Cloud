@@ -14,10 +14,10 @@
 import { AnalysisResultSchema, type AnalysisResult } from "./schema";
 import { buildSystemPrompt, buildUserPrompt } from "./prompt";
 import { createProvider } from "@/lib/llm";
-import { fetchDataPack } from "@/lib/client/api";
+import { fetchDataPack, fetchReferenceFacts } from "@/lib/client/api";
 import type { NormalizedScorecard } from "@/lib/scorecard/schema";
-import type { AppSettings } from "@/lib/settings/store";
-import type { DataPack, DataReport, NormalizedDatum, ProgressEvent } from "@/lib/types";
+import { isCloudProvider, type AppSettings } from "@/lib/settings/store";
+import type { DataPack, DataReport, NormalizedDatum, ProgressEvent, ReferenceFacts } from "@/lib/types";
 
 export interface AnalyzeHandlers {
   onProgress?: (p: ProgressEvent) => void;
@@ -77,37 +77,69 @@ export async function runAnalysis(
     };
   }
   onDataReport?.(dataReport);
+
+  // ── 1b. Research step — verify the city against Wikipedia/Wikidata ──
+  // Universal grounding that works for every provider (even local models that
+  // can't browse). Best-effort: null on any failure.
   onProgress?.({
     step: "data-done",
-    label: `Found ${dataReport.dataPoints} open-data point(s). Preparing the AI…`,
+    label: "Cross-checking the city against Wikipedia & Wikidata…",
     pct: 30,
   });
+  let reference: ReferenceFacts | null = null;
+  try {
+    reference = await fetchReferenceFacts(scorecard.city.name, scorecard.city.country);
+  } catch {
+    reference = null;
+  }
+  if (reference) {
+    dataReport = { ...dataReport, reference };
+    onDataReport?.(dataReport);
+  }
 
   // ── 2. Build prompts ──────────────────────────────────────
   const system = buildSystemPrompt();
-  const user = buildUserPrompt(scorecard, enrichment);
+  const user = buildUserPrompt(scorecard, enrichment, reference);
 
   // ── 3. Stream from the provider ───────────────────────────
   const provider = await createProvider(settings);
   onProgress?.({
     step: "llm",
-    label: `${provider.name} is analysing the scorecard…`,
+    label: `${provider.name} is analysing${settings.webSearch && isCloudProvider(settings.provider) ? " (with web search)" : ""}…`,
     pct: 45,
     indeterminate: true,
   });
 
   let narration = "";
-  const raw = await provider.complete(
-    system,
-    user,
-    {
-      onToken: (delta) => {
-        narration += delta;
-        onNarration?.(narration);
-      },
-    },
-    signal
-  );
+  const onToken = (delta: string) => {
+    narration += delta;
+    onNarration?.(narration);
+  };
+
+  let raw: string;
+  try {
+    raw = await provider.complete(system, user, { onToken }, signal);
+  } catch (err) {
+    // If web search was on, it may be the culprit — retry once WITHOUT it so
+    // enabling search can never do worse than the plain call.
+    if (
+      !signal?.aborted &&
+      settings.webSearch &&
+      isCloudProvider(settings.provider)
+    ) {
+      onProgress?.({
+        step: "llm",
+        label: "Retrying without web search…",
+        pct: 45,
+        indeterminate: true,
+      });
+      narration = "";
+      const plain = await createProvider(settings, { webSearch: false });
+      raw = await plain.complete(system, user, { onToken }, signal);
+    } else {
+      throw err;
+    }
+  }
 
   // ── 4. Validate ───────────────────────────────────────────
   onProgress?.({ step: "validate", label: "Checking the AI's result…", pct: 85 });
@@ -130,7 +162,8 @@ export async function runAnalysis(
       `Previous response:\n${raw}\n\n` +
       "Reply with ONLY the corrected JSON object (summary, strengths, weaknesses, actions, projection). No prose, no markdown.";
     try {
-      const repaired = await provider.complete(system, repairPrompt, undefined, signal);
+      const repairProvider = await createProvider(settings, { webSearch: false });
+      const repaired = await repairProvider.complete(system, repairPrompt, undefined, signal);
       const parsed = JSON.parse(extractJson(repaired));
       const result = AnalysisResultSchema.parse(parsed);
       onProgress?.({ step: "done", label: "Done.", pct: 100 });

@@ -20,6 +20,8 @@ export interface AppSettings {
   ollamaBaseUrl: string;
   lmstudioModel: string;
   lmstudioBaseUrl: string;
+  /** Let cloud providers use their built-in web search while analysing. */
+  webSearch: boolean;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -31,6 +33,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   ollamaBaseUrl: "http://127.0.0.1:11434",
   lmstudioModel: "local-model",
   lmstudioBaseUrl: "http://127.0.0.1:1234/v1",
+  webSearch: true,
 };
 
 const SETTINGS_KEY = "undrr.settings";

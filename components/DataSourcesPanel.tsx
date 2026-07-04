@@ -7,7 +7,7 @@
  * to read the terminal for.
  */
 
-import { CheckCircle2, XCircle, AlertTriangle, Database, MapPin } from "lucide-react";
+import { CheckCircle2, XCircle, AlertTriangle, Database, MapPin, BookCheck } from "lucide-react";
 import type { DataReport } from "@/lib/types";
 
 export function DataSourcesPanel({ report, live }: { report: DataReport | null; live?: boolean }) {
@@ -88,6 +88,43 @@ export function DataSourcesPanel({ report, live }: { report: DataReport | null; 
             </li>
           ))}
         </ul>
+      )}
+
+      {report.reference && (report.reference.facts.length > 0 || report.reference.summary) && (
+        <div className="mt-3 pt-3 border-t border-border">
+          <p className="text-sm font-medium text-text-primary flex items-center gap-1.5 mb-2">
+            <BookCheck size={14} className="text-accent-400" /> Verified reference facts
+          </p>
+          {report.reference.facts.length > 0 && (
+            <div className="flex flex-wrap gap-1.5 mb-2">
+              {report.reference.facts.map((f, i) => (
+                <span
+                  key={i}
+                  className="text-xs px-2 py-1 rounded-lg bg-accent-500/5 border border-accent-500/15 text-text-secondary"
+                >
+                  <span className="text-text-primary">{f.label}:</span> {f.value}
+                </span>
+              ))}
+            </div>
+          )}
+          <p className="text-xs text-text-secondary">
+            Cross-checked against{" "}
+            {report.reference.sources.map((s, i) => (
+              <span key={i}>
+                {i > 0 && ", "}
+                <a
+                  href={s.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="text-primary-300 underline"
+                >
+                  {s.name}
+                </a>
+              </span>
+            ))}
+            .
+          </p>
+        </div>
       )}
     </div>
   );

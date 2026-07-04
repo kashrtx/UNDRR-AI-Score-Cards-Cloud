@@ -13,7 +13,7 @@
  */
 
 import type { NormalizedScorecard } from "@/lib/scorecard/schema";
-import type { NormalizedDatum } from "@/lib/types";
+import type { NormalizedDatum, ReferenceFacts } from "@/lib/types";
 import { ESSENTIAL_NAMES } from "@/lib/scorecard/schema";
 
 // ── System prompt (persona + rules) ─────────────────────────
@@ -53,6 +53,8 @@ Analyze a city's Disaster Resilience Scorecard and produce a structured action p
 
 9. **SANITY-CHECK THE DATA**: The enrichment figures come from automated open sources and can contain artifacts or coarse approximations. Before repeating a number as fact, ask whether it is plausible. If a value is clearly an artifact or implausible, describe it qualitatively or caveat it rather than stating it as precise fact. Concrete example: a grid-derived ground elevation of 0 m for an inhabited island almost always means the coarse grid cell fell on water/coastline — say "low-lying / near sea level" rather than "0 metres elevation". You MAY point out a likely data artifact when you are confident from general knowledge, but ONLY when confident, and you must NEVER invent a precise replacement figure — if unsure, state the uncertainty and lean on the scorecard. Correct obvious errors; do not manufacture new ones.
 
+10. **PREFER VERIFIED SOURCES**: When a "VERIFIED REFERENCE FACTS" section (from Wikipedia/Wikidata) is provided, treat it as more reliable than the coarse open-data estimates and than your own prior memory; where they conflict, go with the verified facts and note the correction. If you have a web-search tool available, use it to verify uncertain, city-specific, or potentially out-of-date facts (e.g. an island's real elevation, recent disasters) before relying on them — but your FINAL output must still be ONLY the JSON object below.
+
 ## THE TEN ESSENTIALS
 ${Object.entries(ESSENTIAL_NAMES).map(([n, name]) => `${n}. ${name}`).join("\n")}
 
@@ -83,7 +85,8 @@ Respond with ONLY a JSON object matching this exact schema — no markdown, no e
 
 export function buildUserPrompt(
   scorecard: NormalizedScorecard,
-  enrichmentData: NormalizedDatum[]
+  enrichmentData: NormalizedDatum[],
+  reference?: ReferenceFacts | null
 ): string {
   const parts: string[] = [];
 
@@ -159,6 +162,18 @@ export function buildUserPrompt(
         `- OpenStreetMap infrastructure counts reflect how completely the area is mapped in OSM and may UNDERCOUNT facilities in less-mapped cities — treat them as a floor, not a census, and don't infer a critical gap from a low OSM count alone.\n` +
         `- World Bank figures are NATIONAL, not city-level — use them as context, not as the city's own numbers.`
     );
+  }
+
+  // ── Verified reference facts (Wikipedia / Wikidata) ──
+  if (reference && (reference.summary || reference.facts.length)) {
+    parts.push(`\n## VERIFIED REFERENCE FACTS (authoritative — from Wikipedia / Wikidata)`);
+    parts.push(
+      `Treat these as more reliable than the coarse open-data estimates above and than your own prior memory. Where they conflict, prefer these and note the correction. Cite them (e.g. "Wikipedia" or "Wikidata") in sourceRefs when you rely on them.`
+    );
+    if (reference.summary) parts.push(`Overview (${reference.title}): ${reference.summary}`);
+    for (const f of reference.facts) {
+      parts.push(`  - ${f.label}: ${f.value} [${f.source}]`);
+    }
   }
 
   // ── Instructions ──

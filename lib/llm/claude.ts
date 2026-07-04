@@ -15,7 +15,11 @@ const API_VERSION = "2023-06-01";
 
 export class ClaudeProvider implements LLMProvider {
   readonly name = "claude";
-  constructor(readonly model: string, private apiKey: string) {}
+  constructor(
+    readonly model: string,
+    private apiKey: string,
+    private useWebSearch = false
+  ) {}
 
   private headers() {
     return {
@@ -45,6 +49,12 @@ export class ClaudeProvider implements LLMProvider {
         system,
         stream: true,
         messages: [{ role: "user", content: user }],
+        // Anthropic runs the search server-side and streams the results back;
+        // our SSE reader simply ignores the non-text blocks and keeps the
+        // final answer text.
+        ...(this.useWebSearch
+          ? { tools: [{ type: "web_search_20250305", name: "web_search", max_uses: 5 }] }
+          : {}),
       }),
     });
 

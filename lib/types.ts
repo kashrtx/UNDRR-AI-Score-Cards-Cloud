@@ -100,12 +100,27 @@ export interface ProgressEvent {
   indeterminate?: boolean;
 }
 
+export interface ReferenceFact {
+  label: string;
+  value: string;
+  source: string;
+  url?: string;
+}
+
+export interface ReferenceFacts {
+  title: string;
+  summary: string;
+  facts: ReferenceFact[];
+  sources: Array<{ name: string; url: string }>;
+}
+
 export interface DataReport {
   serviceUp: boolean;
   located: string | null;
   dataPoints: number;
   sources: Array<{ id: string; name: string; points: number; error?: string }>;
   warnings: string[];
+  reference?: ReferenceFacts | null;
 }
 
 // ── Data pack returned by /api/data/fetch ────────────────────

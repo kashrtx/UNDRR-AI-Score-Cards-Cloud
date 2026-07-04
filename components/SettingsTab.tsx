@@ -10,7 +10,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
   Cloud, Cpu, Sparkles, Boxes, MonitorSmartphone, Save, Loader2,
-  CheckCircle2, XCircle, KeyRound, Trash2, Plug,
+  CheckCircle2, XCircle, KeyRound, Trash2, Plug, Globe,
 } from "lucide-react";
 import {
   type AppSettings, type ProviderId, type CloudProviderId,
@@ -295,6 +295,38 @@ export function SettingsTab({
             )}
           </>
         )}
+
+        {/* Web research toggle */}
+        <div className="pt-1">
+          <button
+            type="button"
+            onClick={() => setDraft({ ...draft, webSearch: !draft.webSearch })}
+            className="w-full flex items-start gap-3 text-left"
+          >
+            <span
+              className={`mt-0.5 shrink-0 w-9 h-5 rounded-full transition-colors relative ${
+                draft.webSearch ? "bg-accent-500" : "bg-surface-overlay border border-border"
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${
+                  draft.webSearch ? "left-[18px]" : "left-0.5"
+                }`}
+              />
+            </span>
+            <span>
+              <span className="text-sm text-text-primary flex items-center gap-1.5">
+                <Globe size={14} className="text-accent-400" /> Let the AI research the web while
+                analysing
+              </span>
+              <span className="text-xs text-text-secondary block mt-0.5">
+                {isCloud
+                  ? "Uses this provider's built-in web search (Gemini, Claude, OpenRouter) to verify facts and cite sources. If a search-enabled run fails, it automatically retries without it."
+                  : "Local models can't browse the web — this applies to cloud providers. Either way, every analysis is cross-checked against Wikipedia & Wikidata."}
+              </span>
+            </span>
+          </button>
+        </div>
 
         {/* Test connection */}
         <div className="flex items-center gap-3 pt-1">

@@ -204,6 +204,28 @@ export function buildReportHtml(p: ExportPayload): string {
   ${dr?.located ? `<p class="sub">Located as: ${esc(dr.located)} · ${dr.dataPoints} data point(s)</p>` : ""}
   <table><thead><tr><th>Source</th><th class="num">Points</th></tr></thead><tbody>${sourceRows}</tbody></table>
 
+  ${
+    dr?.reference && (dr.reference.facts.length || dr.reference.summary)
+      ? `<h2>Verified reference facts</h2>
+         <p class="sub">Cross-checked against ${dr.reference.sources
+           .map((s) => `<a href="${esc(s.url)}">${esc(s.name)}</a>`)
+           .join(", ")}.</p>
+         ${
+           dr.reference.facts.length
+             ? `<table><tbody>${dr.reference.facts
+                 .map(
+                   (f) =>
+                     `<tr><td>${esc(f.label)}</td><td>${esc(f.value)}</td><td class="sub">${esc(
+                       f.source
+                     )}</td></tr>`
+                 )
+                 .join("")}</tbody></table>`
+             : ""
+         }
+         ${dr.reference.summary ? `<p>${esc(dr.reference.summary)}</p>` : ""}`
+      : ""
+  }
+
   <div class="disc">UNDRR ARISE Disaster Resilience Scorecard Analyzer · Generated ${esc(
     when
   )} · Runs entirely in the browser. The official scorecard methodology defines the Ten Essentials; scoring here is read directly from the uploaded workbook.</div>

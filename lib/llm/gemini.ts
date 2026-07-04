@@ -16,7 +16,11 @@ const BASE = "https://generativelanguage.googleapis.com/v1beta";
 
 export class GeminiProvider implements LLMProvider {
   readonly name = "gemini";
-  constructor(readonly model: string, private apiKey: string) {}
+  constructor(
+    readonly model: string,
+    private apiKey: string,
+    private useWebSearch = false
+  ) {}
 
   async complete(
     system: string,
@@ -39,6 +43,9 @@ export class GeminiProvider implements LLMProvider {
         contents: [{ role: "user", parts: [{ text: user }] }],
         // Large budget so a thinking model has room to reason AND answer.
         generationConfig: { temperature: 0.3, maxOutputTokens: 65536 },
+        // Grounding with Google Search — the model decides when to search,
+        // executes automatically, and returns grounded, citable text.
+        ...(this.useWebSearch ? { tools: [{ google_search: {} }] } : {}),
       }),
     });
 
@@ -129,6 +136,7 @@ export class GeminiProvider implements LLMProvider {
         systemInstruction: { parts: [{ text: system }] },
         contents: [{ role: "user", parts: [{ text: user }] }],
         generationConfig: { temperature: 0.3, maxOutputTokens: 65536 },
+        ...(this.useWebSearch ? { tools: [{ google_search: {} }] } : {}),
       }),
     });
     if (!res.ok) {

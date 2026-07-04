@@ -8,7 +8,7 @@
  */
 
 import type { NormalizedScorecard } from "@/lib/scorecard/schema";
-import type { DataPack } from "@/lib/types";
+import type { DataPack, ReferenceFacts } from "@/lib/types";
 
 export async function uploadScorecard(file: File): Promise<NormalizedScorecard> {
   const form = new FormData();
@@ -29,4 +29,21 @@ export async function fetchDataPack(city: string, country?: string): Promise<Dat
   });
   if (!res.ok) throw new Error(`Failed to fetch open data: ${res.statusText}`);
   return res.json();
+}
+
+export async function fetchReferenceFacts(
+  city: string,
+  country?: string
+): Promise<ReferenceFacts | null> {
+  try {
+    const res = await fetch("/api/research", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ city, country }),
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as ReferenceFacts | null;
+  } catch {
+    return null;
+  }
 }

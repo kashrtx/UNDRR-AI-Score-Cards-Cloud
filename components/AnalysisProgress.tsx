@@ -12,6 +12,7 @@ import type { ProgressEvent } from "@/lib/types";
 
 const STEPS = [
   { key: "data", label: "Gathering free open data" },
+  { key: "research", label: "Researching the city (Wikipedia & Wikidata)" },
   { key: "llm", label: "AI is analysing the scorecard" },
   { key: "validate", label: "Checking the result" },
   { key: "done", label: "Finishing up" },
@@ -22,9 +23,9 @@ const DONE_AT: Record<string, number> = {
   start: 0,
   data: 0,
   "data-done": 1,
-  llm: 1,
-  validate: 2,
-  done: 4,
+  llm: 2,
+  validate: 3,
+  done: 5,
 };
 
 export function AnalysisProgress({ progress }: { progress: ProgressEvent | null }) {

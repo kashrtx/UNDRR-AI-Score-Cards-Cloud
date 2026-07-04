@@ -14,7 +14,11 @@ const API_URL = "https://openrouter.ai/api/v1/chat/completions";
 
 export class OpenRouterProvider implements LLMProvider {
   readonly name = "openrouter";
-  constructor(readonly model: string, private apiKey: string) {}
+  constructor(
+    readonly model: string,
+    private apiKey: string,
+    private useWebSearch = false
+  ) {}
 
   private headers() {
     const h: Record<string, string> = {
@@ -41,7 +45,12 @@ export class OpenRouterProvider implements LLMProvider {
       headers: this.headers(),
       signal,
       body: JSON.stringify({
-        model: this.model,
+        // The ":online" suffix enables OpenRouter's web search for any model,
+        // incorporating cited real-time results into the response.
+        model:
+          this.useWebSearch && !this.model.endsWith(":online")
+            ? `${this.model}:online`
+            : this.model,
         temperature: 0.3,
         max_tokens: 16384, // headroom for reasoning models
         stream: true,
