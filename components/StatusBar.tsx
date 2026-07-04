@@ -7,7 +7,7 @@
  * there's no backend to be "down".
  */
 
-import { CheckCircle2, AlertCircle, Cpu, Cloud, Sparkles, Boxes, MonitorSmartphone, FileSpreadsheet, ShieldCheck } from "lucide-react";
+import { CheckCircle2, AlertCircle, Cpu, Cloud, Sparkles, Boxes, MonitorSmartphone, FileSpreadsheet, ShieldCheck, Globe } from "lucide-react";
 import type { AppSettings, ProviderId } from "@/lib/settings/store";
 
 const LABEL: Record<ProviderId, string> = {
@@ -38,10 +38,12 @@ export function StatusBar({
   settings,
   providerReady,
   city,
+  tavilyOn = false,
 }: {
   settings: AppSettings;
   providerReady: boolean;
   city: string | null;
+  tavilyOn?: boolean;
 }) {
   const model =
     settings.provider === "claude"
@@ -86,6 +88,20 @@ export function StatusBar({
       <div className="flex items-center gap-1.5 text-text-secondary" title="Open data runs server-side (no setup needed)">
         <ShieldCheck size={14} className="text-accent-400" />
         <span>Open data ready</span>
+      </div>
+
+      <div
+        className="flex items-center gap-1.5"
+        title={
+          tavilyOn
+            ? "Tavily is running the live web search for grounding"
+            : "Free web search (Wikipedia + DuckDuckGo). Add a Tavily key in Settings for richer results."
+        }
+      >
+        <Globe size={14} className={tavilyOn ? "text-accent-400" : "text-primary-300"} />
+        <span className={tavilyOn ? "text-accent-400 font-medium" : "text-text-secondary"}>
+          {tavilyOn ? "Tavily web search on" : "Web search: free"}
+        </span>
       </div>
 
       <div className="flex items-center gap-1.5 text-text-secondary">

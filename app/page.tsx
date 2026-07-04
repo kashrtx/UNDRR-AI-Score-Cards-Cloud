@@ -35,7 +35,7 @@ import { ConfirmModal } from "@/components/ConfirmModal";
 import { runAnalysis } from "@/lib/analysis/analyze";
 import { downloadReport, downloadJson, type ExportMeta, type ExportPayload } from "@/lib/export/report";
 import {
-  loadSettings, saveSettings as persistSettings, hasApiKey, isCloudProvider,
+  loadSettings, saveSettings as persistSettings, hasApiKey, isCloudProvider, hasSearchKey,
   type AppSettings, type ProviderId,
 } from "@/lib/settings/store";
 import type { NormalizedScorecard } from "@/lib/scorecard/schema";
@@ -69,6 +69,7 @@ export default function Page() {
   const [tab, setTab] = useState<Tab>("dashboard");
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [providerReady, setProviderReady] = useState(false);
+  const [tavilyActive, setTavilyActive] = useState(false);
 
   const [scorecard, setScorecard] = useState<NormalizedScorecard | null>(null);
   const [scFileName, setScFileName] = useState<string | null>(null);
@@ -92,6 +93,7 @@ export default function Page() {
     const s = loadSettings();
     setSettings(s);
     setProviderReady(computeReady(s));
+    setTavilyActive(!!s.useTavily && hasSearchKey());
     try {
       const raw = localStorage.getItem(SCORECARD_KEY);
       if (raw) {
@@ -126,6 +128,7 @@ export default function Page() {
     persistSettings(s);
     setSettings(s);
     setProviderReady(computeReady(s));
+    setTavilyActive(!!s.useTavily && hasSearchKey());
   }, []);
 
   // Commit a scorecard (replaces any current one + clears results).
@@ -338,7 +341,7 @@ export default function Page() {
 
         <div className="border-t border-border/60 bg-surface/60">
           <div className="max-w-[1600px] mx-auto px-4 sm:px-6 py-1.5">
-            <StatusBar settings={settings} providerReady={providerReady} city={scorecard?.city.name ?? null} />
+            <StatusBar settings={settings} providerReady={providerReady} city={scorecard?.city.name ?? null} tavilyOn={tavilyActive} />
           </div>
         </div>
       </header>
