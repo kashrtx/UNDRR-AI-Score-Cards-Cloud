@@ -125,8 +125,17 @@ html.dark .btn-accent {
   .tab-enter { animation: none; }
 }
 
-/* Smooth colour transitions (incl. theme switch) */
-* { @apply transition-colors duration-200; }
+/* Colour transitions for hover/focus feedback only. Applying this to every
+ * element (`*`) made theme switching jittery: hundreds of nodes animated their
+ * colours over 200ms while the SVG charts repainted instantly, so the two got
+ * out of sync. Scoping it to interactive controls keeps hovers smooth and lets
+ * a theme switch repaint everything at once, cohesively. */
+a, button, input, textarea, select, [role="button"] {
+  transition: color 0.15s ease, background-color 0.15s ease, border-color 0.15s ease, fill 0.15s ease;
+}
+@media (prefers-reduced-motion: reduce) {
+  a, button, input, textarea, select, [role="button"] { transition: none; }
+}
 
 /* ── Scrollbar ────────────────────────────────────────────── */
 ::-webkit-scrollbar { width: 8px; height: 8px; }

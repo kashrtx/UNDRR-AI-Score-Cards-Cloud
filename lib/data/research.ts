@@ -264,31 +264,8 @@ export async function researchCity(
   let title = city;
   let summary = "";
 
-  // 1) Wikipedia (keyless core): top articles + full-article geo extraction.
-  const titles = await wikiSearchTitles(query);
-  const primary = titles[0] ? await wikiArticle(titles[0]) : null;
-  if (primary) {
-    title = primary.title;
-    summary = primary.intro;
-    if (primary.intro) passages.push({ source: `Wikipedia — ${primary.title}`, url: primary.url, text: primary.intro });
-    if (primary.geo) passages.push({ source: `Wikipedia — ${primary.title} (geography & hazards)`, url: primary.url, text: primary.geo });
-    sources.push({ name: `Wikipedia — ${primary.title}`, url: primary.url });
-    if (primary.qid) await wikidataFacts(primary.qid, facts, sources);
-  }
-  // Pull one more related article's intro (e.g. "Geography of <country>").
-  for (const t of titles.slice(1, 2)) {
-    const a = await wikiArticle(t);
-    if (a?.intro) {
-      passages.push({ source: `Wikipedia — ${a.title}`, url: a.url, text: a.intro });
-      sources.push({ name: `Wikipedia — ${a.title}`, url: a.url });
-    }
-  }
-
-  // 2) General WEB SEARCH across several angles, so the model gets a rounded
-  //    picture: location & climate, hazards & disaster history, recent
-  //    initiatives & successes, and current challenges. Exactly ONE provider
-  //    runs (Tavily → SearXNG → env Tavily → DuckDuckGo); Wikipedia above
-  //    always runs too.
+  // Several search angles so the model gets a rounded picture: location &
+  // climate, hazards & disaster history, recent initiatives, current challenges.
   const topics = [
     `${query} geography climate weather patterns rainfall sea level`,
     `${query} natural disasters flooding storms cyclone tsunami history`,
@@ -312,36 +289,81 @@ export async function researchCity(
     return out;
   };
 
-  let web: Array<{ title: string; url: string; content: string }> = [];
-  let webSearchMethod: string | undefined;
+  // Decide the single web-search method up front.
+  //   Tavily (user key, or env key when no SearXNG) → trusted live web RAG
+  //   SearXNG (env)                                 → trusted live web RAG
+  //   DuckDuckGo (keyless)                          → weak fallback
+  const method: "Tavily" | "SearXNG" | "DuckDuckGo" =
+    userKey || (!searxUrl && envKey) ? "Tavily" : searxUrl ? "SearXNG" : "DuckDuckGo";
+
+  // When a real web RAG (Tavily / SearXNG) is available we trust it ALONE and
+  // skip Wikipedia + Wikidata entirely — the live search is more current and
+  // avoids leaning on Wikipedia (and stale single-field Wikidata values). Only
+  // in the fully keyless case (DuckDuckGo) do we fall back to Wikipedia +
+  // Wikidata as the grounded core.
+  const trustWebOnly = method === "Tavily" || method === "SearXNG";
+
   try {
-    if (userKey || (!searxUrl && envKey)) {
+    if (method === "Tavily") {
       const key = (userKey || envKey) as string;
-      webSearchMethod = "Tavily";
       const settled = await Promise.allSettled(topics.map((q) => tavily(key, q)));
-      const ok = settled.filter((s) => s.status === "fulfilled").map((s) => (s as PromiseFulfilledResult<Awaited<ReturnType<typeof tavily>>>).value);
+      const ok = settled
+        .filter((s) => s.status === "fulfilled")
+        .map((s) => (s as PromiseFulfilledResult<Awaited<ReturnType<typeof tavily>>>).value);
       answer = ok.find((r) => r.answer)?.answer;
       if (answer) answer = trunc(answer, 1200);
-      web = merge(ok.map((r) => r.results));
-    } else if (searxUrl) {
-      webSearchMethod = "SearXNG";
-      const settled = await Promise.allSettled(topics.slice(0, 3).map((q) => searxng(searxUrl, q)));
-      web = merge(settled.filter((s) => s.status === "fulfilled").map((s) => (s as PromiseFulfilledResult<Array<{ title: string; url: string; content: string }>>).value));
+      const web = merge(ok.map((r) => r.results));
+      for (const r of web.slice(0, 8)) {
+        passages.push({ source: r.title, url: r.url, text: r.content || r.title });
+        sources.push({ name: r.title, url: r.url });
+      }
+    } else if (method === "SearXNG") {
+      const settled = await Promise.allSettled(topics.slice(0, 3).map((q) => searxng(searxUrl!, q)));
+      const web = merge(
+        settled.filter((s) => s.status === "fulfilled").map((s) => (s as PromiseFulfilledResult<Array<{ title: string; url: string; content: string }>>).value)
+      );
+      for (const r of web.slice(0, 8)) {
+        passages.push({ source: r.title, url: r.url, text: r.content || r.title });
+        sources.push({ name: r.title, url: r.url });
+      }
     } else {
-      webSearchMethod = "DuckDuckGo";
+      // ── Keyless core: Wikipedia (+ Wikidata) + DuckDuckGo ──
+      const titles = await wikiSearchTitles(query);
+      const primary = titles[0] ? await wikiArticle(titles[0]) : null;
+      if (primary) {
+        title = primary.title;
+        summary = primary.intro;
+        if (primary.intro) passages.push({ source: `Wikipedia — ${primary.title}`, url: primary.url, text: primary.intro });
+        if (primary.geo) passages.push({ source: `Wikipedia — ${primary.title} (geography & hazards)`, url: primary.url, text: primary.geo });
+        sources.push({ name: `Wikipedia — ${primary.title}`, url: primary.url });
+        if (primary.qid) await wikidataFacts(primary.qid, facts, sources);
+      }
+      for (const t of titles.slice(1, 2)) {
+        const a = await wikiArticle(t);
+        if (a?.intro) {
+          passages.push({ source: `Wikipedia — ${a.title}`, url: a.url, text: a.intro });
+          sources.push({ name: `Wikipedia — ${a.title}`, url: a.url });
+        }
+      }
       const settled = await Promise.allSettled(topics.slice(0, 2).map((q) => duckduckgo(q)));
-      web = merge(settled.filter((s) => s.status === "fulfilled").map((s) => (s as PromiseFulfilledResult<Array<{ title: string; url: string; content: string }>>).value));
+      const web = merge(
+        settled.filter((s) => s.status === "fulfilled").map((s) => (s as PromiseFulfilledResult<Array<{ title: string; url: string; content: string }>>).value)
+      );
+      for (const r of web.slice(0, 4)) {
+        passages.push({ source: r.title, url: r.url, text: r.content || r.title });
+        sources.push({ name: r.title, url: r.url });
+      }
     }
   } catch {
-    web = [];
+    /* best-effort */
   }
-  for (const r of web.slice(0, 8)) {
-    if (r.content || r.title) {
-      passages.push({ source: r.title, url: r.url, text: r.content || r.title });
-      sources.push({ name: r.title, url: r.url });
-    }
+
+  // For a web-only run, seed the title/summary from the best passage/answer.
+  if (trustWebOnly) {
+    title = city;
+    summary = answer || passages[0]?.text || "";
   }
 
   if (!answer && passages.length === 0 && facts.length === 0) return null;
-  return { title, summary, answer, passages, facts, sources, webSearchMethod };
+  return { title, summary, answer, passages, facts, sources, webSearchMethod: method };
 }

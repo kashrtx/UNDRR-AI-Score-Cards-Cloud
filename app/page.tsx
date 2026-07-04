@@ -316,6 +316,9 @@ export default function Page() {
 
             <ThemeToggle />
 
+            {/* Fixed-width slot so switching tabs (button present on Dashboard,
+                absent on Settings) doesn't shift the nav / theme toggle. */}
+            <div className="flex justify-end items-center min-w-[112px] sm:min-w-[132px] shrink-0">
             {tab === "dashboard" && (state === "ready" || state === "results") && scorecard && (
               <button
                 onClick={handleAnalyze}
@@ -333,6 +336,7 @@ export default function Page() {
                 <Loader2 size={16} className="animate-spin" /> <span className="hidden sm:inline">Analysing… (cancel)</span><span className="sm:hidden">Cancel</span>
               </button>
             )}
+            </div>
           </div>
         </div>
 

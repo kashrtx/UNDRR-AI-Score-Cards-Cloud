@@ -176,29 +176,49 @@ export async function runAnalysis(
     onProgress?.({ step: "done", label: "Done.", pct: 100 });
     return { result, dataReport };
   } catch (firstErr) {
-    // ── 5. One repair attempt ───────────────────────────────
-    onProgress?.({
-      step: "validate",
-      label: "Result needed fixing — asking the AI to correct it…",
-      pct: 90,
-      indeterminate: true,
-    });
-    const repairPrompt =
-      "Your previous response was not valid JSON matching the required schema.\n" +
-      `Error: ${firstErr instanceof Error ? firstErr.message : String(firstErr)}\n\n` +
-      `Previous response:\n${raw}\n\n` +
-      "Reply with ONLY the corrected JSON object (summary, strengths, weaknesses, actions, projection). No prose, no markdown.";
-    try {
-      const repairProvider = await createProvider(settings, { webSearch: false });
-      const repaired = await repairProvider.complete(system, repairPrompt, undefined, signal);
-      const parsed = JSON.parse(extractJson(repaired));
-      const result = AnalysisResultSchema.parse(parsed);
-      onProgress?.({ step: "done", label: "Done.", pct: 100 });
-      return { result, dataReport };
-    } catch {
-      onProgress?.({ step: "done", label: "Using a basic fallback analysis.", pct: 100 });
-      return { result: buildFallbackResult(scorecard), dataReport };
+    // Was the response cut off mid-stream (slow reasoning model hitting the
+    // hosting time limit)? If so, a repair call would just be slow and fail the
+    // same way, so skip it and go straight to a clear fallback instead of
+    // freezing on a second long request.
+    const rawTrim = raw.trim();
+    const looksComplete = rawTrim.endsWith("}") && rawTrim.includes('"projection"');
+
+    if (looksComplete) {
+      // ── 5. One repair attempt for a complete-but-malformed response ──
+      onProgress?.({
+        step: "validate",
+        label: "Result needed fixing — asking the AI to correct it…",
+        pct: 90,
+        indeterminate: true,
+      });
+      const repairPrompt =
+        "Your previous response was not valid JSON matching the required schema.\n" +
+        `Error: ${firstErr instanceof Error ? firstErr.message : String(firstErr)}\n\n` +
+        `Previous response:\n${raw}\n\n` +
+        "Reply with ONLY the corrected JSON object (summary, strengths, weaknesses, actions, projection). No prose, no markdown.";
+      try {
+        const repairProvider = await createProvider(settings, { webSearch: false });
+        const repaired = await repairProvider.complete(system, repairPrompt, undefined, signal);
+        const parsed = JSON.parse(extractJson(repaired));
+        const result = AnalysisResultSchema.parse(parsed);
+        onProgress?.({ step: "done", label: "Done.", pct: 100 });
+        return { result, dataReport };
+      } catch {
+        /* fall through to fallback */
+      }
     }
+
+    // ── 6. Deterministic fallback (always returns a usable analysis) ──
+    onProgress?.({ step: "done", label: "Using a basic fallback analysis.", pct: 100 });
+    const fallback = buildFallbackResult(scorecard);
+    if (!looksComplete) {
+      fallback.summary =
+        `The AI's response was cut off before it finished, so a basic analysis is shown instead. ` +
+        `This usually means the model was too slow to complete within the hosting time limit — common with heavy "reasoning" models on a free plan. ` +
+        `Try re-running, or pick a faster model (for example a non-reasoning model, or Gemini/OpenRouter which run without the proxy) in Settings. ` +
+        fallback.summary;
+    }
+    return { result: fallback, dataReport };
   }
 }
 
