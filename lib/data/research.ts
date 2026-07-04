@@ -123,18 +123,52 @@ async function wikiArticle(title: string): Promise<{
   }
 }
 
+type WdStatement = {
+  rank?: string;
+  mainsnak?: { datavalue?: { value?: { amount?: string } } };
+  qualifiers?: { P585?: Array<{ datavalue?: { value?: { time?: string } } }> };
+};
+
+/**
+ * Choose the *current* numeric value from a Wikidata property's statements.
+ * Wikidata keeps historical values (e.g. Toronto's population back to the
+ * 1800s), so taking the first one is wrong. We drop deprecated statements,
+ * prefer "preferred" rank, then pick the latest point-in-time (P585), and only
+ * fall back to the largest value if nothing is dated.
+ */
+function pickCurrentAmount(statements?: WdStatement[]): number | null {
+  const live = (statements ?? []).filter(
+    (s) => s.rank !== "deprecated" && s.mainsnak?.datavalue?.value?.amount != null
+  );
+  if (!live.length) return null;
+  const preferred = live.filter((s) => s.rank === "preferred");
+  const pool = preferred.length ? preferred : live;
+  const yearOf = (s: WdStatement) => {
+    const t = s.qualifiers?.P585?.[0]?.datavalue?.value?.time;
+    const m = t?.match(/([+-]?\d{4})/);
+    return m ? parseInt(m[1], 10) : -Infinity;
+  };
+  const dated = pool.filter((s) => yearOf(s) !== -Infinity);
+  if (dated.length) {
+    dated.sort((a, b) => yearOf(b) - yearOf(a));
+    return num(dated[0].mainsnak!.datavalue!.value!.amount);
+  }
+  // No dates: take the largest (best proxy for the most recent for a city).
+  const amounts = pool.map((s) => num(s.mainsnak!.datavalue!.value!.amount)!).filter((n) => n != null);
+  return amounts.length ? Math.max(...amounts) : null;
+}
+
 async function wikidataFacts(qid: string, facts: ReferenceFacts["facts"], sources: ReferenceFacts["sources"]) {
   const wdUrl = `https://www.wikidata.org/wiki/${qid}`;
   try {
     const wd = await getJson<{
-      entities?: Record<string, { claims?: Record<string, Array<{ mainsnak?: { datavalue?: { value?: unknown } } }>> }>;
+      entities?: Record<string, { claims?: Record<string, WdStatement[]> }>;
     }>(`https://www.wikidata.org/wiki/Special:EntityData/${qid}.json`);
     const claims = wd.entities?.[qid]?.claims ?? {};
-    const claim = (p: string) => claims[p]?.[0]?.mainsnak?.datavalue?.value as { amount?: string } | undefined;
-    const pop = num(claim("P1082")?.amount);
-    if (pop != null) facts.push({ label: "Population", value: Math.round(pop).toLocaleString(), source: "Wikidata", url: wdUrl });
-    const area = num(claim("P2046")?.amount);
-    if (area != null) facts.push({ label: "Area", value: `${area} km²`, source: "Wikidata", url: wdUrl });
+    const pop = pickCurrentAmount(claims["P1082"]);
+    if (pop != null && pop > 0) facts.push({ label: "Population", value: Math.round(pop).toLocaleString(), source: "Wikidata", url: wdUrl });
+    const area = pickCurrentAmount(claims["P2046"]);
+    if (area != null && area > 0) facts.push({ label: "Area", value: `${area} km²`, source: "Wikidata", url: wdUrl });
     if (pop != null || area != null) sources.push({ name: "Wikidata", url: wdUrl });
   } catch {
     /* optional */

@@ -525,7 +525,7 @@ export function SettingsTab({
         <button
           onClick={save}
           disabled={saving}
-          className="flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-semibold bg-gradient-to-r from-accent-500 to-accent-400 text-on-accent hover:from-accent-400 hover:to-accent-500 transition-all active:scale-95 disabled:opacity-50"
+          className="flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-semibold btn-accent transition-all active:scale-95 disabled:opacity-50"
         >
           {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
           Save settings

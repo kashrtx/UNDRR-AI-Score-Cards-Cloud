@@ -133,7 +133,7 @@ export function ScoreProjection({
               );
             }}
           />
-          <Bar dataKey="value" radius={[0, 6, 6, 0]}>
+          <Bar dataKey="value" radius={[0, 6, 6, 0]} isAnimationActive={false}>
             {chartData.map((entry, index) => (
               <Cell
                 key={index}

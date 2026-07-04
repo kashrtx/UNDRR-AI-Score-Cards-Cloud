@@ -76,6 +76,7 @@ export function RadarChart({ essentials }: RadarChartProps) {
           <Radar
             name="Maximum possible"
             dataKey="max"
+            isAnimationActive={false}
             stroke={c.maxStroke}
             fill={c.maxFill}
             fillOpacity={0.5}
@@ -83,6 +84,7 @@ export function RadarChart({ essentials }: RadarChartProps) {
           <Radar
             name="City score"
             dataKey="score"
+            isAnimationActive={false}
             stroke={c.cityStroke}
             fill={c.cityFill}
             fillOpacity={0.45}

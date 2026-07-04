@@ -35,7 +35,7 @@ import { ConfirmModal } from "@/components/ConfirmModal";
 import { runAnalysis } from "@/lib/analysis/analyze";
 import { downloadReport, downloadJson, type ExportMeta, type ExportPayload } from "@/lib/export/report";
 import {
-  loadSettings, saveSettings as persistSettings, hasApiKey, isCloudProvider, hasSearchKey,
+  loadSettings, saveSettings as persistSettings, hasApiKey, isCloudProvider, hasSearchKey, modelForSettings,
   type AppSettings, type ProviderId,
 } from "@/lib/settings/store";
 import type { NormalizedScorecard } from "@/lib/scorecard/schema";
@@ -59,16 +59,7 @@ function computeReady(s: AppSettings): boolean {
   return isCloudProvider(s.provider) ? hasApiKey(s.provider) : true;
 }
 function modelOf(s: AppSettings): string {
-  return s.provider === "claude" ? s.claudeModel
-    : s.provider === "gemini" ? s.geminiModel
-    : s.provider === "openrouter" ? s.openrouterModel
-    : s.provider === "openai" ? s.openaiModel
-    : s.provider === "xai" ? s.xaiModel
-    : s.provider === "zai" ? s.zaiModel
-    : s.provider === "nvidia" ? s.nvidiaModel
-    : s.provider === "meta" ? s.metaModel
-    : s.provider === "lmstudio" ? s.lmstudioModel
-    : s.ollamaModel;
+  return modelForSettings(s);
 }
 
 export default function Page() {
@@ -328,7 +319,7 @@ export default function Page() {
             {tab === "dashboard" && (state === "ready" || state === "results") && scorecard && (
               <button
                 onClick={handleAnalyze}
-                className="flex items-center gap-2 px-3.5 sm:px-5 py-2 rounded-xl text-sm font-semibold bg-gradient-to-r from-accent-500 to-accent-400 text-on-accent hover:from-accent-400 hover:to-accent-500 transition-all shadow-lg shadow-accent-500/25 active:scale-95 shrink-0"
+                className="flex items-center gap-2 px-3.5 sm:px-5 py-2 rounded-xl text-sm font-semibold btn-accent transition-all shadow-lg shadow-accent-500/25 active:scale-95 shrink-0"
               >
                 {state === "results" ? <RotateCcw size={16} /> : <Play size={16} />}
                 {state === "results" ? "Re-run" : "Run Analysis"}
@@ -366,6 +357,7 @@ export default function Page() {
 
       {/* ── Main ───────────────────────────────── */}
       <main className="flex-1 max-w-[1600px] w-full mx-auto px-4 sm:px-6 py-5 sm:py-6">
+        <div key={tab} className="tab-enter">
         {tab === "settings" && (
           <SettingsTab settings={settings} onChange={handleSettingsChange} />
         )}
@@ -528,7 +520,7 @@ export default function Page() {
                     <div className="flex flex-wrap items-center gap-2">
                       <button
                         onClick={handleExportReport}
-                        className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold bg-gradient-to-r from-accent-500 to-accent-400 text-on-accent hover:from-accent-400 hover:to-accent-500 transition-all active:scale-95"
+                        className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold btn-accent transition-all active:scale-95"
                       >
                         <Download size={15} /> Export report
                       </button>
@@ -610,6 +602,7 @@ export default function Page() {
             )}
           </>
         )}
+        </div>
       </main>
 
       {/* ── Footer ─────────────────────────────── */}

@@ -82,6 +82,23 @@ export function isCloudProvider(p: ProviderId): p is CloudProviderId {
   return p !== "ollama" && p !== "lmstudio";
 }
 
+/** The active model id for the chosen provider (single source of truth). */
+export function modelForSettings(s: AppSettings): string {
+  switch (s.provider) {
+    case "claude": return s.claudeModel;
+    case "gemini": return s.geminiModel;
+    case "openrouter": return s.openrouterModel;
+    case "openai": return s.openaiModel;
+    case "xai": return s.xaiModel;
+    case "zai": return s.zaiModel;
+    case "nvidia": return s.nvidiaModel;
+    case "meta": return s.metaModel;
+    case "lmstudio": return s.lmstudioModel;
+    case "ollama": return s.ollamaModel;
+    default: return "";
+  }
+}
+
 /** Providers whose model can search the web natively (built-in tool). */
 export const WEBSEARCH_PROVIDERS: ProviderId[] = ["claude", "gemini", "openrouter"];
 export function providerSupportsWebSearch(p: ProviderId): boolean {

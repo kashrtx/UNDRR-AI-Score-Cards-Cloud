@@ -103,6 +103,28 @@ h1, h2, h3 { letter-spacing: -0.01em; }
 /* Fixed dark ink for text on green accent buttons (readable in both themes) */
 .text-on-accent { color: oklch(0.22 0.05 160); }
 
+/* Vibrant green action button (Run, Re-run, Export, Save), both themes */
+.btn-accent {
+  background-image: linear-gradient(135deg, oklch(0.72 0.18 158), oklch(0.79 0.16 163));
+  color: oklch(0.20 0.06 152);
+}
+.btn-accent:hover { filter: brightness(1.05); }
+.btn-accent:active { filter: brightness(0.96); }
+html.dark .btn-accent {
+  background-image: linear-gradient(135deg, oklch(0.72 0.19 160), oklch(0.82 0.17 164));
+  color: oklch(0.16 0.05 155);
+}
+
+/* Smooth tab / view transitions */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+.tab-enter { animation: fadeUp 0.24s ease-out both; }
+@media (prefers-reduced-motion: reduce) {
+  .tab-enter { animation: none; }
+}
+
 /* Smooth colour transitions (incl. theme switch) */
 * { @apply transition-colors duration-200; }
 

@@ -37,12 +37,22 @@ function toReport(pack: DataPack, serviceUp: boolean): DataReport {
 }
 
 function extractJson(text: string): string {
-  // Thinking models sometimes embed reasoning in <think>…</think> blocks —
-  // strip them so we parse the answer, not the reasoning.
-  const cleaned = text.replace(/<think>[\s\S]*?<\/think>/gi, "").trim();
+  let cleaned = text;
+  // Reasoning models wrap their chain-of-thought in <think>…</think>. The real
+  // answer is whatever comes AFTER the final </think>, so cut there first (this
+  // also handles a truncated/unclosed opening <think> with content after it).
+  if (/<\/think>/i.test(cleaned)) {
+    cleaned = cleaned.split(/<\/think>/i).pop() ?? cleaned;
+  }
+  // Remove any remaining think blocks or stray tags.
+  cleaned = cleaned
+    .replace(/<think>[\s\S]*?<\/think>/gi, "")
+    .replace(/<\/?think>/gi, "")
+    .trim();
+  // Prefer a fenced ```json block if present.
   const fenced = cleaned.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
   if (fenced) return fenced[1].trim();
-  // Greedy match from the first "{" to the last "}" — the JSON object.
+  // Otherwise take the outermost { … } object.
   const first = cleaned.indexOf("{");
   const last = cleaned.lastIndexOf("}");
   if (first !== -1 && last !== -1 && last > first) return cleaned.slice(first, last + 1);

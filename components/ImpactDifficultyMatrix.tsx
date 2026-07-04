@@ -116,7 +116,7 @@ export function ImpactDifficultyMatrix({ actions }: MatrixProps) {
           <ReferenceLine x={3} stroke={c.divider} strokeDasharray="6 6" />
           <ReferenceLine y={3} stroke={c.divider} strokeDasharray="6 6" />
 
-          <Scatter data={data} fillOpacity={0.85} strokeWidth={1.5} stroke={c.dotStroke}>
+          <Scatter data={data} fillOpacity={0.85} strokeWidth={1.5} stroke={c.dotStroke} isAnimationActive={false}>
             {data.map((entry, index) => (
               <Cell key={index} fill={entry.fill} />
             ))}

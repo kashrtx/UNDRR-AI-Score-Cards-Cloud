@@ -9,6 +9,7 @@
 
 import { CheckCircle2, AlertCircle, Cpu, Cloud, Sparkles, Boxes, MonitorSmartphone, FileSpreadsheet, ShieldCheck, Globe } from "lucide-react";
 import type { AppSettings, ProviderId } from "@/lib/settings/store";
+import { modelForSettings } from "@/lib/settings/store";
 
 const LABEL: Record<ProviderId, string> = {
   claude: "Claude",
@@ -58,16 +59,7 @@ export function StatusBar({
   city: string | null;
   tavilyOn?: boolean;
 }) {
-  const model =
-    settings.provider === "claude"
-      ? settings.claudeModel
-      : settings.provider === "gemini"
-      ? settings.geminiModel
-      : settings.provider === "openrouter"
-      ? settings.openrouterModel
-      : settings.provider === "lmstudio"
-      ? settings.lmstudioModel
-      : settings.ollamaModel;
+  const model = modelForSettings(settings);
 
   const isLocal = settings.provider === "ollama" || settings.provider === "lmstudio";
   const readyDetail = providerReady

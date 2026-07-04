@@ -23,12 +23,16 @@ interface Cfg {
   /** OpenAI reasoning models reject a custom temperature; omit it there. */
   temperature: boolean;
   keyHint: string;
+  /** Extra body fields (e.g. disable z.AI's thinking for reliable JSON). */
+  extraBody?: Record<string, unknown>;
 }
 
 const CFG: Record<ProxyProviderId, Cfg> = {
   openai: { label: "OpenAI", maxTokensParam: "max_completion_tokens", temperature: false, keyHint: "sk-..." },
   xai: { label: "xAI (Grok)", maxTokensParam: "max_tokens", temperature: true, keyHint: "xai-..." },
-  zai: { label: "z.AI (GLM)", maxTokensParam: "max_tokens", temperature: true, keyHint: "..." },
+  // z.AI's GLM defaults to a long "thinking" pass; for a structured JSON task we
+  // disable it so the model returns the answer directly (faster, no truncation).
+  zai: { label: "z.AI (GLM)", maxTokensParam: "max_tokens", temperature: true, keyHint: "...", extraBody: { thinking: { type: "disabled" } } },
   nvidia: { label: "NVIDIA NIM", maxTokensParam: "max_tokens", temperature: true, keyHint: "nvapi-..." },
   meta: { label: "Meta (Llama)", maxTokensParam: "max_completion_tokens", temperature: true, keyHint: "LLM|..." },
 };
@@ -59,6 +63,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
       [cfg.maxTokensParam]: maxTokens,
     };
     if (cfg.temperature) body.temperature = 0.3;
+    if (cfg.extraBody) Object.assign(body, cfg.extraBody);
     return body;
   }
 
@@ -78,7 +83,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
       body: JSON.stringify({
         provider: this.providerId,
         apiKey: this.apiKey,
-        body: this.buildBody(system, user, true, 16384),
+        body: this.buildBody(system, user, true, 20000),
       }),
     });
 
@@ -88,7 +93,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
     }
 
     let full = "";
-    let sawReasoning = false;
+    let reasoningFull = "";
     let finishReason: string | undefined;
 
     await readSSE(res, (data) => {
@@ -96,7 +101,6 @@ export class OpenAICompatibleProvider implements LLMProvider {
       let evt: {
         choices?: Array<{
           delta?: { content?: string; reasoning?: string; reasoning_content?: string };
-          message?: { content?: string };
           finish_reason?: string;
         }>;
         error?: { message?: string };
@@ -112,7 +116,7 @@ export class OpenAICompatibleProvider implements LLMProvider {
       const delta = choice?.delta;
       const reasoning = delta?.reasoning ?? delta?.reasoning_content;
       if (reasoning) {
-        sawReasoning = true;
+        reasoningFull += reasoning;
         handlers?.onToken?.(reasoning);
       }
       if (delta?.content) {
@@ -121,20 +125,26 @@ export class OpenAICompatibleProvider implements LLMProvider {
       }
     });
 
-    if (!full.trim()) {
+    // Prefer the real answer (content). But some reasoning models (seen with
+    // GLM on NIM) stream the whole reply — including the final JSON — into
+    // reasoning_content and leave content empty. In that case fall back to the
+    // reasoning text so the JSON isn't lost; extractJson() downstream strips any
+    // <think> wrapper and pulls the JSON object out.
+    const answer = full.trim() ? full : reasoningFull;
+
+    if (!answer.trim()) {
       if (finishReason === "length") {
         throw new Error(
-          `${cfg.label} hit its output-token limit before finishing` +
-            (sawReasoning ? " (a reasoning model used the budget)" : "") +
-            ". Try again or choose a lighter model."
+          `${cfg.label} hit its output-token limit before finishing. ` +
+            "Try again or pick a lighter (non-reasoning) model."
         );
       }
       throw new Error(
-        `${cfg.label} returned no answer text${finishReason ? ` (finish_reason: ${finishReason})` : ""}. ` +
+        `${cfg.label} returned no text${finishReason ? ` (finish_reason: ${finishReason})` : ""}. ` +
           "Try again, or pick another model."
       );
     }
-    return full;
+    return answer;
   }
 
   async test(signal?: AbortSignal) {
