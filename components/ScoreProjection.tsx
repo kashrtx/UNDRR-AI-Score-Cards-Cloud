@@ -17,6 +17,14 @@ import {
 } from "recharts";
 import { TrendingUp } from "lucide-react";
 import type { Action } from "@/lib/types";
+import { useTheme } from "@/lib/theme";
+
+// Bar colours mirror the big number colours in the card: "Current" uses the
+// secondary text tone, "Projected" the green accent, "Maximum" a faded secondary.
+const BAR_COLORS = {
+  light: { current: "oklch(0.44 0.02 262)", projected: "oklch(0.52 0.16 160)", max: "oklch(0.44 0.02 262)", tick: "oklch(0.44 0.02 262)" },
+  dark: { current: "oklch(0.82 0.012 260)", projected: "oklch(0.80 0.17 160)", max: "oklch(0.82 0.012 260)", tick: "oklch(0.82 0.012 260)" },
+};
 
 interface ScoreProjectionProps {
   currentScore: number;
@@ -49,6 +57,9 @@ export function ScoreProjection({
 
   const selectAll = () => setSelected(new Set(actions.map((a) => a.n)));
   const clearAll = () => setSelected(new Set());
+
+  const { theme } = useTheme();
+  const c = BAR_COLORS[theme === "dark" ? "dark" : "light"];
 
   const selectedDelta = actions
     .filter((a) => selected.has(a.n))
@@ -117,7 +128,7 @@ export function ScoreProjection({
           <YAxis
             type="category"
             dataKey="name"
-            tick={{ fill: "oklch(0.70 0.01 250)", fontSize: 12 }}
+            tick={{ fill: c.tick, fontSize: 12 }}
             width={70}
           />
           <RechartsTooltip
@@ -137,13 +148,8 @@ export function ScoreProjection({
             {chartData.map((entry, index) => (
               <Cell
                 key={index}
-                fill={
-                  index === 0
-                    ? "oklch(0.40 0.10 250)"
-                    : index === 1
-                    ? "oklch(0.65 0.20 160)"
-                    : "oklch(0.25 0.03 250)"
-                }
+                fill={index === 0 ? c.current : index === 1 ? c.projected : c.max}
+                fillOpacity={index === 2 ? 0.4 : 1}
               />
             ))}
           </Bar>

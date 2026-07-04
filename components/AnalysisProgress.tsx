@@ -34,9 +34,11 @@ const DONE_AT: Record<string, number> = {
 export function AnalysisProgress({
   progress,
   dataReport,
+  tavilyOn = false,
 }: {
   progress: ProgressEvent | null;
   dataReport?: DataReport | null;
+  tavilyOn?: boolean;
 }) {
   const [elapsed, setElapsed] = useState(0);
   useEffect(() => {
@@ -58,13 +60,21 @@ export function AnalysisProgress({
       if (isActive) return "contacting open-data sources…";
     }
     if (key === "research") {
+      // Wikipedia + Wikidata are only used on the keyless path. When a live web
+      // RAG (Tavily / SearXNG) is on, it's the sole source, so don't imply
+      // Wikipedia was used.
       if (ref) {
-        const parts = ["Wikipedia"];
-        if (ref.webSearchMethod) parts.push(ref.webSearchMethod);
-        return `${parts.join(" + ")} · ${ref.sources.length} source(s)`;
+        const m = ref.webSearchMethod;
+        const label =
+          m === "Tavily" || m === "SearXNG"
+            ? m
+            : m === "DuckDuckGo"
+            ? "Wikipedia + DuckDuckGo"
+            : "Wikipedia";
+        return `${label} · ${ref.sources.length} source(s)`;
       }
-      if (isActive) return "searching Wikipedia + web…";
-      if (isDone) return "Wikipedia";
+      if (isActive) return tavilyOn ? "searching the live web (Tavily)…" : "searching Wikipedia + web…";
+      if (isDone) return tavilyOn ? "Tavily" : "Wikipedia";
     }
     if (key === "llm") {
       if (isActive) return "streaming the analysis… (this is the long part)";

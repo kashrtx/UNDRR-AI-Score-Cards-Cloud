@@ -121,6 +121,24 @@ export default function Page() {
     return () => abortRef.current?.abort();
   }, []);
 
+  // Recharts' ResponsiveContainer occasionally measures 0/stale size on first
+  // paint (especially right after a tab switch or when results first appear),
+  // leaving a blank box until the window is resized. Nudging a resize event
+  // after paint forces every chart to re-measure correctly.
+  useEffect(() => {
+    if (tab !== "dashboard" || (state !== "results" && state !== "analyzing")) return;
+    const id = requestAnimationFrame(() =>
+      requestAnimationFrame(() => {
+        try {
+          window.dispatchEvent(new Event("resize"));
+        } catch {
+          /* no-op */
+        }
+      })
+    );
+    return () => cancelAnimationFrame(id);
+  }, [tab, state, analysis]);
+
   const handleSettingsChange = useCallback((s: AppSettings) => {
     persistSettings(s);
     setSettings(s);
@@ -504,7 +522,7 @@ export default function Page() {
                 {/* Live progress */}
                 {state === "analyzing" && (
                   <>
-                    <AnalysisProgress progress={progress} dataReport={dataReport} />
+                    <AnalysisProgress progress={progress} dataReport={dataReport} tavilyOn={tavilyActive} />
                     <DataSourcesPanel report={dataReport} live />
                     {narration && (
                       <div className="glass-card p-5">
