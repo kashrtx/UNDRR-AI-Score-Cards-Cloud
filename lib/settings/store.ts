@@ -22,6 +22,8 @@ export interface AppSettings {
   lmstudioBaseUrl: string;
   /** Let cloud providers use their built-in web search while analysing. */
   webSearch: boolean;
+  /** Use Tavily for web-search grounding (only takes effect if a key is set). */
+  useTavily: boolean;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {
@@ -34,6 +36,7 @@ export const DEFAULT_SETTINGS: AppSettings = {
   lmstudioModel: "local-model",
   lmstudioBaseUrl: "http://127.0.0.1:1234/v1",
   webSearch: true,
+  useTavily: false,
 };
 
 const SETTINGS_KEY = "undrr.settings";
@@ -46,6 +49,13 @@ export const SECRET_NAMES: Record<CloudProviderId, string> = {
 };
 
 export const CLOUD_PROVIDERS: CloudProviderId[] = ["gemini", "openrouter", "claude"];
+
+/** Optional web-search (Tavily) key for the research/RAG step. */
+export const SEARCH_SECRET_NAME = "tavily_api_key";
+export async function setSearchKey(key: string) { await setSecret(SEARCH_SECRET_NAME, key); }
+export async function getSearchKey(): Promise<string | null> { return getSecret(SEARCH_SECRET_NAME); }
+export function hasSearchKey(): boolean { return hasSecret(SEARCH_SECRET_NAME); }
+export function clearSearchKey() { clearSecret(SEARCH_SECRET_NAME); }
 export const LOCAL_PROVIDERS: LocalProviderId[] = ["ollama", "lmstudio"];
 
 export function isCloudProvider(p: ProviderId): p is CloudProviderId {

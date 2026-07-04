@@ -184,11 +184,40 @@ Placeholders usable in `url`/`label`: `{name} {country} {country_code} {lat}
 
 ## Data sources (all free, no key)
 
-Geocoding (OpenStreetMap Nominatim / Open-Meteo), historical climate
-(Open-Meteo), river-flood discharge & coastal ground elevation
-(Open-Meteo Flood + Copernicus DEM), infrastructure counts (OpenStreetMap
-Overpass), earthquake history (USGS FDSN), national indicators (World Bank
-Open Data), and any config-driven REST sources you add.
+Geocoding (OpenStreetMap Nominatim / Open-Meteo), historical climate &
+coastal ground elevation (Open-Meteo — elevation returned with the climate
+response), infrastructure counts (OpenStreetMap Overpass), earthquake history
+(USGS FDSN), national indicators (World Bank Open Data), and any config-driven
+REST sources you add.
+
+## Web-search research (RAG) — keyless, no setup
+
+Before the AI writes anything, a research step retrieves real, citable evidence
+about the city and feeds it to the model as cross-checked context (never a
+single "verified" number — that's what produced a bogus island elevation
+before). It works for every provider, including local models that can't browse,
+and needs **no API key**:
+
+- **Wikipedia** (keyless core): a multi-article search plus full-article
+  geography/hazard/climate extraction — bot-friendly and reliable from Vercel.
+- **Wikidata**: population & area only. Elevation is intentionally not surfaced
+  from Wikidata — it's unreliable for islands/coastal cities.
+- **DuckDuckGo** (keyless, best-effort): a little general-web coverage. It can be
+  rate-limited/blocked from datacenter IPs, so it degrades silently.
+
+Optional, no-code upgrades for broader/higher-quality web results (set once in
+your Vercel environment — still no per-query hassle):
+
+- `SEARXNG_URL` — point at an open-source [SearXNG](https://searxng.org) instance
+  (self-hosted or your own) to use its JSON API. No API key.
+- `TAVILY_API_KEY` — a managed RAG search API (free tier available). Or paste a
+  key under **Settings → Web-search grounding**.
+
+> Note: SearXNG is a standalone service and can't run *inside* a Vercel function;
+> host it separately and point `SEARXNG_URL` at it. Cloud providers can also use
+> their own native web search (Gemini/Claude/OpenRouter) via the Settings
+> toggle, but that's model-decided, so the keyless server-side research above is
+> the primary path.
 
 > ReliefWeb (UN OCHA) disaster history is included as code but off by default:
 > since 1 Nov 2025 its API needs a pre-approved appname (a quick org
@@ -201,8 +230,8 @@ Open Data), and any config-driven REST sources you add.
   are well under this.
 - **Overpass/Nominatim rate limits:** requests are server-side with a polite
   User-Agent and per-source timeouts; sources degrade gracefully.
-- **RAG scaffold** from the original prototype (Ollama embeddings + ChromaDB)
-  was local-only and is intentionally not included here — noted as future work.
+- **Accuracy:** AI output is decision-support and depends on the model; the RAG
+  step reduces hallucination but the model can still err — always review.
 
 ## License
 

@@ -110,8 +110,15 @@ export interface ReferenceFact {
 export interface ReferenceFacts {
   title: string;
   summary: string;
+  /** Synthesized answer from the web-search provider (Tavily), if available. */
+  answer?: string;
+  /** Retrieved excerpts (web + encyclopedia) — cited evidence, not gospel. */
+  passages: Array<{ source: string; url: string; text: string }>;
+  /** Attributed structured facts (population/area). Never elevation. */
   facts: ReferenceFact[];
   sources: Array<{ name: string; url: string }>;
+  /** Which web-search method actually ran (Tavily / SearXNG / DuckDuckGo). */
+  webSearchMethod?: string;
 }
 
 export interface DataReport {

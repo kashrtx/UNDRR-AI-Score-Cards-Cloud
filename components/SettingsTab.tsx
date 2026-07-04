@@ -10,11 +10,12 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
   Cloud, Cpu, Sparkles, Boxes, MonitorSmartphone, Save, Loader2,
-  CheckCircle2, XCircle, KeyRound, Trash2, Plug, Globe,
+  CheckCircle2, XCircle, KeyRound, Trash2, Plug, Globe, Search,
 } from "lucide-react";
 import {
   type AppSettings, type ProviderId, type CloudProviderId,
   setApiKey, hasApiKey, clearApiKey, isCloudProvider,
+  setSearchKey, hasSearchKey, clearSearchKey,
 } from "@/lib/settings/store";
 import { createProvider } from "@/lib/llm";
 
@@ -79,6 +80,8 @@ export function SettingsTab({
   const [saved, setSaved] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testMsg, setTestMsg] = useState<{ ok: boolean; message: string } | null>(null);
+  const [searchKeyInput, setSearchKeyInput] = useState("");
+  const [searchKeyPresent, setSearchKeyPresent] = useState(false);
 
   useEffect(() => setDraft(settings), [settings]);
 
@@ -89,7 +92,7 @@ export function SettingsTab({
       claude: hasApiKey("claude"),
     });
   };
-  useEffect(() => { refreshKeyPresence(); }, []);
+  useEffect(() => { refreshKeyPresence(); setSearchKeyPresent(hasSearchKey()); }, []);
   useEffect(() => { setKeyInput(""); setTestMsg(null); }, [draft.provider]);
 
   const provider = draft.provider;
@@ -117,8 +120,13 @@ export function SettingsTab({
         await setApiKey(provider as CloudProviderId, keyInput.trim());
         setKeyInput("");
       }
+      if (searchKeyInput.trim()) {
+        await setSearchKey(searchKeyInput.trim());
+        setSearchKeyInput("");
+      }
       onChange(draft);
       refreshKeyPresence();
+      setSearchKeyPresent(hasSearchKey());
       setSaved(true);
       setTimeout(() => setSaved(false), 2500);
     } finally {
@@ -316,13 +324,12 @@ export function SettingsTab({
             </span>
             <span>
               <span className="text-sm text-text-primary flex items-center gap-1.5">
-                <Globe size={14} className="text-accent-400" /> Let the AI research the web while
-                analysing
+                <Globe size={14} className="text-accent-400" /> Let the AI model search the web itself
               </span>
               <span className="text-xs text-text-secondary block mt-0.5">
                 {isCloud
-                  ? "Uses this provider's built-in web search (Gemini, Claude, OpenRouter) to verify facts and cite sources. If a search-enabled run fails, it automatically retries without it."
-                  : "Local models can't browse the web — this applies to cloud providers. Either way, every analysis is cross-checked against Wikipedia & Wikidata."}
+                  ? "Separate from the research step below: the model itself runs live web searches via its provider (Gemini, Claude, OpenRouter) to verify facts and cite sources, then still receives the research context. If a search-enabled run fails, it automatically retries without it."
+                  : "Local models can't browse the web — this applies to cloud providers. Either way, every analysis gets the server-side research context (Wikipedia + web search) below."}
               </span>
             </span>
           </button>
@@ -345,6 +352,100 @@ export function SettingsTab({
             </span>
           )}
         </div>
+      </div>
+
+      {/* Web search RAG key (optional, global) */}
+      <div className="glass-card p-5 space-y-3">
+        <div>
+          <h3 className="text-sm font-semibold text-text-primary flex items-center gap-1.5">
+            <Search size={15} className="text-accent-400" /> Web-search grounding
+          </h3>
+          <p className="text-xs text-text-secondary mt-1">
+            Before the AI writes anything, a research step retrieves real, citable evidence about the
+            city and feeds it in as cross-checked context. It applies to every provider, including
+            local models that can&apos;t browse, and works in two layers:
+          </p>
+          <ul className="text-xs text-text-secondary mt-2 space-y-1 list-disc pl-4">
+            <li>
+              <strong className="text-text-primary">Always on (free, no key):</strong> Wikipedia
+              (multi-article + geography/hazard extraction) and Wikidata population/area.
+            </li>
+            <li>
+              <strong className="text-text-primary">Live web search — exactly one method runs</strong>,
+              by priority: your <strong className="text-text-primary">Tavily</strong> key (if switched
+              on below) → a <code className="text-primary-300">SEARXNG_URL</code> you&apos;ve set →
+              free <strong className="text-text-primary">DuckDuckGo</strong> fallback. Turning Tavily on
+              <strong className="text-text-primary"> replaces</strong> the DuckDuckGo fallback — they
+              never both run.
+            </li>
+          </ul>
+          <p className="text-xs text-text-secondary mt-2">
+            Optional, no-code deployer alternatives (set once in Vercel env): an open-source{" "}
+            <a className="text-primary-300 underline" href="https://searxng.org" target="_blank" rel="noreferrer">SearXNG</a>{" "}
+            instance via <code className="text-primary-300">SEARXNG_URL</code>, or{" "}
+            <code className="text-primary-300">TAVILY_API_KEY</code>.
+          </p>
+        </div>
+
+        {(() => {
+          const tavilyReady = searchKeyPresent || searchKeyInput.trim().length > 0;
+          const on = draft.useTavily && tavilyReady;
+          return (
+            <button
+              type="button"
+              disabled={!tavilyReady}
+              onClick={() => setDraft({ ...draft, useTavily: !draft.useTavily })}
+              className={`w-full flex items-start gap-3 text-left ${tavilyReady ? "" : "opacity-60 cursor-not-allowed"}`}
+            >
+              <span
+                className={`mt-0.5 shrink-0 w-9 h-5 rounded-full transition-colors relative ${
+                  on ? "bg-accent-500" : "bg-surface-overlay border border-border"
+                }`}
+              >
+                <span
+                  className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${
+                    on ? "left-[18px]" : "left-0.5"
+                  }`}
+                />
+              </span>
+              <span>
+                <span className="text-sm text-text-primary">Use Tavily web search in the analysis</span>
+                <span className="text-xs text-text-secondary block mt-0.5">
+                  {tavilyReady
+                    ? on
+                      ? "On — Tavily is used for live web search (instead of DuckDuckGo)."
+                      : "Off — live web search uses the free DuckDuckGo fallback."
+                    : "Enter and save a Tavily key below to enable this."}
+                </span>
+              </span>
+            </button>
+          );
+        })()}
+
+        <label className="block">
+          <span className="text-sm text-text-primary flex items-center gap-1.5">
+            <KeyRound size={13} /> Tavily API key <span className="text-text-secondary font-normal">(optional)</span>
+          </span>
+          <input
+            type="password"
+            value={searchKeyInput}
+            onChange={(e) => setSearchKeyInput(e.target.value)}
+            className={`${inputCls} font-mono`}
+            placeholder={searchKeyPresent ? "A key is saved — type to replace it, or leave blank to keep" : "tvly-…"}
+          />
+          <span className="text-xs text-text-secondary">
+            Encrypted in this browser; sent only to your own app server to run the search. Alternatively,
+            set <code className="text-primary-300">TAVILY_API_KEY</code> in your Vercel environment (cleaner for a shared deployment).
+          </span>
+          {searchKeyPresent && (
+            <button
+              onClick={() => { clearSearchKey(); setSearchKeyPresent(false); setDraft({ ...draft, useTavily: false }); }}
+              className="mt-2 inline-flex items-center gap-1.5 text-xs text-danger-400 hover:text-danger-500"
+            >
+              <Trash2 size={12} /> Remove saved key
+            </button>
+          )}
+        </label>
       </div>
 
       {/* Save */}

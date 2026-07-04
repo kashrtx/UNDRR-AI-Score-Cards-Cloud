@@ -16,7 +16,7 @@ import { buildSystemPrompt, buildUserPrompt } from "./prompt";
 import { createProvider } from "@/lib/llm";
 import { fetchDataPack, fetchReferenceFacts } from "@/lib/client/api";
 import type { NormalizedScorecard } from "@/lib/scorecard/schema";
-import { isCloudProvider, type AppSettings } from "@/lib/settings/store";
+import { isCloudProvider, getSearchKey, type AppSettings } from "@/lib/settings/store";
 import type { DataPack, DataReport, NormalizedDatum, ProgressEvent, ReferenceFacts } from "@/lib/types";
 
 export interface AnalyzeHandlers {
@@ -88,7 +88,14 @@ export async function runAnalysis(
   });
   let reference: ReferenceFacts | null = null;
   try {
-    reference = await fetchReferenceFacts(scorecard.city.name, scorecard.city.country);
+    // Only use the pasted Tavily key when the toggle is on; otherwise the
+    // research step stays keyless (Wikipedia + DuckDuckGo / SearXNG env).
+    const searchKey = settings.useTavily ? await getSearchKey() : null;
+    reference = await fetchReferenceFacts(
+      scorecard.city.name,
+      scorecard.city.country,
+      searchKey
+    );
   } catch {
     reference = null;
   }

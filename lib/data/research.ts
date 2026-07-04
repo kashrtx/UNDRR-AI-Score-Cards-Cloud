@@ -1,147 +1,296 @@
 /**
- * City research (server-side) — credible, keyless factual grounding from
- * Wikipedia + Wikidata. This is the universal research step: it runs for EVERY
- * provider (including local models that can't browse), so the AI checks its
- * picture of the city against a real reference instead of hallucinating or
- * trusting coarse open-data grid artifacts (e.g. a "0 m" island elevation).
+ * City research (server-side RAG) — retrieves real, citable evidence and feeds
+ * it to the model as cross-checked CONTEXT (never single-source "verified"
+ * numbers).
  *
- * Runs on the server (no browser CORS limits; a polite User-Agent as Wikimedia
- * asks). Entirely best-effort: any failure returns null and analysis proceeds.
+ * KEYLESS BY DEFAULT — works on Vercel with zero setup:
+ *   1. Wikipedia: a multi-article search + full-article geography/hazard/climate
+ *      extraction (bot-friendly, reliable from serverless). This is the core.
+ *   2. Wikidata: population & area only (elevation is deliberately NOT surfaced —
+ *      it's unreliable per-entity and produced a bogus figure before).
+ *   3. DuckDuckGo (keyless, best-effort): a little general-web coverage. May be
+ *      rate-limited/blocked from datacenter IPs, so it degrades silently.
+ *
+ * OPTIONAL UPGRADES (no per-query hassle, still no code changes):
+ *   • SEARXNG_URL env  → query your own/self-hosted SearXNG JSON API (open source)
+ *   • TAVILY_API_KEY env (or a key passed from Settings) → managed RAG search
+ *
+ * Everything is best-effort: any failure is skipped and analysis proceeds.
  */
 
 import type { ReferenceFacts } from "@/lib/types";
 
 const UA =
   "UNDRR-ARISE-Scorecard-Analyzer/1.0 (disaster-resilience research tool; +https://vercel.app)";
+const BROWSER_UA =
+  "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36";
 
-async function getJson<T>(url: string, timeoutMs = 8000): Promise<T> {
+async function req(url: string, init?: RequestInit, timeoutMs = 9000): Promise<Response> {
   const ctrl = new AbortController();
   const timer = setTimeout(() => ctrl.abort(), timeoutMs);
   try {
-    const res = await fetch(url, {
-      headers: { "user-agent": UA, accept: "application/json" },
-      signal: ctrl.signal,
-    });
-    if (!res.ok) throw new Error(`HTTP ${res.status}`);
-    return (await res.json()) as T;
+    return await fetch(url, { ...init, signal: ctrl.signal });
   } finally {
     clearTimeout(timer);
   }
 }
-
-const WIKI = "https://en.wikipedia.org/w/api.php";
-
-interface WikiPage {
-  title?: string;
-  extract?: string;
-  pageprops?: { wikibase_item?: string };
-  fullurl?: string;
-  canonicalurl?: string;
-}
-interface WikiSearchResp {
-  query?: { pages?: Record<string, WikiPage> };
-}
-interface WikidataResp {
-  entities?: Record<
-    string,
-    { claims?: Record<string, Array<{ mainsnak?: { datavalue?: { value?: unknown } } }>> }
-  >;
+async function getJson<T>(url: string, init?: RequestInit, timeoutMs = 9000): Promise<T> {
+  const res = await req(
+    url,
+    { ...init, headers: { "user-agent": UA, accept: "application/json", ...(init?.headers || {}) } },
+    timeoutMs
+  );
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return (await res.json()) as T;
 }
 
+function trunc(s: string, n: number): string {
+  const t = (s || "").replace(/\s+/g, " ").trim();
+  return t.length > n ? t.slice(0, n) + "…" : t;
+}
+function stripHtml(s: string): string {
+  return s.replace(/<[^>]+>/g, " ").replace(/&amp;/g, "&").replace(/&#x27;/g, "'")
+    .replace(/&quot;/g, '"').replace(/&lt;/g, "<").replace(/&gt;/g, ">").replace(/&nbsp;/g, " ");
+}
 function num(v: unknown): number | null {
   const n = typeof v === "string" ? parseFloat(v) : typeof v === "number" ? v : NaN;
   return Number.isFinite(n) ? n : null;
 }
 
-export async function researchCity(
-  city: string,
-  country?: string
-): Promise<ReferenceFacts | null> {
-  const query = [city, country].filter(Boolean).join(", ");
+// Keywords that make a Wikipedia paragraph worth feeding to the model.
+const GEO_KW =
+  /\b(elevation|sea[- ]level|metres?|meters?|altitude|highest point|low[- ]lying|coast|geograph|terrain|climate|rainfall|precipitation|monsoon|cyclone|storm|flood|tsunami|earthquake|hazard|lagoon|reef|population)\b/i;
 
-  // 1) Best-matching Wikipedia page → intro extract + Wikidata id + canonical URL.
-  let page: WikiPage | undefined;
+// ── Wikipedia + Wikidata (keyless, reliable) ─────────────────
+const WIKI = "https://en.wikipedia.org/w/api.php";
+
+async function wikiSearchTitles(query: string): Promise<string[]> {
   try {
     const params = new URLSearchParams({
-      action: "query",
-      generator: "search",
-      gsrsearch: query,
-      gsrlimit: "1",
-      prop: "extracts|pageprops|info",
-      inprop: "url",
-      exintro: "1",
-      explaintext: "1",
-      exsentences: "5",
-      ppprop: "wikibase_item",
-      redirects: "1",
-      format: "json",
+      action: "query", list: "search", srsearch: query, srlimit: "3",
+      srprop: "", format: "json",
     });
-    const resp = await getJson<WikiSearchResp>(`${WIKI}?${params.toString()}`);
-    const pages = resp.query?.pages;
-    if (pages) page = Object.values(pages)[0];
+    const r = await getJson<{ query?: { search?: Array<{ title: string }> } }>(`${WIKI}?${params}`);
+    return (r.query?.search ?? []).map((x) => x.title).filter(Boolean);
   } catch {
-    return null; // Wikipedia unreachable → skip research entirely.
+    return [];
   }
-  if (!page?.title) return null;
+}
 
-  const pageUrl =
-    page.fullurl ||
-    page.canonicalurl ||
-    `https://en.wikipedia.org/wiki/${encodeURIComponent(page.title.replace(/ /g, "_"))}`;
+async function wikiArticle(title: string): Promise<{
+  title: string; url: string; qid?: string; intro: string; geo: string;
+} | null> {
+  try {
+    const params = new URLSearchParams({
+      action: "query", prop: "extracts|pageprops|info", titles: title,
+      explaintext: "1", inprop: "url", ppprop: "wikibase_item", redirects: "1", format: "json",
+    });
+    const r = await getJson<{
+      query?: { pages?: Record<string, {
+        title?: string; extract?: string; fullurl?: string; canonicalurl?: string;
+        pageprops?: { wikibase_item?: string };
+      }> };
+    }>(`${WIKI}?${params}`);
+    const page = Object.values(r.query?.pages ?? {})[0];
+    if (!page?.title || !page.extract) return null;
 
+    const url = page.fullurl || page.canonicalurl ||
+      `https://en.wikipedia.org/wiki/${encodeURIComponent(page.title.replace(/ /g, "_"))}`;
+
+    // Split full plaintext into paragraphs; keep the intro + best geo/hazard paras.
+    const paras = page.extract
+      .split(/\n{2,}/)
+      .map((p) => p.trim())
+      .filter((p) => p.length > 50 && !/^=+.*=+$/.test(p));
+    const intro = paras.slice(0, 2).join(" ");
+    const scored = paras
+      .slice(2)
+      .map((p) => ({ p, score: (p.match(GEO_KW) || []).length }))
+      .filter((x) => x.score > 0)
+      .sort((a, b) => b.score - a.score)
+      .slice(0, 3)
+      .map((x) => x.p);
+
+    return {
+      title: page.title,
+      url,
+      qid: page.pageprops?.wikibase_item,
+      intro: trunc(intro, 900),
+      geo: trunc(scored.join(" "), 1100),
+    };
+  } catch {
+    return null;
+  }
+}
+
+async function wikidataFacts(qid: string, facts: ReferenceFacts["facts"], sources: ReferenceFacts["sources"]) {
+  const wdUrl = `https://www.wikidata.org/wiki/${qid}`;
+  try {
+    const wd = await getJson<{
+      entities?: Record<string, { claims?: Record<string, Array<{ mainsnak?: { datavalue?: { value?: unknown } } }>> }>;
+    }>(`https://www.wikidata.org/wiki/Special:EntityData/${qid}.json`);
+    const claims = wd.entities?.[qid]?.claims ?? {};
+    const claim = (p: string) => claims[p]?.[0]?.mainsnak?.datavalue?.value as { amount?: string } | undefined;
+    const pop = num(claim("P1082")?.amount);
+    if (pop != null) facts.push({ label: "Population", value: Math.round(pop).toLocaleString(), source: "Wikidata", url: wdUrl });
+    const area = num(claim("P2046")?.amount);
+    if (area != null) facts.push({ label: "Area", value: `${area} km²`, source: "Wikidata", url: wdUrl });
+    if (pop != null || area != null) sources.push({ name: "Wikidata", url: wdUrl });
+  } catch {
+    /* optional */
+  }
+}
+
+// ── Keyless general web search: DuckDuckGo (best-effort) ─────
+function decodeDdgHref(href: string): string {
+  const m = href.match(/[?&]uddg=([^&]+)/);
+  if (m) { try { return decodeURIComponent(m[1]); } catch { /* fall through */ } }
+  return href.startsWith("//") ? "https:" + href : href;
+}
+
+async function duckduckgo(query: string): Promise<Array<{ title: string; url: string; content: string }>> {
+  try {
+    const res = await req(
+      "https://lite.duckduckgo.com/lite/",
+      {
+        method: "POST",
+        headers: {
+          "user-agent": BROWSER_UA,
+          "content-type": "application/x-www-form-urlencoded",
+          "accept-language": "en-US,en;q=0.9",
+        },
+        body: `q=${encodeURIComponent(query)}`,
+      },
+      10000
+    );
+    if (!res.ok) return [];
+    const html = await res.text();
+    const links = [...html.matchAll(/<a[^>]+class="result-link"[^>]+href="([^"]+)"[^>]*>(.*?)<\/a>/gis)];
+    const snips = [...html.matchAll(/<td[^>]*class="result-snippet"[^>]*>(.*?)<\/td>/gis)].map((m) =>
+      trunc(stripHtml(m[1]), 320)
+    );
+    const out: Array<{ title: string; url: string; content: string }> = [];
+    for (let i = 0; i < links.length && out.length < 4; i++) {
+      const url = decodeDdgHref(links[i][1]);
+      const title = trunc(stripHtml(links[i][2]), 140);
+      if (!/^https?:\/\//.test(url)) continue;
+      out.push({ title: title || url, url, content: snips[i] || "" });
+    }
+    return out;
+  } catch {
+    return [];
+  }
+}
+
+// ── Optional SearXNG (open source, keyless) ──────────────────
+async function searxng(baseUrl: string, query: string): Promise<Array<{ title: string; url: string; content: string }>> {
+  try {
+    const url = `${baseUrl.replace(/\/$/, "")}/search?q=${encodeURIComponent(query)}&format=json`;
+    const r = await getJson<{ results?: Array<{ title?: string; url?: string; content?: string }> }>(
+      url, { headers: { "user-agent": BROWSER_UA } }, 12000
+    );
+    return (r.results ?? [])
+      .filter((x) => x.url)
+      .slice(0, 4)
+      .map((x) => ({ title: x.title || x.url!, url: x.url!, content: trunc(x.content || "", 400) }));
+  } catch {
+    return [];
+  }
+}
+
+// ── Optional Tavily (managed, keyed) ─────────────────────────
+async function tavily(key: string, query: string): Promise<{ answer?: string; results: Array<{ title: string; url: string; content: string }> }> {
+  const data = await getJson<{ answer?: string; results?: Array<{ title?: string; url?: string; content?: string }> }>(
+    "https://api.tavily.com/search",
+    {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ api_key: key, query, search_depth: "advanced", include_answer: "advanced", max_results: 5 }),
+    },
+    12000
+  );
+  return {
+    answer: data.answer,
+    results: (data.results ?? []).filter((r) => r.url && r.content).map((r) => ({
+      title: r.title || r.url!, url: r.url!, content: r.content!,
+    })),
+  };
+}
+
+export async function researchCity(
+  city: string,
+  country?: string,
+  searchApiKey?: string
+): Promise<ReferenceFacts | null> {
+  const query = [city, country].filter(Boolean).join(", ");
+  const passages: ReferenceFacts["passages"] = [];
   const facts: ReferenceFacts["facts"] = [];
+  const sources: ReferenceFacts["sources"] = [];
+  let answer: string | undefined;
+  let title = city;
+  let summary = "";
 
-  // 2) Structured facts from Wikidata (best-effort; the summary alone is useful).
-  const qid = page.pageprops?.wikibase_item;
-  let wdUrl: string | undefined;
-  if (qid) {
-    wdUrl = `https://www.wikidata.org/wiki/${qid}`;
-    try {
-      const wd = await getJson<WikidataResp>(
-        `https://www.wikidata.org/wiki/Special:EntityData/${qid}.json`
-      );
-      const claims = wd.entities?.[qid]?.claims ?? {};
-      const claim = (p: string) =>
-        claims[p]?.[0]?.mainsnak?.datavalue?.value as { amount?: string } | undefined;
-
-      const elev = num(claim("P2044")?.amount); // elevation above sea level (m)
-      if (elev != null)
-        facts.push({
-          label: "Elevation above sea level",
-          value: `${elev} m`,
-          source: "Wikidata (P2044)",
-          url: wdUrl,
-        });
-
-      const pop = num(claim("P1082")?.amount); // population
-      if (pop != null)
-        facts.push({
-          label: "Population",
-          value: Math.round(pop).toLocaleString(),
-          source: "Wikidata (P1082)",
-          url: wdUrl,
-        });
-
-      const area = num(claim("P2046")?.amount); // area (usually km²)
-      if (area != null)
-        facts.push({
-          label: "Area",
-          value: `${area} km²`,
-          source: "Wikidata (P2046)",
-          url: wdUrl,
-        });
-    } catch {
-      /* Wikidata optional */
+  // 1) Wikipedia (keyless core): top articles + full-article geo extraction.
+  const titles = await wikiSearchTitles(query);
+  const primary = titles[0] ? await wikiArticle(titles[0]) : null;
+  if (primary) {
+    title = primary.title;
+    summary = primary.intro;
+    if (primary.intro) passages.push({ source: `Wikipedia — ${primary.title}`, url: primary.url, text: primary.intro });
+    if (primary.geo) passages.push({ source: `Wikipedia — ${primary.title} (geography & hazards)`, url: primary.url, text: primary.geo });
+    sources.push({ name: `Wikipedia — ${primary.title}`, url: primary.url });
+    if (primary.qid) await wikidataFacts(primary.qid, facts, sources);
+  }
+  // Pull one more related article's intro (e.g. "Geography of <country>").
+  for (const t of titles.slice(1, 2)) {
+    const a = await wikiArticle(t);
+    if (a?.intro) {
+      passages.push({ source: `Wikipedia — ${a.title}`, url: a.url, text: a.intro });
+      sources.push({ name: `Wikipedia — ${a.title}`, url: a.url });
     }
   }
 
-  const summary = (page.extract || "").trim();
-  if (!summary && facts.length === 0) return null;
+  // 2) General WEB SEARCH — exactly ONE method runs, by priority:
+  //    (a) your Tavily key (toggled on in Settings)  → best
+  //    (b) SEARXNG_URL env (self-hosted, open source)
+  //    (c) TAVILY_API_KEY env (deployer-set)
+  //    (d) DuckDuckGo (keyless fallback)
+  // Turning Tavily on therefore REPLACES the DuckDuckGo fallback — they never
+  // both run. Wikipedia/Wikidata above always run regardless (free + reliable).
+  const wq = `${query} elevation above sea level climate natural hazards flooding disaster history`;
+  const userKey = searchApiKey && searchApiKey.trim();
+  const envKey = process.env.TAVILY_API_KEY;
+  const searxUrl = process.env.SEARXNG_URL;
+  let web: Array<{ title: string; url: string; content: string }> = [];
+  let webSearchMethod: string | undefined;
+  try {
+    if (userKey) {
+      webSearchMethod = "Tavily";
+      const t = await tavily(userKey, wq);
+      answer = t.answer ? trunc(t.answer, 1200) : undefined;
+      web = t.results;
+    } else if (searxUrl) {
+      webSearchMethod = "SearXNG";
+      web = await searxng(searxUrl, wq);
+    } else if (envKey) {
+      webSearchMethod = "Tavily";
+      const t = await tavily(envKey, wq);
+      answer = t.answer ? trunc(t.answer, 1200) : undefined;
+      web = t.results;
+    } else {
+      webSearchMethod = "DuckDuckGo";
+      web = await duckduckgo(wq);
+    }
+  } catch {
+    web = [];
+  }
+  for (const r of web.slice(0, 4)) {
+    if (r.content || r.title) {
+      passages.push({ source: r.title, url: r.url, text: r.content || r.title });
+      sources.push({ name: r.title, url: r.url });
+    }
+  }
 
-  const sources: ReferenceFacts["sources"] = [
-    { name: `Wikipedia — ${page.title}`, url: pageUrl },
-  ];
-  if (wdUrl) sources.push({ name: "Wikidata", url: wdUrl });
-
-  return { title: page.title, summary: summary.slice(0, 1200), facts, sources };
+  if (!answer && passages.length === 0 && facts.length === 0) return null;
+  return { title, summary, answer, passages, facts, sources, webSearchMethod };
 }

@@ -90,42 +90,46 @@ export function DataSourcesPanel({ report, live }: { report: DataReport | null; 
         </ul>
       )}
 
-      {report.reference && (report.reference.facts.length > 0 || report.reference.summary) && (
-        <div className="mt-3 pt-3 border-t border-border">
-          <p className="text-sm font-medium text-text-primary flex items-center gap-1.5 mb-2">
-            <BookCheck size={14} className="text-accent-400" /> Verified reference facts
-          </p>
-          {report.reference.facts.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 mb-2">
-              {report.reference.facts.map((f, i) => (
-                <span
-                  key={i}
-                  className="text-xs px-2 py-1 rounded-lg bg-accent-500/5 border border-accent-500/15 text-text-secondary"
-                >
-                  <span className="text-text-primary">{f.label}:</span> {f.value}
+      {report.reference &&
+        (report.reference.facts.length > 0 ||
+          report.reference.answer ||
+          report.reference.passages.length > 0) && (
+          <div className="mt-3 pt-3 border-t border-border">
+            <p className="text-sm font-medium text-text-primary flex items-center gap-1.5 mb-2">
+              <BookCheck size={14} className="text-accent-400" /> Web research (cross-checked)
+              {report.reference.webSearchMethod && (
+                <span className="text-[11px] font-normal text-text-secondary bg-surface-overlay/60 border border-border rounded-full px-2 py-0.5">
+                  web search: {report.reference.webSearchMethod}
+                </span>
+              )}
+            </p>
+            {report.reference.facts.length > 0 && (
+              <div className="flex flex-wrap gap-1.5 mb-2">
+                {report.reference.facts.map((f, i) => (
+                  <span
+                    key={i}
+                    className="text-xs px-2 py-1 rounded-lg bg-accent-500/5 border border-accent-500/15 text-text-secondary"
+                  >
+                    <span className="text-text-primary">{f.label}:</span> {f.value}{" "}
+                    <span className="text-text-secondary/70">· {f.source}</span>
+                  </span>
+                ))}
+              </div>
+            )}
+            <p className="text-xs text-text-secondary">
+              Grounded in retrieved evidence from{" "}
+              {report.reference.sources.slice(0, 6).map((s, i) => (
+                <span key={i}>
+                  {i > 0 && ", "}
+                  <a href={s.url} target="_blank" rel="noreferrer" className="text-primary-300 underline">
+                    {s.name.length > 40 ? s.name.slice(0, 40) + "…" : s.name}
+                  </a>
                 </span>
               ))}
-            </div>
-          )}
-          <p className="text-xs text-text-secondary">
-            Cross-checked against{" "}
-            {report.reference.sources.map((s, i) => (
-              <span key={i}>
-                {i > 0 && ", "}
-                <a
-                  href={s.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="text-primary-300 underline"
-                >
-                  {s.name}
-                </a>
-              </span>
-            ))}
-            .
-          </p>
-        </div>
-      )}
+              . The AI is instructed to cross-check these and cite them — not to trust any single figure.
+            </p>
+          </div>
+        )}
     </div>
   );
 }

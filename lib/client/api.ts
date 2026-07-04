@@ -33,13 +33,14 @@ export async function fetchDataPack(city: string, country?: string): Promise<Dat
 
 export async function fetchReferenceFacts(
   city: string,
-  country?: string
+  country?: string,
+  searchApiKey?: string | null
 ): Promise<ReferenceFacts | null> {
   try {
     const res = await fetch("/api/research", {
       method: "POST",
       headers: { "content-type": "application/json" },
-      body: JSON.stringify({ city, country }),
+      body: JSON.stringify({ city, country, searchApiKey: searchApiKey || undefined }),
     });
     if (!res.ok) return null;
     return (await res.json()) as ReferenceFacts | null;

@@ -53,7 +53,7 @@ Analyze a city's Disaster Resilience Scorecard and produce a structured action p
 
 9. **SANITY-CHECK THE DATA**: The enrichment figures come from automated open sources and can contain artifacts or coarse approximations. Before repeating a number as fact, ask whether it is plausible. If a value is clearly an artifact or implausible, describe it qualitatively or caveat it rather than stating it as precise fact. Concrete example: a grid-derived ground elevation of 0 m for an inhabited island almost always means the coarse grid cell fell on water/coastline — say "low-lying / near sea level" rather than "0 metres elevation". You MAY point out a likely data artifact when you are confident from general knowledge, but ONLY when confident, and you must NEVER invent a precise replacement figure — if unsure, state the uncertainty and lean on the scorecard. Correct obvious errors; do not manufacture new ones.
 
-10. **PREFER VERIFIED SOURCES**: When a "VERIFIED REFERENCE FACTS" section (from Wikipedia/Wikidata) is provided, treat it as more reliable than the coarse open-data estimates and than your own prior memory; where they conflict, go with the verified facts and note the correction. If you have a web-search tool available, use it to verify uncertain, city-specific, or potentially out-of-date facts (e.g. an island's real elevation, recent disasters) before relying on them — but your FINAL output must still be ONLY the JSON object below.
+10. **USE THE RESEARCH CONTEXT**: When a "RESEARCH CONTEXT" section (retrieved from the web/encyclopedia) is provided, treat it as cited evidence to cross-check the coarse open-data estimates and your own prior memory. Prefer well-corroborated retrieved facts, cite the source, and note conflicts. Do NOT treat any single database field as authoritative — corroborate it against the retrieved excerpts. If you have a web-search tool available, you may also use it to verify uncertain or city-specific facts. Either way, your FINAL output must be ONLY the JSON object below.
 
 ## THE TEN ESSENTIALS
 ${Object.entries(ESSENTIAL_NAMES).map(([n, name]) => `${n}. ${name}`).join("\n")}
@@ -164,15 +164,23 @@ export function buildUserPrompt(
     );
   }
 
-  // ── Verified reference facts (Wikipedia / Wikidata) ──
-  if (reference && (reference.summary || reference.facts.length)) {
-    parts.push(`\n## VERIFIED REFERENCE FACTS (authoritative — from Wikipedia / Wikidata)`);
+  // ── Research context (retrieved evidence — RAG) ──
+  if (reference && (reference.answer || reference.summary || reference.passages.length || reference.facts.length)) {
+    parts.push(`\n## RESEARCH CONTEXT (retrieved from the web & encyclopedia — evidence to cross-check, NOT gospel)`);
     parts.push(
-      `Treat these as more reliable than the coarse open-data estimates above and than your own prior memory. Where they conflict, prefer these and note the correction. Cite them (e.g. "Wikipedia" or "Wikidata") in sourceRefs when you rely on them.`
+      `Ground your analysis in this retrieved evidence and cite the source by name (e.g. "Wikipedia", or the site/title). Cross-check figures across the sources below. For physical facts such as elevation, rely on what these sources actually say and give a qualified value or range; treat any single database field as ONE source that may be wrong; never state a precise number as fact unless the retrieved evidence supports it. If sources conflict, say so briefly.`
     );
-    if (reference.summary) parts.push(`Overview (${reference.title}): ${reference.summary}`);
-    for (const f of reference.facts) {
-      parts.push(`  - ${f.label}: ${f.value} [${f.source}]`);
+    if (reference.answer) parts.push(`\nSynthesized answer: ${reference.answer}`);
+    if (reference.summary) parts.push(`\nOverview (${reference.title}): ${reference.summary}`);
+    if (reference.facts.length) {
+      parts.push(`\nReference data (single-source — verify against the excerpts):`);
+      for (const f of reference.facts) parts.push(`  - ${f.label}: ${f.value} [${f.source}]`);
+    }
+    if (reference.passages.length) {
+      parts.push(`\nRetrieved excerpts:`);
+      for (const p of reference.passages) {
+        parts.push(`  - [${p.source}] ${p.text} (${p.url})`);
+      }
     }
   }
 

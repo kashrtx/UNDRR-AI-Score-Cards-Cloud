@@ -205,11 +205,12 @@ export function buildReportHtml(p: ExportPayload): string {
   <table><thead><tr><th>Source</th><th class="num">Points</th></tr></thead><tbody>${sourceRows}</tbody></table>
 
   ${
-    dr?.reference && (dr.reference.facts.length || dr.reference.summary)
-      ? `<h2>Verified reference facts</h2>
-         <p class="sub">Cross-checked against ${dr.reference.sources
+    dr?.reference && (dr.reference.facts.length || dr.reference.answer || dr.reference.passages.length)
+      ? `<h2>Web research (cross-checked)</h2>
+         <p class="sub">Retrieved evidence from ${dr.reference.sources
+           .slice(0, 6)
            .map((s) => `<a href="${esc(s.url)}">${esc(s.name)}</a>`)
-           .join(", ")}.</p>
+           .join(", ")}. The AI was instructed to cross-check these and cite them, not to trust any single figure.</p>
          ${
            dr.reference.facts.length
              ? `<table><tbody>${dr.reference.facts
@@ -222,7 +223,7 @@ export function buildReportHtml(p: ExportPayload): string {
                  .join("")}</tbody></table>`
              : ""
          }
-         ${dr.reference.summary ? `<p>${esc(dr.reference.summary)}</p>` : ""}`
+         ${dr.reference.answer ? `<p>${esc(dr.reference.answer)}</p>` : ""}`
       : ""
   }
 

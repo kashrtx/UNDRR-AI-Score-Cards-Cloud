@@ -14,7 +14,7 @@ export const maxDuration = 30;
  * the facts or null so the analysis pipeline can proceed regardless.
  */
 export async function POST(req: NextRequest) {
-  let body: { city?: string; country?: string };
+  let body: { city?: string; country?: string; searchApiKey?: string };
   try {
     body = await req.json();
   } catch {
@@ -25,7 +25,7 @@ export async function POST(req: NextRequest) {
   if (!city) return NextResponse.json(null, { status: 200 });
 
   try {
-    const facts = await researchCity(city, country);
+    const facts = await researchCity(city, country, body.searchApiKey);
     return NextResponse.json(facts, { status: 200 });
   } catch {
     return NextResponse.json(null, { status: 200 });
