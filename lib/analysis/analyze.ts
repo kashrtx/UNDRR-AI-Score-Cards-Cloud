@@ -83,8 +83,9 @@ export async function runAnalysis(
   // can't browse). Best-effort: null on any failure.
   onProgress?.({
     step: "data-done",
-    label: "Cross-checking the city against Wikipedia & Wikidata…",
+    label: `Found ${dataReport.dataPoints} open-data point(s). Researching ${scorecard.city.name} on the web…`,
     pct: 30,
+    indeterminate: true,
   });
   let reference: ReferenceFacts | null = null;
   try {
@@ -103,6 +104,15 @@ export async function runAnalysis(
     dataReport = { ...dataReport, reference };
     onDataReport?.(dataReport);
   }
+  const refMethod = reference?.webSearchMethod;
+  const refCount = reference?.sources?.length ?? 0;
+  onProgress?.({
+    step: "research-done",
+    label: refCount
+      ? `Found ${refCount} reference source(s)${refMethod ? ` · web search: ${refMethod}` : ""}. Preparing the AI…`
+      : "No extra references found. Preparing the AI…",
+    pct: 40,
+  });
 
   // ── 2. Build prompts ──────────────────────────────────────
   const system = buildSystemPrompt();

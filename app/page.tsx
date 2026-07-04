@@ -496,7 +496,7 @@ export default function Page() {
                 {/* Live progress */}
                 {state === "analyzing" && (
                   <>
-                    <AnalysisProgress progress={progress} />
+                    <AnalysisProgress progress={progress} dataReport={dataReport} />
                     <DataSourcesPanel report={dataReport} live />
                     {narration && (
                       <div className="glass-card p-5">

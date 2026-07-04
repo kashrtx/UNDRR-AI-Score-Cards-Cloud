@@ -1,18 +1,19 @@
 "use client";
 
 /**
- * Analysis Progress — replaces the plain spinner with a live checklist so you
- * can see exactly which step the software is on and how long the AI step is
- * taking (its duration is unpredictable, so we show an elapsed timer).
+ * Analysis Progress — a live, self-narrating checklist. Each step shows a
+ * dynamic sub-line reflecting what actually happened (open-data points found,
+ * which web-search method ran and how many sources, etc.) so the user is always
+ * in the loop — no static placeholders.
  */
 
 import { useEffect, useState } from "react";
 import { CheckCircle2, Loader2, Circle } from "lucide-react";
-import type { ProgressEvent } from "@/lib/types";
+import type { ProgressEvent, DataReport } from "@/lib/types";
 
 const STEPS = [
   { key: "data", label: "Gathering free open data" },
-  { key: "research", label: "Researching the city (Wikipedia & Wikidata)" },
+  { key: "research", label: "Researching the city on the web" },
   { key: "llm", label: "AI is analysing the scorecard" },
   { key: "validate", label: "Checking the result" },
   { key: "done", label: "Finishing up" },
@@ -23,12 +24,20 @@ const DONE_AT: Record<string, number> = {
   start: 0,
   data: 0,
   "data-done": 1,
+  research: 1,
+  "research-done": 2,
   llm: 2,
   validate: 3,
   done: 5,
 };
 
-export function AnalysisProgress({ progress }: { progress: ProgressEvent | null }) {
+export function AnalysisProgress({
+  progress,
+  dataReport,
+}: {
+  progress: ProgressEvent | null;
+  dataReport?: DataReport | null;
+}) {
   const [elapsed, setElapsed] = useState(0);
   useEffect(() => {
     const t = setInterval(() => setElapsed((e) => e + 1), 1000);
@@ -40,10 +49,39 @@ export function AnalysisProgress({ progress }: { progress: ProgressEvent | null 
   const mm = String(Math.floor(elapsed / 60)).padStart(2, "0");
   const ss = String(elapsed % 60).padStart(2, "0");
 
+  const ref = dataReport?.reference;
+
+  // Dynamic sub-line for each step, based on real state.
+  const detailFor = (key: string, isDone: boolean, isActive: boolean): string | null => {
+    if (key === "data") {
+      if (isDone) return `${dataReport?.dataPoints ?? 0} open-data point(s) found`;
+      if (isActive) return "contacting open-data sources…";
+    }
+    if (key === "research") {
+      if (ref) {
+        const parts = ["Wikipedia"];
+        if (ref.webSearchMethod) parts.push(ref.webSearchMethod);
+        return `${parts.join(" + ")} · ${ref.sources.length} source(s)`;
+      }
+      if (isActive) return "searching Wikipedia + web…";
+      if (isDone) return "Wikipedia";
+    }
+    if (key === "llm") {
+      if (isActive) return "streaming the analysis… (this is the long part)";
+    }
+    return null;
+  };
+
   return (
-    <div className="glass-card p-8">
+    <div className="glass-card p-6 sm:p-8">
       <div className="flex items-center justify-between mb-4">
-        <h2 className="text-lg font-semibold text-text-primary">Analysing scorecard…</h2>
+        <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
+          <span className="relative flex h-2.5 w-2.5">
+            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent-400 opacity-75" />
+            <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-accent-500" />
+          </span>
+          Analysing scorecard…
+        </h2>
         <span className="text-sm font-mono text-text-secondary" aria-label="elapsed time">
           {mm}:{ss}
         </span>
@@ -58,24 +96,32 @@ export function AnalysisProgress({ progress }: { progress: ProgressEvent | null 
       </div>
 
       {/* Live message */}
-      <p className="text-sm text-accent-400 mb-5">{progress?.label ?? "Starting…"}</p>
+      <p className="text-sm text-accent-400 mb-5 min-h-[1.25rem] transition-all">
+        {progress?.label ?? "Starting…"}
+      </p>
 
-      {/* Step checklist */}
-      <ul className="space-y-2.5">
+      {/* Step checklist with dynamic detail */}
+      <ul className="space-y-3">
         {STEPS.map((s, i) => {
           const isDone = completed > i;
           const isActive = completed === i;
+          const detail = detailFor(s.key, isDone, isActive);
           return (
-            <li key={s.key} className="flex items-center gap-2.5 text-sm">
+            <li key={s.key} className="flex items-start gap-2.5 text-sm">
               {isDone ? (
-                <CheckCircle2 size={16} className="text-accent-400 shrink-0" />
+                <CheckCircle2 size={16} className="text-accent-400 shrink-0 mt-0.5" />
               ) : isActive ? (
-                <Loader2 size={16} className="animate-spin text-accent-400 shrink-0" />
+                <Loader2 size={16} className="animate-spin text-accent-400 shrink-0 mt-0.5" />
               ) : (
-                <Circle size={16} className="text-text-secondary/40 shrink-0" />
+                <Circle size={16} className="text-text-secondary/40 shrink-0 mt-0.5" />
               )}
-              <span className={isDone || isActive ? "text-text-primary" : "text-text-secondary"}>
-                {s.label}
+              <span className="flex-1">
+                <span className={isDone || isActive ? "text-text-primary" : "text-text-secondary"}>
+                  {s.label}
+                </span>
+                {detail && (
+                  <span className="block text-xs text-text-secondary mt-0.5">{detail}</span>
+                )}
               </span>
             </li>
           );
