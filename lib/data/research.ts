@@ -250,41 +250,58 @@ export async function researchCity(
     }
   }
 
-  // 2) General WEB SEARCH — exactly ONE method runs, by priority:
-  //    (a) your Tavily key (toggled on in Settings)  → best
-  //    (b) SEARXNG_URL env (self-hosted, open source)
-  //    (c) TAVILY_API_KEY env (deployer-set)
-  //    (d) DuckDuckGo (keyless fallback)
-  // Turning Tavily on therefore REPLACES the DuckDuckGo fallback — they never
-  // both run. Wikipedia/Wikidata above always run regardless (free + reliable).
-  const wq = `${query} elevation above sea level climate natural hazards flooding disaster history`;
+  // 2) General WEB SEARCH across several angles, so the model gets a rounded
+  //    picture: location & climate, hazards & disaster history, recent
+  //    initiatives & successes, and current challenges. Exactly ONE provider
+  //    runs (Tavily → SearXNG → env Tavily → DuckDuckGo); Wikipedia above
+  //    always runs too.
+  const topics = [
+    `${query} geography climate weather patterns rainfall sea level`,
+    `${query} natural disasters flooding storms cyclone tsunami history`,
+    `${query} climate resilience adaptation project initiative recent success`,
+    `${query} current challenges infrastructure water waste problems`,
+  ];
   const userKey = searchApiKey && searchApiKey.trim();
   const envKey = process.env.TAVILY_API_KEY;
   const searxUrl = process.env.SEARXNG_URL;
+
+  const merge = (batches: Array<{ title: string; url: string; content: string }>[]) => {
+    const seen = new Set<string>();
+    const out: Array<{ title: string; url: string; content: string }> = [];
+    for (const batch of batches) {
+      for (const r of batch) {
+        if (!r.url || seen.has(r.url)) continue;
+        seen.add(r.url);
+        out.push(r);
+      }
+    }
+    return out;
+  };
+
   let web: Array<{ title: string; url: string; content: string }> = [];
   let webSearchMethod: string | undefined;
   try {
-    if (userKey) {
+    if (userKey || (!searxUrl && envKey)) {
+      const key = (userKey || envKey) as string;
       webSearchMethod = "Tavily";
-      const t = await tavily(userKey, wq);
-      answer = t.answer ? trunc(t.answer, 1200) : undefined;
-      web = t.results;
+      const settled = await Promise.allSettled(topics.map((q) => tavily(key, q)));
+      const ok = settled.filter((s) => s.status === "fulfilled").map((s) => (s as PromiseFulfilledResult<Awaited<ReturnType<typeof tavily>>>).value);
+      answer = ok.find((r) => r.answer)?.answer;
+      if (answer) answer = trunc(answer, 1200);
+      web = merge(ok.map((r) => r.results));
     } else if (searxUrl) {
       webSearchMethod = "SearXNG";
-      web = await searxng(searxUrl, wq);
-    } else if (envKey) {
-      webSearchMethod = "Tavily";
-      const t = await tavily(envKey, wq);
-      answer = t.answer ? trunc(t.answer, 1200) : undefined;
-      web = t.results;
+      const settled = await Promise.allSettled(topics.slice(0, 3).map((q) => searxng(searxUrl, q)));
+      web = merge(settled.filter((s) => s.status === "fulfilled").map((s) => (s as PromiseFulfilledResult<Array<{ title: string; url: string; content: string }>>).value));
     } else {
       webSearchMethod = "DuckDuckGo";
-      web = await duckduckgo(wq);
+      const settled = await Promise.allSettled(topics.slice(0, 2).map((q) => duckduckgo(q)));
+      web = merge(settled.filter((s) => s.status === "fulfilled").map((s) => (s as PromiseFulfilledResult<Array<{ title: string; url: string; content: string }>>).value));
     }
   } catch {
     web = [];
   }
-  for (const r of web.slice(0, 4)) {
+  for (const r of web.slice(0, 8)) {
     if (r.content || r.title) {
       passages.push({ source: r.title, url: r.url, text: r.content || r.title });
       sources.push({ name: r.title, url: r.url });

@@ -168,7 +168,7 @@ export function buildUserPrompt(
   if (reference && (reference.answer || reference.summary || reference.passages.length || reference.facts.length)) {
     parts.push(`\n## RESEARCH CONTEXT (retrieved from the web & encyclopedia — evidence to cross-check, NOT gospel)`);
     parts.push(
-      `Ground your analysis in this retrieved evidence and cite the source by name (e.g. "Wikipedia", or the site/title). Cross-check figures across the sources below. For physical facts such as elevation, rely on what these sources actually say and give a qualified value or range; treat any single database field as ONE source that may be wrong; never state a precise number as fact unless the retrieved evidence supports it. If sources conflict, say so briefly.`
+      `Ground your analysis in this retrieved evidence and cite the source by name (for example "Wikipedia", or the site or title). The evidence spans the city's geography and climate, its hazards and past disasters, recent resilience initiatives and successes, and current challenges. Use recent initiatives and projects to inform strengths, and ongoing or historical problems to inform weaknesses and the action plan. Cross-check figures across the sources below. For physical facts such as elevation, rely on what these sources actually say and give a qualified value or range; treat any single database field as one source that may be wrong; never state a precise number as fact unless the retrieved evidence supports it. If sources conflict, say so briefly.`
     );
     if (reference.answer) parts.push(`\nSynthesized answer: ${reference.answer}`);
     if (reference.summary) parts.push(`\nOverview (${reference.title}): ${reference.summary}`);

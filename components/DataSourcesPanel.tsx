@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Data Sources panel — shows, right in the dashboard, exactly what the data
+ * Data Sources panel, shows, right in the dashboard, exactly what the data
  * engine found: whether the service is up, where the city was located, how many
  * data points each source returned, and any gaps. This is what you used to have
  * to read the terminal for.
@@ -37,7 +37,7 @@ export function DataSourcesPanel({ report, live }: { report: DataReport | null; 
           <AlertTriangle size={15} className="shrink-0 mt-0.5" />
           <span>
             The open-data service couldn&apos;t be reached, so the analysis used the scorecard alone.
-            This is usually a temporary network issue with the upstream free APIs — try running the analysis again.
+            This is usually a temporary network issue with the upstream free APIs, try running the analysis again.
           </span>
         </div>
       )}
@@ -126,7 +126,7 @@ export function DataSourcesPanel({ report, live }: { report: DataReport | null; 
                   </a>
                 </span>
               ))}
-              . The AI is instructed to cross-check these and cite them — not to trust any single figure.
+              . The AI is instructed to cross-check these and cite them, not to trust any single figure.
             </p>
           </div>
         )}

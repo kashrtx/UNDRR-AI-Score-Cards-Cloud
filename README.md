@@ -199,11 +199,20 @@ before). It works for every provider, including local models that can't browse,
 and needs **no API key**:
 
 - **Wikipedia** (keyless core): a multi-article search plus full-article
-  geography/hazard/climate extraction — bot-friendly and reliable from Vercel.
-- **Wikidata**: population & area only. Elevation is intentionally not surfaced
-  from Wikidata — it's unreliable for islands/coastal cities.
+  geography/hazard/climate extraction, bot-friendly and reliable from Vercel.
+- **Wikidata**: population and area only. Elevation is intentionally not surfaced
+  from Wikidata, since it's unreliable for islands and coastal cities.
 - **DuckDuckGo** (keyless, best-effort): a little general-web coverage. It can be
-  rate-limited/blocked from datacenter IPs, so it degrades silently.
+  rate-limited or blocked from datacenter IPs, so it degrades quietly.
+
+Whichever web search runs, it covers several angles for a rounded picture: the
+city's geography and climate, its hazards and past disasters, recent resilience
+initiatives and successes, and current challenges.
+
+### Appearance
+
+Light and dark themes are both built in. Light is the default; use the sun/moon
+button in the header to switch, and your choice is remembered.
 
 Optional, no-code upgrades for broader/higher-quality web results (set once in
 your Vercel environment — still no per-query hassle):

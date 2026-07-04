@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * ConfirmModal — a small, mobile-friendly modal for confirmations
+ * ConfirmModal, a small, mobile-friendly modal for confirmations
  * (e.g. "attaching a new file will clear the current results").
  */
 
@@ -31,7 +31,7 @@ export function ConfirmModal({
 
   const cls = (v: ModalAction["variant"]) =>
     v === "primary"
-      ? "bg-gradient-to-r from-accent-500 to-accent-400 text-surface hover:from-accent-400 hover:to-accent-500"
+      ? "bg-gradient-to-r from-accent-500 to-accent-400 text-on-accent hover:from-accent-400 hover:to-accent-500"
       : v === "danger"
       ? "bg-danger-500/15 text-danger-400 border border-danger-500/30 hover:bg-danger-500/25"
       : "border border-border text-text-secondary hover:text-text-primary";

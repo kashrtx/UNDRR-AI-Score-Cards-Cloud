@@ -1,5 +1,5 @@
 /**
- * Logo — an original resilience mark (rounded shield + a "resilience pulse"
+ * Logo, an original resilience mark (rounded shield + a "resilience pulse"
  * line + an AI badge). Deliberately NOT the official UNDRR emblem; it's a
  * custom wordmark-style icon for this tool.
  */

@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Scorecard Upload — drag-and-drop .xlsm file upload.
+ * Scorecard Upload, drag-and-drop .xlsm file upload.
  */
 
 import { useState, useCallback } from "react";

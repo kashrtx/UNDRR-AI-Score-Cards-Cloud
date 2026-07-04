@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Score Projection — interactive toggle showing how actions improve the score.
+ * Score Projection, interactive toggle showing how actions improve the score.
  * Check/uncheck actions to see projected score change.
  */
 

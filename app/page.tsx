@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Main app — UNDRR ARISE Scorecard Analyzer.
+ * Main app, UNDRR ARISE Scorecard Analyzer.
  *
  * Everything runs client-side. Scorecard, settings, AND the finished analysis
  * persist in localStorage, so a refresh restores the full dashboard. Results can
@@ -17,6 +17,7 @@ import {
 } from "lucide-react";
 
 import { Logo } from "@/components/Logo";
+import { ThemeToggle } from "@/components/ThemeToggle";
 import { RadarChart } from "@/components/RadarChart";
 import { ImpactDifficultyMatrix } from "@/components/ImpactDifficultyMatrix";
 import { ActionPlan } from "@/components/ActionPlan";
@@ -142,7 +143,7 @@ export default function Page() {
       localStorage.setItem(SCORECARD_NAME_KEY, name);
       localStorage.removeItem(ANALYSIS_KEY);
     } catch {
-      /* quota — non-fatal */
+      /* quota, non-fatal */
     }
   }, []);
 
@@ -248,7 +249,7 @@ export default function Page() {
       try {
         localStorage.setItem(ANALYSIS_KEY, JSON.stringify({ result, dataReport: dr, meta }));
       } catch {
-        /* quota — non-fatal */
+        /* quota, non-fatal */
       }
     } catch (err) {
       if (controller.signal.aborted) {
@@ -298,7 +299,7 @@ export default function Page() {
               <button
                 onClick={() => setTab("dashboard")}
                 className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                  tab === "dashboard" ? "bg-primary-700 text-text-primary" : "text-text-secondary hover:text-text-primary"
+                  tab === "dashboard" ? "bg-primary-700 text-white" : "text-text-secondary hover:text-text-primary"
                 }`}
               >
                 <LayoutDashboard size={15} /> <span className="hidden sm:inline">Dashboard</span>
@@ -306,17 +307,19 @@ export default function Page() {
               <button
                 onClick={() => setTab("settings")}
                 className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                  tab === "settings" ? "bg-primary-700 text-text-primary" : "text-text-secondary hover:text-text-primary"
+                  tab === "settings" ? "bg-primary-700 text-white" : "text-text-secondary hover:text-text-primary"
                 }`}
               >
                 <SettingsIcon size={15} /> <span className="hidden sm:inline">Settings</span>
               </button>
             </nav>
 
+            <ThemeToggle />
+
             {tab === "dashboard" && (state === "ready" || state === "results") && scorecard && (
               <button
                 onClick={handleAnalyze}
-                className="flex items-center gap-2 px-3.5 sm:px-5 py-2 rounded-xl text-sm font-semibold bg-gradient-to-r from-accent-500 to-accent-400 text-surface hover:from-accent-400 hover:to-accent-500 transition-all shadow-lg shadow-accent-500/25 active:scale-95 shrink-0"
+                className="flex items-center gap-2 px-3.5 sm:px-5 py-2 rounded-xl text-sm font-semibold bg-gradient-to-r from-accent-500 to-accent-400 text-on-accent hover:from-accent-400 hover:to-accent-500 transition-all shadow-lg shadow-accent-500/25 active:scale-95 shrink-0"
               >
                 {state === "results" ? <RotateCcw size={16} /> : <Play size={16} />}
                 {state === "results" ? "Re-run" : "Run Analysis"}
@@ -345,9 +348,9 @@ export default function Page() {
         <div className="max-w-[1600px] mx-auto flex items-start gap-2 text-sm text-warn-400">
           <Info size={14} className="shrink-0 mt-0.5" />
           <span>
-            <strong>Decision-support tool.</strong> Outputs are illustrative and AI-generated, and
-            <strong> depend on the AI model used</strong> — review by qualified disaster-resilience
-            professionals is required before implementation.
+            <strong>A helping hand, not the final word.</strong> These results are AI-generated and
+            will vary with the model you pick, so please have qualified disaster-resilience
+            professionals review them before acting.
           </span>
         </div>
       </div>
@@ -379,7 +382,7 @@ export default function Page() {
                   <div className="flex gap-2 justify-center">
                     <button
                       onClick={() => { setError(null); setState(scorecard ? "ready" : "empty"); }}
-                      className="px-4 py-2 text-sm rounded-lg bg-primary-700 text-text-primary hover:bg-primary-600 transition-colors"
+                      className="px-4 py-2 text-sm rounded-lg bg-primary-700 text-white hover:bg-primary-600 transition-colors"
                     >
                       Back
                     </button>
@@ -516,7 +519,7 @@ export default function Page() {
                     <div className="flex flex-wrap items-center gap-2">
                       <button
                         onClick={handleExportReport}
-                        className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold bg-gradient-to-r from-accent-500 to-accent-400 text-surface hover:from-accent-400 hover:to-accent-500 transition-all active:scale-95"
+                        className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold bg-gradient-to-r from-accent-500 to-accent-400 text-on-accent hover:from-accent-400 hover:to-accent-500 transition-all active:scale-95"
                       >
                         <Download size={15} /> Export report
                       </button>
@@ -548,8 +551,7 @@ export default function Page() {
                       <p className="mt-3 text-xs text-text-secondary flex items-start gap-1.5 bg-surface-overlay/40 border border-border rounded-lg px-3 py-2">
                         <Info size={13} className="shrink-0 mt-0.5 text-primary-300" />
                         This analysis reflects the judgement of the AI model above. A different model
-                        (or a re-run) may surface different strengths, gaps and recommendations —
-                        compare models for important decisions.
+                        (or a re-run) may surface different strengths, gaps and recommendations, compare models for important decisions.
                       </p>
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-5">
@@ -639,7 +641,7 @@ export default function Page() {
         Loading <strong className="text-text-primary">{pendingUpload?.name}</strong> will clear the
         current analysis results for{" "}
         <strong className="text-text-primary">{scorecard?.city.name}</strong>. You can download the
-        current results first — otherwise they&apos;ll be discarded.
+        current results first, otherwise they&apos;ll be discarded.
       </ConfirmModal>
 
       {/* ── Remove-scorecard warning modal ─────── */}
@@ -670,7 +672,7 @@ export default function Page() {
         ]}
       >
         Removing <strong className="text-text-primary">{scorecard?.city.name}</strong> will erase its
-        completed analysis results. This can&apos;t be undone — download them first if you want to
+        completed analysis results. This can&apos;t be undone, download them first if you want to
         keep a copy.
       </ConfirmModal>
 

@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Impact vs Difficulty Matrix — scatter plot with 4 quadrants.
+ * Impact vs Difficulty Matrix, scatter plot with 4 quadrants.
  * Actions are plotted as bubbles, colored by Essential, sized by cost tier.
  */
 

@@ -1,10 +1,10 @@
 "use client";
 
 /**
- * Analysis Progress — a live, self-narrating checklist. Each step shows a
+ * Analysis Progress, a live, self-narrating checklist. Each step shows a
  * dynamic sub-line reflecting what actually happened (open-data points found,
  * which web-search method ran and how many sources, etc.) so the user is always
- * in the loop — no static placeholders.
+ * in the loop, no static placeholders.
  */
 
 import { useEffect, useState } from "react";

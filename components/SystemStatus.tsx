@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * System status — an at-a-glance panel of everything the tool needs and whether
+ * System status, an at-a-glance panel of everything the tool needs and whether
  * it's healthy: the attached scorecard (with filename + a Remove button), the AI
  * provider (with a one-click Test), and the open-data service. Surfaces parse
  * warnings so you can see exactly what was read and flag anything off.
@@ -39,7 +39,7 @@ function parseChecks(sc: NormalizedScorecard): { warnings: string[]; essentialsW
     warnings.push(`Only ${sc.indicators.length} indicators detected (a full Preliminary scorecard has ~47). Double-check the file.`);
   }
   if (essentialsWithData < 10) {
-    warnings.push(`${10 - essentialsWithData} of the Ten Essentials have no indicators — some sections may not have parsed.`);
+    warnings.push(`${10 - essentialsWithData} of the Ten Essentials have no indicators, some sections may not have parsed.`);
   }
   return { warnings, essentialsWithData };
 }
@@ -115,7 +115,7 @@ export function SystemStatus({
             </>
           ) : (
             <p className="text-sm text-text-secondary">
-              No scorecard attached yet — upload one below to begin.
+              No scorecard attached yet, upload one below to begin.
             </p>
           )}
         </div>
@@ -145,7 +145,7 @@ export function SystemStatus({
               </span>
             ) : (
               <span className="inline-flex items-center gap-1 text-xs text-warn-400">
-                <KeyRound size={12} /> Needs a key — open Settings
+                <KeyRound size={12} /> Needs a key, open Settings
               </span>
             )}
           </div>
@@ -172,7 +172,7 @@ export function SystemStatus({
       <div className="flex items-center gap-3">
         <ShieldCheck size={15} className="text-accent-400" />
         <p className="text-xs text-text-secondary flex-1">
-          Open-data service ready — climate, infrastructure, seismic, national indicators &amp; disaster history are fetched automatically at analysis time.
+          Open-data service ready, climate, infrastructure, seismic, national indicators &amp; disaster history are fetched automatically at analysis time.
         </p>
       </div>
     </div>

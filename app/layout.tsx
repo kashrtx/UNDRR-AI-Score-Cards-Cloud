@@ -4,7 +4,7 @@ import "./globals.css";
 export const metadata: Metadata = {
   title: "UNDRR ARISE Scorecard Analyzer",
   description:
-    "Analyze a city's UNDRR Disaster Resilience Scorecard and generate a grounded, prioritized action plan — entirely in your browser.",
+    "Analyze a city's UNDRR Disaster Resilience Scorecard and get a grounded, prioritized action plan, right in your browser.",
   icons: {
     icon: [{ url: "/favicon.svg", type: "image/svg+xml" }],
     shortcut: ["/favicon.svg"],
@@ -13,15 +13,20 @@ export const metadata: Metadata = {
 };
 
 export const viewport: Viewport = {
-  themeColor: "#0b0f1a",
-  colorScheme: "dark",
+  colorScheme: "light dark",
 };
+
+// Apply the saved theme before paint so there's no flash. Default is light.
+const themeScript = `try{var t=localStorage.getItem('undrr.theme')||'light';if(t==='dark'){document.documentElement.classList.add('dark');}}catch(e){}`;
 
 export default function RootLayout({
   children,
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en">
+      <head>
+        <script dangerouslySetInnerHTML={{ __html: themeScript }} />
+      </head>
       <body className="antialiased">{children}</body>
     </html>
   );

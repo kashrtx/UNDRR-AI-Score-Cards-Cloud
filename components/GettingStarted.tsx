@@ -1,5 +1,5 @@
 /**
- * Getting Started — a short, friendly "what do I do?" panel, shown until the
+ * Getting Started, a short, friendly "what do I do?" panel, shown until the
  * user has run their first analysis.
  */
 
@@ -49,7 +49,7 @@ export function GettingStarted({ onOpenSettings }: { onOpenSettings: () => void 
       <p className="text-sm text-text-secondary mt-3">
         The status bar at the top shows whether your AI provider is ready. If it isn&apos;t, open{" "}
         <span className="text-primary-300">Settings</span> to pick a provider (Gemini and OpenRouter
-        have free tiers) and paste a key — or select your local Ollama model.
+        have free tiers) and paste a key, or select your local Ollama model.
       </p>
     </div>
   );

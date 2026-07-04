@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Status bar — a live, plain-language read-out of what's ready: which AI
+ * Status bar, a live, plain-language read-out of what's ready: which AI
  * provider is active, whether it has what it needs (an API key, or Ollama for
  * local), and whether a scorecard is loaded. Everything is client-side, so
  * there's no backend to be "down".
@@ -60,8 +60,8 @@ export function StatusBar({
       ? "Local model selected"
       : "API key saved"
     : isLocal
-    ? "Local model selected — make sure the local server is running"
-    : "No API key yet — add one in Settings";
+    ? "Local model selected, make sure the local server is running"
+    : "No API key yet, add one in Settings";
 
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">

@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Settings — choose which AI writes the analysis and configure it. Everything
+ * Settings, choose which AI writes the analysis and configure it. Everything
  * here is stored in THIS browser only: plain settings in localStorage, and API
  * keys encrypted with a device key (WebCrypto AES-GCM). Nothing is ever sent to
  * our server or stored in the repo.
@@ -60,7 +60,7 @@ const PROVIDER_META: Record<ProviderId, { title: string; subtitle: string; icon:
   },
 };
 
-// Display order — cloud first (the friction-free path), then local.
+// Display order, cloud first (the friction-free path), then local.
 const ORDER: ProviderId[] = ["gemini", "openrouter", "claude", "lmstudio", "ollama"];
 
 const inputCls =
@@ -165,7 +165,7 @@ export function SettingsTab({
       <div>
         <h2 className="text-lg font-semibold text-text-primary mb-1">AI provider</h2>
         <p className="text-sm text-text-secondary">
-          Choose who writes the analysis. All AI calls run in your browser — your key is sent
+          Choose who writes the analysis. All AI calls run in your browser, your key is sent
           only to the provider you pick, never to this site.
         </p>
       </div>
@@ -238,7 +238,7 @@ export function SettingsTab({
               className={`${inputCls} font-mono`}
               placeholder={
                 keyPresence[provider]
-                  ? "A key is saved — type to replace it, or leave blank to keep"
+                  ? "A key is saved, type to replace it, or leave blank to keep"
                   : provider === "claude" ? "sk-ant-…"
                   : provider === "openrouter" ? "sk-or-…"
                   : "AIza…"
@@ -272,7 +272,7 @@ export function SettingsTab({
         {isLocal && (
           <>
             <div className="text-xs text-warn-400 bg-warn-500/10 border border-warn-500/20 rounded-lg p-3">
-              <strong>On a phone or tablet?</strong> Local models won&apos;t work — the browser can
+              <strong>On a phone or tablet?</strong> Local models won&apos;t work, the browser can
               only reach a model server running on the same computer. On mobile, pick a cloud
               provider (Gemini, OpenRouter or Claude) instead.
             </div>
@@ -329,7 +329,7 @@ export function SettingsTab({
               <span className="text-xs text-text-secondary block mt-0.5">
                 {isCloud
                   ? "Separate from the research step below: the model itself runs live web searches via its provider (Gemini, Claude, OpenRouter) to verify facts and cite sources, then still receives the research context. If a search-enabled run fails, it automatically retries without it."
-                  : "Local models can't browse the web — this applies to cloud providers. Either way, every analysis gets the server-side research context (Wikipedia + web search) below."}
+                  : "Local models can't browse the web, this applies to cloud providers. Either way, every analysis gets the server-side research context (Wikipedia + web search) below."}
               </span>
             </span>
           </button>
@@ -354,36 +354,15 @@ export function SettingsTab({
         </div>
       </div>
 
-      {/* Web search RAG key (optional, global) */}
-      <div className="glass-card p-5 space-y-3">
+      {/* Web search (optional Tavily, keyless by default) */}
+      <div className="glass-card p-5 space-y-4">
         <div>
-          <h3 className="text-sm font-semibold text-text-primary flex items-center gap-1.5">
-            <Search size={15} className="text-accent-400" /> Web-search grounding
+          <h3 className="text-base font-bold text-text-primary flex items-center gap-2">
+            <Search size={17} className="text-accent-400" /> Web search
           </h3>
-          <p className="text-xs text-text-secondary mt-1">
-            Before the AI writes anything, a research step retrieves real, citable evidence about the
-            city and feeds it in as cross-checked context. It applies to every provider, including
-            local models that can&apos;t browse, and works in two layers:
-          </p>
-          <ul className="text-xs text-text-secondary mt-2 space-y-1 list-disc pl-4">
-            <li>
-              <strong className="text-text-primary">Always on (free, no key):</strong> Wikipedia
-              (multi-article + geography/hazard extraction) and Wikidata population/area.
-            </li>
-            <li>
-              <strong className="text-text-primary">Live web search — exactly one method runs</strong>,
-              by priority: your <strong className="text-text-primary">Tavily</strong> key (if switched
-              on below) → a <code className="text-primary-300">SEARXNG_URL</code> you&apos;ve set →
-              free <strong className="text-text-primary">DuckDuckGo</strong> fallback. Turning Tavily on
-              <strong className="text-text-primary"> replaces</strong> the DuckDuckGo fallback — they
-              never both run.
-            </li>
-          </ul>
-          <p className="text-xs text-text-secondary mt-2">
-            Optional, no-code deployer alternatives (set once in Vercel env): an open-source{" "}
-            <a className="text-primary-300 underline" href="https://searxng.org" target="_blank" rel="noreferrer">SearXNG</a>{" "}
-            instance via <code className="text-primary-300">SEARXNG_URL</code>, or{" "}
-            <code className="text-primary-300">TAVILY_API_KEY</code>.
+          <p className="text-sm text-text-secondary mt-1">
+            The tool always checks your city against Wikipedia for free, so the AI works from real
+            facts. You can also switch on Tavily for richer live web results.
           </p>
         </div>
 
@@ -395,27 +374,29 @@ export function SettingsTab({
               type="button"
               disabled={!tavilyReady}
               onClick={() => setDraft({ ...draft, useTavily: !draft.useTavily })}
-              className={`w-full flex items-start gap-3 text-left ${tavilyReady ? "" : "opacity-60 cursor-not-allowed"}`}
+              className={`w-full flex items-center gap-3 text-left ${tavilyReady ? "" : "opacity-60 cursor-not-allowed"}`}
             >
               <span
-                className={`mt-0.5 shrink-0 w-9 h-5 rounded-full transition-colors relative ${
+                className={`shrink-0 w-11 h-6 rounded-full relative ${
                   on ? "bg-accent-500" : "bg-surface-overlay border border-border"
                 }`}
               >
                 <span
-                  className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${
-                    on ? "left-[18px]" : "left-0.5"
+                  className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all ${
+                    on ? "left-[22px]" : "left-0.5"
                   }`}
                 />
               </span>
               <span>
-                <span className="text-sm text-text-primary">Use Tavily web search in the analysis</span>
-                <span className="text-xs text-text-secondary block mt-0.5">
+                <span className="text-base font-semibold text-text-primary block">
+                  Use Tavily for web search
+                </span>
+                <span className="text-sm text-text-secondary block">
                   {tavilyReady
                     ? on
-                      ? "On — Tavily is used for live web search (instead of DuckDuckGo)."
-                      : "Off — live web search uses the free DuckDuckGo fallback."
-                    : "Enter and save a Tavily key below to enable this."}
+                      ? "On. Tavily runs the live web search."
+                      : "Off. Live web search uses the free DuckDuckGo option."
+                    : "Add a Tavily key below to switch this on."}
                 </span>
               </span>
             </button>
@@ -423,29 +404,50 @@ export function SettingsTab({
         })()}
 
         <label className="block">
-          <span className="text-sm text-text-primary flex items-center gap-1.5">
-            <KeyRound size={13} /> Tavily API key <span className="text-text-secondary font-normal">(optional)</span>
+          <span className="text-sm font-semibold text-text-primary flex items-center gap-1.5">
+            <KeyRound size={14} /> Tavily key
+            <span className="text-text-secondary font-normal">(optional, free)</span>
           </span>
           <input
             type="password"
             value={searchKeyInput}
             onChange={(e) => setSearchKeyInput(e.target.value)}
             className={`${inputCls} font-mono`}
-            placeholder={searchKeyPresent ? "A key is saved — type to replace it, or leave blank to keep" : "tvly-…"}
+            placeholder={searchKeyPresent ? "Key saved. Type to replace it, or leave blank." : "tvly-..."}
           />
-          <span className="text-xs text-text-secondary">
-            Encrypted in this browser; sent only to your own app server to run the search. Alternatively,
-            set <code className="text-primary-300">TAVILY_API_KEY</code> in your Vercel environment (cleaner for a shared deployment).
-          </span>
           {searchKeyPresent && (
             <button
               onClick={() => { clearSearchKey(); setSearchKeyPresent(false); setDraft({ ...draft, useTavily: false }); }}
-              className="mt-2 inline-flex items-center gap-1.5 text-xs text-danger-400 hover:text-danger-500"
+              className="mt-2 inline-flex items-center gap-1.5 text-sm text-danger-400 hover:text-danger-500"
             >
-              <Trash2 size={12} /> Remove saved key
+              <Trash2 size={13} /> Remove saved key
             </button>
           )}
         </label>
+
+        <details className="text-sm text-text-secondary">
+          <summary className="cursor-pointer font-semibold text-text-primary select-none">
+            How web search works
+          </summary>
+          <div className="mt-2 space-y-2 leading-relaxed">
+            <p>
+              Wikipedia and Wikidata always run for free, and give the AI the city overview plus
+              population and area. On top of that, one live web search runs each time.
+            </p>
+            <p>
+              If Tavily is switched on, it does that search. Otherwise the tool uses free DuckDuckGo.
+              Only one of them runs, so turning Tavily on simply replaces DuckDuckGo.
+            </p>
+            <p>
+              Prefer to set it up once for everyone? Add{" "}
+              <code className="text-primary-300">TAVILY_API_KEY</code>, or point{" "}
+              <code className="text-primary-300">SEARXNG_URL</code> at your own{" "}
+              <a className="text-primary-300 underline" href="https://searxng.org" target="_blank" rel="noreferrer">SearXNG</a>{" "}
+              server, in your Vercel settings. Your key is encrypted in this browser and only sent to
+              your own app to run the search.
+            </p>
+          </div>
+        </details>
       </div>
 
       {/* Save */}
@@ -453,7 +455,7 @@ export function SettingsTab({
         <button
           onClick={save}
           disabled={saving}
-          className="flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-semibold bg-gradient-to-r from-accent-500 to-accent-400 text-surface hover:from-accent-400 hover:to-accent-500 transition-all active:scale-95 disabled:opacity-50"
+          className="flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-semibold bg-gradient-to-r from-accent-500 to-accent-400 text-on-accent hover:from-accent-400 hover:to-accent-500 transition-all active:scale-95 disabled:opacity-50"
         >
           {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
           Save settings

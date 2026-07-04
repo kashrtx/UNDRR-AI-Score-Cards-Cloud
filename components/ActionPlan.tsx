@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Action Plan — tabbed/filtered table showing Now / Next / Later actions.
+ * Action Plan, tabbed/filtered table showing Now / Next / Later actions.
  * Expandable rows with source references.
  */
 

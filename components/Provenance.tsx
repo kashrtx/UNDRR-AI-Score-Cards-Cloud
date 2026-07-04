@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Provenance Tooltip — shows data source info on hover.
+ * Provenance Tooltip, shows data source info on hover.
  * Reusable component for grounding every data point.
  */
 
