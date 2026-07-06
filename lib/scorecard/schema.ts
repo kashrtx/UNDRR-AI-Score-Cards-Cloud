@@ -33,6 +33,7 @@ export const IndicatorSchema = z.object({
   score: z.union([z.literal(0), z.literal(1), z.literal(2), z.literal(3)]),
   maxScore: z.literal(3),
   notes: z.string().optional(),       // qualitative notes from the E-sheets
+  answered: z.boolean().optional(),   // whether this indicator was actually answered (vs a blank template)
 });
 
 export const CityProfileSchema = z.object({

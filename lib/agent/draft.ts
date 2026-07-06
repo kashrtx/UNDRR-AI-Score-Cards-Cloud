@@ -62,14 +62,27 @@ export function applyScores(
   return n;
 }
 
-/** Pre-fill a draft from a parsed (possibly partial) scorecard upload. */
-export function mergeScorecardIntoDraft(draft: Draft, sc: NormalizedScorecard): Draft {
+/**
+ * Pre-fill a draft from a parsed (possibly partial) scorecard upload. Only
+ * indicators the file actually answered are loaded; blank ones stay unfilled so
+ * the assistant knows what is left to complete. Returns the merged draft and how
+ * many answers were loaded.
+ */
+export function mergeScorecardIntoDraft(
+  draft: Draft,
+  sc: NormalizedScorecard
+): { draft: Draft; loaded: number } {
   const next = { ...draft };
+  let loaded = 0;
   for (const ind of sc.indicators) {
+    if (ind.answered === false) continue; // blank in the source → leave unfilled
     const code = ind.code.toUpperCase().replace(/\s+/g, "");
-    if (code in next) next[code] = { score: ind.score, note: ind.notes || next[code]?.note || "" };
+    if (code in next) {
+      next[code] = { score: ind.score, note: ind.notes || next[code]?.note || "" };
+      loaded++;
+    }
   }
-  return next;
+  return { draft: next, loaded };
 }
 
 /** Turn the draft into the analyzer's NormalizedScorecard (unfilled → 0). */

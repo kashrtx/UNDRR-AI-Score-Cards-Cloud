@@ -76,6 +76,57 @@ function findSheet(wb: XLSX.WorkBook, pred: (name: string) => boolean): WS | und
   return key ? wb.Sheets[key] : undefined;
 }
 
+// ── Answered detection (blank template vs real answers) ───────────────────────
+/**
+ * The official 2024 tool records each answer as a radio group in the E-sheets
+ * (E01…E10): all boxes FALSE means unanswered, exactly one TRUE means answered.
+ * The Results "score" cell is 0 for both a blank indicator and a genuine 0, so
+ * we read the E-sheets to know which indicators were actually filled in. This is
+ * what lets the assistant tell a blank upload ("fill everything") from a partial
+ * one ("keep these, finish the rest").
+ */
+function detectAnswered(wb: XLSX.WorkBook): { answered: Set<string>; hadESheets: boolean } {
+  const answered = new Set<string>();
+  let hadESheets = false;
+  const HDR = /^(P\d+\.\d+)/i;
+
+  for (const name of wb.SheetNames) {
+    if (!/^E\d+$/i.test(name.trim())) continue;
+    const ws = wb.Sheets[name];
+    const range = sheetRange(ws);
+    if (!range) continue;
+
+    const headers: { row: number; code: string }[] = [];
+    for (let r = range.s.r; r <= range.e.r; r++) {
+      for (let c = range.s.c; c <= Math.min(range.s.c + 3, range.e.c); c++) {
+        const m = asStr(cellAt(ws, r, c)).match(HDR);
+        if (m) {
+          headers.push({ row: r, code: m[1].toUpperCase() });
+          break;
+        }
+      }
+    }
+    if (headers.length) hadESheets = true;
+
+    for (let i = 0; i < headers.length; i++) {
+      const start = headers[i].row;
+      const end = i + 1 < headers.length ? headers[i + 1].row : Math.min(start + 14, range.e.r);
+      let found = false;
+      for (let r = start + 1; r < end && !found; r++) {
+        for (let c = range.s.c; c <= Math.min(range.e.c, 15); c++) {
+          const v = cellAt(ws, r, c)?.v;
+          if (v === true || v === 1 || (typeof v === "string" && v.toLowerCase() === "true")) {
+            found = true;
+            break;
+          }
+        }
+      }
+      if (found) answered.add(headers[i].code);
+    }
+  }
+  return { answered, hadESheets };
+}
+
 // ── Indicator detection ───────────────────────────────────────────────────────
 interface RawIndicator {
   row: number;
@@ -304,15 +355,24 @@ function parseWorkbook(wb: XLSX.WorkBook): NormalizedScorecard {
   }
   const scoreOf = useInvert ? scoreInvert : scoreDirect;
 
+  // Which indicators were actually answered (vs a blank template).
+  const { answered, hadESheets } = detectAnswered(wb);
+  const isAnswered = (code: string, score: number): boolean =>
+    hadESheets ? answered.has(code) : declared ? true : score > 0;
+
   // 3. Build indicators.
-  const indicators: Indicator[] = bestRows.map((row) => ({
-    code: row.code,
-    essential: row.essential,
-    text: row.text,
-    score: scoreOf(rawValues.get(row.row)),
-    maxScore: 3 as const,
-    notes: undefined,
-  }));
+  const indicators: Indicator[] = bestRows.map((row) => {
+    const score = scoreOf(rawValues.get(row.row));
+    return {
+      code: row.code,
+      essential: row.essential,
+      text: row.text,
+      score,
+      maxScore: 3 as const,
+      notes: undefined,
+      answered: isAnswered(row.code, score),
+    };
+  });
 
   // 4. Per-Essential summaries (derived from the actual indicators).
   const essentials: EssentialSummary[] = [];

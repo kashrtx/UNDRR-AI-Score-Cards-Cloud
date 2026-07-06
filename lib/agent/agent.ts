@@ -24,6 +24,7 @@ export type TranscriptItem =
 
 export type AgentEvent =
   | { type: "thinking"; on: boolean }
+  | { type: "thought"; text: string }
   | { type: "assistant"; text: string }
   | { type: "tool"; label: string; detail?: string }
   | { type: "draft" }
@@ -35,9 +36,60 @@ export interface AgentContext {
   transcript: TranscriptItem[];
   draft: Draft;
   searchKey?: string | null;
+  city?: string;
+  country?: string;
 }
 
 const MAX_STEPS = 16;
+
+function sleep(ms: number, signal?: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const id = setTimeout(resolve, ms);
+    signal?.addEventListener(
+      "abort",
+      () => {
+        clearTimeout(id);
+        reject(new DOMException("Aborted", "AbortError"));
+      },
+      { once: true }
+    );
+  });
+}
+
+function isRateLimit(err: unknown): boolean {
+  const m = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  return /\b429\b|quota|rate.?limit|resource_exhausted|too many requests|overloaded|\b503\b/.test(m);
+}
+
+/**
+ * Call the model, riding out the rate limits that free tiers (e.g. Gemini)
+ * throw when the agent makes several quick calls. Waits and retries on 429-style
+ * errors; other errors bubble up immediately.
+ */
+async function completeWithRetry(
+  ctx: AgentContext,
+  user: string,
+  onEvent: (e: AgentEvent) => void,
+  signal?: AbortSignal
+): Promise<string> {
+  const waits = [5000, 12000];
+  let lastErr: unknown;
+  for (let attempt = 0; attempt <= waits.length; attempt++) {
+    try {
+      return await ctx.provider.complete(SYSTEM, user, undefined, signal);
+    } catch (e) {
+      lastErr = e;
+      if (signal?.aborted) throw e;
+      if (!isRateLimit(e) || attempt === waits.length) throw e;
+      const s = Math.round(waits[attempt] / 1000);
+      onEvent({ type: "tool", label: `Model is rate-limited, waiting ${s}s and retrying…` });
+      onEvent({ type: "thinking", on: false });
+      await sleep(waits[attempt], signal);
+      onEvent({ type: "thinking", on: true });
+    }
+  }
+  throw lastErr;
+}
 
 // ── System prompt ────────────────────────────────────────────
 function indicatorList(): string {
@@ -67,20 +119,23 @@ ${indicatorList()}
 
 HOW YOU WORK:
 - You reply with EXACTLY ONE JSON object per turn and NOTHING else. No prose outside the JSON, no markdown fences.
+- ALWAYS include a short "thought" field (one plain sentence) saying what you are doing and why, so the user can follow along.
 - Choose the single best next action:
-  {"action":"research_city","city":"<name>","country":"<name>"}  — gather open data + web facts about the city (climate, hazards, infrastructure, population). Do this once early when you know the city.
-  {"action":"web_search","query":"<query>"}  — look up a specific fact (e.g. "Toronto emergency management office budget", "Toronto early warning system").
-  {"action":"set_scores","scores":[{"code":"P1.1","score":2,"note":"<one short sentence on the basis>"}, ...]}  — fill one or more indicators. You may set many at once.
-  {"action":"message","text":"<what you want to say or ask the user>"}  — talk to the user and WAIT for their reply. Use this to ask for information only the city would know.
-  {"action":"finish","text":"<friendly wrap-up>"}  — only when ALL ${TOTAL_INDICATORS} indicators have a score.
+  {"thought":"...","action":"research_city","city":"<name>","country":"<name>"}  — gather open data + web facts about the city (climate, hazards, infrastructure, population). Do this once early when you know the city.
+  {"thought":"...","action":"web_search","query":"<query>"}  — look up a specific fact (e.g. "Toronto emergency management office budget", "Toronto early warning system").
+  {"thought":"...","action":"set_scores","scores":[{"code":"P1.1","score":2,"note":"<one short sentence on the basis>"}, ...]}  — fill one or more indicators. Include a note for EVERY indicator you score.
+  {"thought":"...","action":"message","text":"<what you want to say or ask the user>"}  — talk to the user and WAIT for their reply. Use this to ask for information only the city would know, or when the city name is missing.
+  {"thought":"...","action":"finish","text":"<friendly wrap-up>"}  — only when ALL ${TOTAL_INDICATORS} indicators have a score.
 
 RULES:
+- You need to know the target city. If no city has been provided, your FIRST action must be a "message" asking which city this scorecard is for. Do not guess a city.
 - Base every score on evidence: the user's statements, research results, or open data. Never invent specific facts, budgets, or programme names.
 - When an indicator depends on internal information only the city would know (plans, budgets, procedures) and you have no evidence, either ask the user with a "message", or set a conservative score with a note that clearly says it is an assumption to verify.
-- Keep notes to one short sentence naming the basis (e.g. "Based on city's flood plan mentioned by user" or "Assumption — please verify").
-- Prefer to set scores in reasonable batches (for example, one Essential at a time). Re-check the "unfilled" list before finishing.
+- Give EVERY scored indicator a one-sentence note naming the basis (e.g. "Based on city's flood plan mentioned by user" or "Assumption — please verify").
+- Work in batches (for example, one Essential at a time), and re-check the "unfilled" list before finishing.
 - Be efficient: research once, then fill. Do not repeat the same search.
-- If the user asked you to fill it autonomously, only use "message" when you genuinely need information you cannot research.`;
+- Some indicators may already be filled from an uploaded file. Keep those unless the user asks otherwise, and focus on the unfilled ones.
+- If the user asked you to fill it autonomously, only use "message" when you genuinely need information you cannot research (or the city is missing).`;
 
 // ── Robust JSON extraction (mirrors the analyzer's) ──────────
 function extractJson(text: string): string {
@@ -96,6 +151,7 @@ function extractJson(text: string): string {
 }
 
 interface AgentAction {
+  thought?: string;
   action: string;
   city?: string;
   country?: string;
@@ -139,7 +195,8 @@ async function researchTool(city: string, country: string | undefined, searchKey
       if (pts.length) lines.push("Open data:", ...pts);
     }
     if (refRes.status === "fulfilled" && refRes.value) {
-      const rf = refRes.value as { answer?: string; passages?: Array<{ text: string }> };
+      const rf = refRes.value as { answer?: string; passages?: Array<{ text: string }>; webSearchMethod?: string };
+      if (rf.webSearchMethod) lines.push(`(web search via ${rf.webSearchMethod})`);
       if (rf.answer) lines.push("", "Web summary:", rf.answer.slice(0, 900));
       for (const p of (rf.passages || []).slice(0, 4)) lines.push("- " + p.text.slice(0, 240));
     }
@@ -157,8 +214,9 @@ async function searchTool(query: string, searchKey?: string | null): Promise<str
       body: JSON.stringify({ query, searchApiKey: searchKey || undefined }),
     });
     if (!res.ok) return `Search failed (HTTP ${res.status}).`;
-    const r = (await res.json()) as { answer?: string; results?: Array<{ title: string; content: string }> };
+    const r = (await res.json()) as { answer?: string; method?: string; results?: Array<{ title: string; content: string }> };
     const lines: string[] = [];
+    if (r.method) lines.push(`(via ${r.method})`);
     if (r.answer) lines.push(r.answer.slice(0, 800));
     for (const it of (r.results || []).slice(0, 5)) lines.push(`- ${it.title}: ${(it.content || "").slice(0, 200)}`);
     return lines.length ? lines.join("\n") : "No results.";
@@ -181,12 +239,17 @@ function buildUser(ctx: AgentContext): string {
     .map((i) => `${i.code}=${ctx.draft[i.code].score}`)
     .join(", ");
 
+  const cityLine = ctx.city && ctx.city.trim()
+    ? `Target city: ${ctx.city}${ctx.country && ctx.country.trim() ? ", " + ctx.country : ""}.`
+    : "No city has been provided yet — ask the user which city this is for before scoring.";
+
   return `${history || "(no messages yet)"}
 
+${cityLine}
 CURRENT DRAFT: ${filled}/${TOTAL_INDICATORS} filled.${draftLines ? ` Scores so far: ${draftLines}.` : ""}
 ${unfilled.length ? `Still unfilled: ${unfilled.join(", ")}.` : "All indicators are filled."}
 
-Output ONLY the next action as a single JSON object.`;
+Output ONLY the next action as a single JSON object (remember the "thought" field).`;
 }
 
 // ── The turn loop ────────────────────────────────────────────
@@ -199,16 +262,25 @@ export async function runAgentTurn(
   onEvent: (e: AgentEvent) => void,
   signal?: AbortSignal
 ): Promise<void> {
+  let parseFailures = 0;
   for (let step = 0; step < MAX_STEPS; step++) {
     if (signal?.aborted) return;
     onEvent({ type: "thinking", on: true });
 
     let raw = "";
     try {
-      raw = await ctx.provider.complete(SYSTEM, buildUser(ctx), undefined, signal);
+      raw = await completeWithRetry(ctx, buildUser(ctx), onEvent, signal);
     } catch (e) {
       onEvent({ type: "thinking", on: false });
       if (signal?.aborted) return;
+      if (isRateLimit(e)) {
+        onEvent({
+          type: "error",
+          text:
+            "the model hit its rate limit or quota. Free tiers (like Gemini) allow only a few calls a minute, and the assistant makes several. Wait a minute and continue, or switch to a model with more headroom such as NVIDIA NIM in Settings",
+        });
+        return;
+      }
       onEvent({ type: "error", text: e instanceof Error ? e.message : String(e) });
       return;
     }
@@ -216,22 +288,28 @@ export async function runAgentTurn(
 
     const action = parseAction(raw);
     if (!action) {
-      ctx.transcript.push({ role: "tool", content: "Your last reply was not a single valid JSON action. Reply with exactly one JSON object." });
+      parseFailures++;
+      if (parseFailures >= 3) {
+        onEvent({ type: "error", text: "the model kept replying in a format I couldn't read. Try again, or switch to another model in Settings" });
+        return;
+      }
+      ctx.transcript.push({ role: "tool", content: "Your last reply was not a single valid JSON action. Reply with exactly one JSON object with a \"thought\" and an \"action\"." });
       continue;
     }
+    parseFailures = 0;
+    if (action.thought) onEvent({ type: "thought", text: action.thought });
 
     switch (action.action) {
       case "research_city": {
-        const city = action.city || "";
-        onEvent({ type: "tool", label: `Researching ${city || "the city"}…` });
-        const obs = await researchTool(city, action.country, ctx.searchKey);
+        const city = action.city || ctx.city || "";
+        onEvent({ type: "tool", label: `Researching ${city || "the city"}`, detail: "open data + web" });
+        const obs = await researchTool(city, action.country || ctx.country, ctx.searchKey);
         ctx.transcript.push({ role: "tool", content: `research_city(${city}):\n${obs}` });
-        onEvent({ type: "tool", label: `Researched ${city || "the city"}`, detail: "open data + web" });
         break;
       }
       case "web_search": {
         const q = action.query || "";
-        onEvent({ type: "tool", label: `Searching: ${q}` });
+        onEvent({ type: "tool", label: "Web search", detail: q.slice(0, 80) });
         const obs = await searchTool(q, ctx.searchKey);
         ctx.transcript.push({ role: "tool", content: `web_search(${q}):\n${obs}` });
         break;
@@ -251,6 +329,16 @@ export async function runAgentTurn(
         return; // wait for the user
       }
       case "finish": {
+        const remaining = unfilledCodes(ctx.draft);
+        if (remaining.length > 0) {
+          // Don't let it finish early: push it to complete every indicator.
+          onEvent({ type: "tool", label: `Not done yet — ${remaining.length} still to fill`, detail: "completing them" });
+          ctx.transcript.push({
+            role: "tool",
+            content: `You cannot finish yet: ${remaining.length} indicator(s) are still unfilled: ${remaining.join(", ")}. Score every one of them now (use a conservative estimate with a note if you must), then finish.`,
+          });
+          break;
+        }
         const text = action.text || "All done. Review the draft, then load it into the analyzer or download it.";
         ctx.transcript.push({ role: "assistant", content: text });
         onEvent({ type: "assistant", text });
@@ -262,7 +350,12 @@ export async function runAgentTurn(
     }
   }
 
-  const msg = "I've taken several steps. Let me pause so you can review the draft and tell me what to adjust or continue.";
+  const remaining = unfilledCodes(ctx.draft).length;
+  const msg =
+    remaining > 0
+      ? `I've done a lot of steps and there are still ${remaining} indicator(s) to go. Say "continue" and I'll keep filling them, or review what's there so far.`
+      : "All indicators are filled. Review the draft, then load it into the analyzer or download it.";
   ctx.transcript.push({ role: "assistant", content: msg });
   onEvent({ type: "assistant", text: msg });
+  if (remaining === 0) onEvent({ type: "done" });
 }

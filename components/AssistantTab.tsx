@@ -9,7 +9,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Bot, Send, Sparkles, Upload, Loader2, Wrench, Download, ArrowRight, RotateCcw, ClipboardCheck,
+  Bot, Send, Sparkles, Upload, Loader2, Wrench, Download, ArrowRight, RotateCcw, ClipboardCheck, Lightbulb,
 } from "lucide-react";
 import type { AppSettings } from "@/lib/settings/store";
 import { getSearchKey, hasSearchKey } from "@/lib/settings/store";
@@ -27,6 +27,7 @@ import { exportScorecardXlsx } from "@/lib/export/scorecardXlsx";
 type ChatItem =
   | { kind: "user"; text: string }
   | { kind: "assistant"; text: string }
+  | { kind: "thought"; text: string }
   | { kind: "tool"; label: string; detail?: string };
 
 const SCORE_LABELS: Record<string, string> = {
@@ -67,20 +68,40 @@ export function AssistantTab({
     chatEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [chat, thinking]);
 
+  // A gentle "still working" timer so the user can see it isn't frozen.
+  const [elapsed, setElapsed] = useState(0);
+  useEffect(() => {
+    if (!thinking) {
+      setElapsed(0);
+      return;
+    }
+    const t = setInterval(() => setElapsed((s) => s + 1), 1000);
+    return () => clearInterval(t);
+  }, [thinking]);
+
   const filled = filledCount(draft);
   const pct = Math.round((filled / TOTAL_INDICATORS) * 100);
 
   const ensureCtx = useCallback(async (): Promise<AgentContext> => {
     if (ctxRef.current) {
       ctxRef.current.draft = draftRef.current; // sync any manual edits in
+      ctxRef.current.city = city.trim();
+      ctxRef.current.country = country.trim();
       return ctxRef.current;
     }
     const provider = await createProvider(settings);
     const searchKey = hasSearchKey() ? await getSearchKey() : null;
-    const ctx: AgentContext = { provider, transcript: [], draft: draftRef.current, searchKey };
+    const ctx: AgentContext = {
+      provider,
+      transcript: [],
+      draft: draftRef.current,
+      searchKey,
+      city: city.trim(),
+      country: country.trim(),
+    };
     ctxRef.current = ctx;
     return ctx;
-  }, [settings]);
+  }, [settings, city, country]);
 
   const onEvent = useCallback((e: AgentEvent) => {
     switch (e.type) {
@@ -89,6 +110,9 @@ export function AssistantTab({
         break;
       case "assistant":
         setChat((c) => [...c, { kind: "assistant", text: e.text }]);
+        break;
+      case "thought":
+        setChat((c) => [...c, { kind: "thought", text: e.text }]);
         break;
       case "tool":
         setChat((c) => [...c, { kind: "tool", label: e.label, detail: e.detail }]);
@@ -130,11 +154,16 @@ export function AssistantTab({
     if (!city.trim()) return;
     setStarted(true);
     const cityLine = `${city.trim()}${country.trim() ? ", " + country.trim() : ""}`;
+    const already = filledCount(draftRef.current);
+    const scope =
+      already > 0
+        ? `Some indicators (${already} of ${TOTAL_INDICATORS}) are already filled from an uploaded file, keep those and complete the remaining ones for ${cityLine}. `
+        : `Please fill out the whole scorecard for ${cityLine}. `;
     const msg =
-      `Please fill out the whole scorecard for ${cityLine}. ` +
+      scope +
       (info.trim() ? `Here is what I know about the city: ${info.trim()}. ` : "") +
       `Research the city as needed, set every indicator with a short note, and only ask me if something truly cannot be researched.`;
-    setChat((c) => [...c, { kind: "user", text: `Fill it out for ${cityLine}.` }]);
+    setChat((c) => [...c, { kind: "user", text: already > 0 ? `Complete the rest for ${cityLine}.` : `Fill it out for ${cityLine}.` }]);
     void runTurn(msg);
   }, [city, country, info, runTurn]);
 
@@ -148,18 +177,34 @@ export function AssistantTab({
   }, [input, running, runTurn]);
 
   const handleUpload = useCallback(async (file: File) => {
+    setChat((c) => [...c, { kind: "tool", label: "Reading file", detail: file.name }]);
     try {
       const sc = await uploadScorecard(file);
+      let loaded = 0;
       setDraft((d) => {
-        const merged = mergeScorecardIntoDraft(d, sc);
-        if (ctxRef.current) ctxRef.current.draft = merged;
-        return merged;
+        const res = mergeScorecardIntoDraft(d, sc);
+        loaded = res.loaded;
+        if (ctxRef.current) ctxRef.current.draft = res.draft;
+        return res.draft;
       });
-      if (sc.city?.name && sc.city.name !== "Unknown") setCity(sc.city.name);
-      if (sc.city?.country && sc.city.country !== "Unknown") setCountry(sc.city.country);
-      setChat((c) => [...c, { kind: "tool", label: `Loaded ${file.name}`, detail: "existing answers pre-filled" }]);
+      const knownCity = sc.city?.name && sc.city.name !== "Unknown" ? sc.city.name : "";
+      const knownCountry = sc.city?.country && sc.city.country !== "Unknown" ? sc.city.country : "";
+      if (knownCity) setCity(knownCity);
+      if (knownCountry) setCountry(knownCountry);
+      setChat((c) => [
+        ...c,
+        { kind: "tool", label: `Parsed ${file.name}`, detail: `${loaded} of ${TOTAL_INDICATORS} answers found` },
+      ]);
+      // Guidance (no model call): confirm what loaded and clarify the city if missing.
+      const guidance = knownCity
+        ? `I loaded your file for ${knownCity}${knownCountry ? ", " + knownCountry : ""} with ${loaded} of ${TOTAL_INDICATORS} indicators already answered. Press "Fill it out for me" and I'll complete the rest, or tell me anything specific first.`
+        : loaded > 0
+        ? `I loaded ${loaded} of ${TOTAL_INDICATORS} answers, but I couldn't find the city name in the file. Which city is this scorecard for? (You can also type it in the City box above.)`
+        : `That file looks blank, no answers yet. Tell me the city (above) and press "Fill it out for me", and I'll complete the whole thing.`;
+      setChat((c) => [...c, { kind: "assistant", text: guidance }]);
+      setStarted(true);
     } catch (e) {
-      setChat((c) => [...c, { kind: "assistant", text: `Could not read that file: ${e instanceof Error ? e.message : String(e)}` }]);
+      setChat((c) => [...c, { kind: "assistant", text: `Could not read that file: ${e instanceof Error ? e.message : String(e)}. Make sure it's an official UNDRR Preliminary scorecard (.xlsm/.xlsx).` }]);
     }
   }, []);
 
@@ -197,90 +242,94 @@ export function AssistantTab({
     });
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-5">
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 lg:h-[calc(100vh-13rem)]">
       {/* ── Left: chat ─────────────────────────────── */}
-      <section className="glass-card p-5 flex flex-col min-h-[70vh]">
-        <div className="flex items-center gap-2 mb-1">
+      <section className="glass-card p-4 sm:p-5 flex flex-col h-[72vh] lg:h-full min-h-0 overflow-hidden">
+        <div className="flex items-center gap-2 mb-3 shrink-0">
           <Bot size={20} className="text-accent-400" />
           <h2 className="text-lg font-semibold text-text-primary">Scorecard assistant</h2>
         </div>
-        <p className="text-sm text-text-secondary mb-4">
-          Tell it about your city and it fills the scorecard for you, or chat step by step. It can research your city and the web as it goes.
-        </p>
 
-        {/* City setup (shown until first message) */}
-        {!started && (
-          <div className="space-y-3 mb-4 rounded-xl border border-border p-4 bg-surface-overlay/30">
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-              <div>
-                <label className="text-xs text-text-secondary">City</label>
-                <input
-                  value={city}
-                  onChange={(e) => setCity(e.target.value)}
-                  placeholder="e.g. Toronto"
-                  className="w-full mt-1 px-3 py-2 rounded-lg bg-surface-overlay border border-border text-text-primary text-sm"
-                />
-              </div>
-              <div>
-                <label className="text-xs text-text-secondary">Country</label>
-                <input
-                  value={country}
-                  onChange={(e) => setCountry(e.target.value)}
-                  placeholder="e.g. Canada"
-                  className="w-full mt-1 px-3 py-2 rounded-lg bg-surface-overlay border border-border text-text-primary text-sm"
-                />
-              </div>
+        {/* Always-visible setup: your city + how to start. Never disappears, so
+            you can edit the city or re-run at any time. */}
+        <div className="shrink-0 space-y-2.5 rounded-xl border border-border p-3 bg-surface-overlay/30 mb-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+            <div>
+              <label className="text-[11px] text-text-secondary">City</label>
+              <input
+                value={city}
+                onChange={(e) => setCity(e.target.value)}
+                placeholder="e.g. Toronto"
+                className="w-full mt-0.5 px-2.5 py-1.5 rounded-lg bg-surface-overlay border border-border text-text-primary text-sm"
+              />
             </div>
             <div>
-              <label className="text-xs text-text-secondary">Anything you already know (optional)</label>
-              <textarea
-                value={info}
-                onChange={(e) => setInfo(e.target.value)}
-                rows={2}
-                placeholder="e.g. We have a flood plan and an emergency office, but no early-warning system yet."
-                className="w-full mt-1 px-3 py-2 rounded-lg bg-surface-overlay border border-border text-text-primary text-sm resize-none"
-              />
-            </div>
-            <div className="flex flex-wrap gap-2">
-              <button
-                onClick={handleStartAutonomous}
-                disabled={!city.trim() || !providerReady}
-                className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold btn-accent disabled:opacity-50 disabled:cursor-not-allowed"
-              >
-                <Sparkles size={16} /> Fill it out for me
-              </button>
-              <button
-                onClick={() => fileRef.current?.click()}
-                className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium bg-surface-overlay border border-border text-text-primary"
-              >
-                <Upload size={15} /> Continue from a file
-              </button>
+              <label className="text-[11px] text-text-secondary">Country</label>
               <input
-                ref={fileRef}
-                type="file"
-                accept=".xlsm,.xlsx,.xls"
-                className="hidden"
-                onChange={(e) => {
-                  const f = e.target.files?.[0];
-                  if (f) void handleUpload(f);
-                  e.currentTarget.value = "";
-                }}
+                value={country}
+                onChange={(e) => setCountry(e.target.value)}
+                placeholder="e.g. Canada"
+                className="w-full mt-0.5 px-2.5 py-1.5 rounded-lg bg-surface-overlay border border-border text-text-primary text-sm"
               />
             </div>
-            {!providerReady && (
-              <p className="text-xs text-warn-400">Choose an AI model and add a key in Settings first.</p>
-            )}
           </div>
-        )}
+          <textarea
+            value={info}
+            onChange={(e) => setInfo(e.target.value)}
+            rows={2}
+            placeholder="Anything you already know (optional): e.g. we have a flood plan but no early-warning system."
+            className="w-full px-2.5 py-1.5 rounded-lg bg-surface-overlay border border-border text-text-primary text-sm resize-none"
+          />
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={handleStartAutonomous}
+              disabled={!city.trim() || !providerReady || running}
+              className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-semibold btn-accent disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              <Sparkles size={16} /> Fill it out for me
+            </button>
+            <button
+              onClick={() => fileRef.current?.click()}
+              disabled={running}
+              className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium bg-surface-overlay border border-border text-text-primary disabled:opacity-50"
+            >
+              <Upload size={15} /> Continue from a file
+            </button>
+            <input
+              ref={fileRef}
+              type="file"
+              accept=".xlsm,.xlsx,.xls"
+              className="hidden"
+              onChange={(e) => {
+                const f = e.target.files?.[0];
+                if (f) void handleUpload(f);
+                e.currentTarget.value = "";
+              }}
+            />
+          </div>
+          {!providerReady && (
+            <p className="text-xs text-warn-400">Choose an AI model and add a key in Settings first.</p>
+          )}
+        </div>
 
-        {/* Chat log */}
-        <div className="flex-1 overflow-y-auto space-y-3 pr-1">
+        {/* Chat log (scrolls) */}
+        <div className="flex-1 overflow-y-auto min-h-0 space-y-3 pr-1">
+          {chat.length === 0 && (
+            <p className="text-sm text-text-secondary">
+              Fill in your city above and press &ldquo;Fill it out for me,&rdquo; or just type below to work through it together.
+            </p>
+          )}
           {chat.map((m, i) =>
             m.kind === "tool" ? (
               <div key={i} className="flex items-center gap-2 text-xs text-text-secondary">
                 <Wrench size={13} className="text-primary-300 shrink-0" />
                 <span className="font-medium text-text-primary">{m.label}</span>
-                {m.detail && <span className="text-text-secondary">· {m.detail}</span>}
+                {m.detail && <span className="text-text-secondary truncate">· {m.detail}</span>}
+              </div>
+            ) : m.kind === "thought" ? (
+              <div key={i} className="flex items-start gap-2 text-xs text-text-secondary italic">
+                <Lightbulb size={13} className="text-warn-400 shrink-0 mt-0.5" />
+                <span>{m.text}</span>
               </div>
             ) : (
               <div key={i} className={`flex ${m.kind === "user" ? "justify-end" : "justify-start"}`}>
@@ -298,14 +347,14 @@ export function AssistantTab({
           )}
           {thinking && (
             <div className="flex items-center gap-2 text-xs text-text-secondary">
-              <Loader2 size={14} className="animate-spin text-accent-400" /> Thinking…
+              <Loader2 size={14} className="animate-spin text-accent-400" /> Thinking{elapsed > 0 ? `… (${elapsed}s)` : "…"}
             </div>
           )}
           <div ref={chatEndRef} />
         </div>
 
-        {/* Composer */}
-        <div className="mt-3 flex items-end gap-2">
+        {/* Composer (always visible at the bottom of the pane) */}
+        <div className="shrink-0 mt-3 flex items-end gap-2">
           <textarea
             value={input}
             onChange={(e) => setInput(e.target.value)}
@@ -316,7 +365,7 @@ export function AssistantTab({
               }
             }}
             rows={1}
-            placeholder={started ? "Reply, or ask it to adjust something…" : "Or just start typing…"}
+            placeholder="Reply, or ask it to adjust something…"
             className="flex-1 px-3 py-2.5 rounded-xl bg-surface-overlay border border-border text-text-primary text-sm resize-none max-h-32"
           />
           {running ? (
@@ -337,19 +386,19 @@ export function AssistantTab({
       </section>
 
       {/* ── Right: live draft ──────────────────────── */}
-      <section className="glass-card p-5 flex flex-col min-h-[70vh]">
-        <div className="flex items-center justify-between mb-1">
+      <section className="glass-card p-4 sm:p-5 flex flex-col h-[72vh] lg:h-full min-h-0 overflow-hidden">
+        <div className="flex items-center justify-between mb-1 shrink-0">
           <div className="flex items-center gap-2">
             <ClipboardCheck size={20} className="text-accent-400" />
             <h2 className="text-lg font-semibold text-text-primary">Draft scorecard</h2>
           </div>
           <span className="text-sm font-medium text-text-secondary">{filled}/{TOTAL_INDICATORS}</span>
         </div>
-        <div className="h-2 rounded-full bg-surface-overlay overflow-hidden mb-4">
+        <div className="h-2 rounded-full bg-surface-overlay overflow-hidden mb-4 shrink-0">
           <div className="h-full btn-accent transition-all" style={{ width: `${pct}%` }} />
         </div>
 
-        <div className="flex-1 overflow-y-auto pr-1 space-y-4">
+        <div className="flex-1 overflow-y-auto min-h-0 pr-1 space-y-4">
           {Array.from({ length: 10 }, (_, k) => k + 1).map((e) => {
             const inds = PRELIMINARY_INDICATORS.filter((i) => i.essential === e);
             const done = inds.filter((i) => draft[i.code]?.score != null).length;
@@ -398,7 +447,7 @@ export function AssistantTab({
           })}
         </div>
 
-        <div className="mt-4 flex flex-wrap gap-2 border-t border-border pt-4">
+        <div className="shrink-0 mt-3 flex flex-wrap gap-2 border-t border-border pt-3 items-center">
           <button onClick={handleLoad} className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold btn-accent">
             <ArrowRight size={16} /> Load into analyzer
           </button>
@@ -407,19 +456,15 @@ export function AssistantTab({
           </button>
           <button
             onClick={() => {
-              setDraft(emptyDraft());
-              if (ctxRef.current) ctxRef.current.draft = emptyDraft();
+              const fresh = emptyDraft();
+              setDraft(fresh);
+              if (ctxRef.current) ctxRef.current.draft = fresh;
             }}
             className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium text-text-secondary hover:text-text-primary ml-auto"
           >
             <RotateCcw size={14} /> Reset
           </button>
         </div>
-        {filled < TOTAL_INDICATORS && (
-          <p className="text-xs text-text-secondary mt-2">
-            Unfilled indicators count as 0 if you load now. You can keep chatting to finish them.
-          </p>
-        )}
       </section>
     </div>
   );
