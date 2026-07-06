@@ -90,7 +90,7 @@ export function StatusBar({
         </span>
       </div>
 
-      <div className="flex items-center gap-1.5 text-text-secondary" title="Open data runs server-side (no setup needed)">
+      <div className="flex items-center gap-1.5 text-text-secondary" title="Public data is fetched for you, nothing to set up">
         <ShieldCheck size={14} className="text-accent-400" />
         <span>Open data ready</span>
       </div>
@@ -99,7 +99,7 @@ export function StatusBar({
         className="flex items-center gap-1.5"
         title={
           tavilyOn
-            ? "Tavily is running the live web search for grounding"
+            ? "Tavily is powering the live web search"
             : "Free web search (Wikipedia + DuckDuckGo). Add a Tavily key in Settings for richer results."
         }
       >

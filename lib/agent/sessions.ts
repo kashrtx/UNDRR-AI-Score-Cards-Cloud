@@ -13,6 +13,7 @@ export type ChatItem =
   | { kind: "user"; text: string }
   | { kind: "assistant"; text: string }
   | { kind: "thought"; text: string }
+  | { kind: "reasoning"; summary: string; detail?: string; seconds?: number }
   | { kind: "tool"; label: string; detail?: string };
 
 export interface Attachment {
@@ -47,6 +48,8 @@ function previewOf(chat: ChatItem[]): string {
     const m = chat[i];
     if (m.kind === "user" || m.kind === "assistant" || m.kind === "thought") {
       if (m.text && m.text.trim()) return m.text.trim().slice(0, 100);
+    } else if (m.kind === "reasoning" && m.summary) {
+      return m.summary.trim().slice(0, 100);
     } else if (m.kind === "tool" && m.label) {
       return m.label.slice(0, 100);
     }

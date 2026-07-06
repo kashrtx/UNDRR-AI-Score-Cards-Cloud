@@ -20,20 +20,52 @@ import type { Draft } from "@/lib/agent/draft";
 
 export interface CellEdit {
   ref: string;
-  value: number;
+  value: number | string;
   keepFormula?: boolean;
+}
+
+/** City-information fields written to the official template's "Info" sheet. */
+export interface TemplateInfo {
+  city?: string;
+  country?: string;
+  typeOfCity?: string;
+  date?: string;
+  population?: number;
+  mostLikelyHazard?: string;
+  mostSevereHazard?: string;
 }
 
 // ── Work out which cells to set, from the draft ──────────────
 const HDR = /^(P\d+\.\d+)\b/i;
 
-export function computeTemplateEdits(buf: ArrayBuffer, draft: Draft): Map<string, CellEdit[]> {
+export function computeTemplateEdits(
+  buf: ArrayBuffer,
+  draft: Draft,
+  info?: TemplateInfo
+): Map<string, CellEdit[]> {
   const wb = XLSX.read(buf, { type: "array" });
   const edits = new Map<string, CellEdit[]>();
-  const push = (sheet: string, ref: string, value: number, keepFormula?: boolean) => {
+  const push = (sheet: string, ref: string, value: number | string, keepFormula?: boolean) => {
     if (!edits.has(sheet)) edits.set(sheet, []);
     edits.get(sheet)!.push({ ref, value, keepFormula });
   };
+
+  // ── City Information sheet ("Info"): fill the identity block + hazards ──
+  if (info) {
+    const infoCells: Array<[string, string | number | undefined]> = [
+      ["C4", info.city],
+      ["C5", info.typeOfCity],
+      ["C6", info.country],
+      ["C7", info.date],
+      ["C11", info.population],
+      ["C21", info.mostLikelyHazard],
+      ["C22", info.mostSevereHazard],
+    ];
+    for (const [ref, val] of infoCells) {
+      if (val === undefined || val === null || val === "") continue;
+      push("Info", ref, val, false);
+    }
+  }
 
   for (const name of wb.SheetNames) {
     if (!/^E\d+$/i.test(name)) continue;
@@ -233,27 +265,14 @@ function colToNum(ref: string): number {
   return n;
 }
 
-function setCellValue(xml: string, ref: string, value: number, keepFormula?: boolean): string {
-  const cellRe = new RegExp(`<c r="${ref}"([^>]*?)(?:/>|>([\\s\\S]*?)</c>)`);
-  const m = xml.match(cellRe);
-  if (m) {
-    let attrs = m[1] || "";
-    const inner = m[2] || "";
-    attrs = attrs.replace(/\s+t="[^"]*"/g, ""); // numbers carry no type
-    let newInner: string;
-    if (keepFormula) {
-      const f = inner.match(/<f[\s\S]*?<\/f>|<f[^>]*\/>/);
-      newInner = `${f ? f[0] : ""}<v>${value}</v>`;
-    } else {
-      newInner = `<v>${value}</v>`;
-    }
-    return xml.replace(cellRe, `<c r="${ref}"${attrs}>${newInner}</c>`);
-  }
+function xmlEsc(s: string): string {
+  return s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;");
+}
 
-  // Cell absent — insert into its row (in column order).
+// Insert a brand-new cell (in column order) when the ref is absent.
+function insertCellXml(xml: string, ref: string, cellXml: string): string {
   const rowNum = ref.replace(/[A-Z]/g, "");
   const colN = colToNum(ref);
-  const newCell = `<c r="${ref}"><v>${value}</v></c>`;
   const rowRe = new RegExp(`(<row r="${rowNum}"[^>]*>)([\\s\\S]*?)(</row>)`);
   const rm = xml.match(rowRe);
   if (rm) {
@@ -264,20 +283,48 @@ function setCellValue(xml: string, ref: string, value: number, keepFormula?: boo
     while ((cm = cellTag.exec(body))) {
       if (colToNum(cm[1]) > colN) { insertAt = cm.index; break; }
     }
-    const newBody = body.slice(0, insertAt) + newCell + body.slice(insertAt);
+    const newBody = body.slice(0, insertAt) + cellXml + body.slice(insertAt);
     return xml.replace(rowRe, `${rm[1]}${newBody}${rm[3]}`);
   }
-
-  // Row absent — insert a new row in row order inside <sheetData>.
   const rowTag = /<row r="(\d+)"[^>]*>/g;
   let insertAt = -1;
   let rmatch: RegExpExecArray | null;
   while ((rmatch = rowTag.exec(xml))) {
     if (parseInt(rmatch[1], 10) > parseInt(rowNum, 10)) { insertAt = rmatch.index; break; }
   }
-  const rowXml = `<row r="${rowNum}">${newCell}</row>`;
+  const rowXml = `<row r="${rowNum}">${cellXml}</row>`;
   if (insertAt >= 0) return xml.slice(0, insertAt) + rowXml + xml.slice(insertAt);
   return xml.replace("</sheetData>", `${rowXml}</sheetData>`);
+}
+
+function setCellValue(xml: string, ref: string, value: number, keepFormula?: boolean): string {
+  const cellRe = new RegExp(`<c r="${ref}"([^>]*?)(?:/>|>([\\s\\S]*?)</c>)`);
+  const m = xml.match(cellRe);
+  if (m) {
+    let attrs = (m[1] || "").replace(/\s+t="[^"]*"/g, ""); // numbers carry no type
+    const inner = m[2] || "";
+    let newInner: string;
+    if (keepFormula) {
+      const f = inner.match(/<f[\s\S]*?<\/f>|<f[^>]*\/>/);
+      newInner = `${f ? f[0] : ""}<v>${value}</v>`;
+    } else {
+      newInner = `<v>${value}</v>`;
+    }
+    return xml.replace(cellRe, `<c r="${ref}"${attrs}>${newInner}</c>`);
+  }
+  return insertCellXml(xml, ref, `<c r="${ref}"><v>${value}</v></c>`);
+}
+
+// Write a text cell that references the shared-strings table (t="s"), matching
+// how the template itself stores every label — the most universally-read form.
+function setSharedCell(xml: string, ref: string, index: number): string {
+  const cellRe = new RegExp(`<c r="${ref}"([^>]*?)(?:/>|>([\\s\\S]*?)</c>)`);
+  const m = xml.match(cellRe);
+  if (m) {
+    const attrs = (m[1] || "").replace(/\s+t="[^"]*"/g, "");
+    return xml.replace(cellRe, `<c r="${ref}"${attrs} t="s"><v>${index}</v></c>`);
+  }
+  return insertCellXml(xml, ref, `<c r="${ref}" t="s"><v>${index}</v></c>`);
 }
 
 function setFullCalc(wbXml: string): string {
@@ -289,6 +336,37 @@ function setFullCalc(wbXml: string): string {
   }
   if (/<\/sheets>/.test(wbXml)) return wbXml.replace("</sheets>", `</sheets><calcPr calcId="0" fullCalcOnLoad="1"/>`);
   return wbXml;
+}
+
+// ── Legacy option-button (radio) visual state ────────────────
+// Each indicator is a group of Form-Control option buttons. The group's first
+// button carries <x:FmlaLink>$E$row</x:FmlaLink>; the buttons appear in option
+// order (option 1 = "score 3" … option 4 = "score 0"). Excel shows the SELECTED
+// button from its stored <x:Checked>1</x:Checked> flag, so setting the linked E
+// cell alone leaves the circles empty. This stamps Checked on the right button
+// (position = the E value = 4 − score), exactly as a real Excel fill does.
+function applyRadioChecks(vml: string, rowToIdx: Map<number, number>): string {
+  const re = /<x:ClientData ObjectType="Radio">[\s\S]*?<\/x:ClientData>/g;
+  let curRow: number | null = null;
+  let pos = 0;
+  return vml.replace(re, (block) => {
+    const first = block.includes("<x:FirstButton/>");
+    if (first) {
+      const m = block.match(/<x:FmlaLink>\$E\$(\d+)<\/x:FmlaLink>/);
+      curRow = m ? parseInt(m[1], 10) : null;
+      pos = 1;
+    } else {
+      pos += 1;
+    }
+    if (curRow == null || !rowToIdx.has(curRow)) return block;
+    const wantIdx = rowToIdx.get(curRow)!;
+    // Remove any existing Checked, then stamp it on the selected option only.
+    let b = block.replace(/\s*<x:Checked>[\s\S]*?<\/x:Checked>/g, "");
+    if (pos === wantIdx) {
+      b = b.replace("</x:ClientData>", "<x:Checked>1</x:Checked>\r\n  </x:ClientData>");
+    }
+    return b;
+  });
 }
 
 // ── Public API ───────────────────────────────────────────────
@@ -314,6 +392,38 @@ export async function fillOfficialTemplate(
   const modified = new Map<string, Uint8Array>();
   const encoder = new TextEncoder();
 
+  // Register any text values in the shared-strings table (t="s"), the form the
+  // template uses for every label, then reference them by index in each cell.
+  const strIndex = new Map<string, number>();
+  const allStrings: string[] = [];
+  for (const eds of editsBySheet.values())
+    for (const ed of eds) if (typeof ed.value === "string") allStrings.push(ed.value);
+  const sstEntry = byName.get("xl/sharedStrings.xml");
+  if (allStrings.length && sstEntry) {
+    let sst = await getText(sstEntry);
+    let base = (sst.match(/<si[\s>]/g) || []).length; // current unique count = next index
+    let additions = "";
+    let added = 0;
+    for (const s of allStrings) {
+      if (strIndex.has(s)) continue;
+      strIndex.set(s, base++);
+      additions += `<si><t xml:space="preserve">${xmlEsc(s)}</t></si>`;
+      added++;
+    }
+    if (additions) {
+      sst = sst.replace("</sst>", `${additions}</sst>`);
+      sst = sst.replace(/<sst([^>]*)>/, (full, attrs: string) => {
+        const cm = /\bcount="(\d+)"/.exec(attrs);
+        const um = /\buniqueCount="(\d+)"/.exec(attrs);
+        const count = (cm ? parseInt(cm[1], 10) : 0) + allStrings.length;
+        const uniq = (um ? parseInt(um[1], 10) : 0) + added;
+        let a = attrs.replace(/\s+count="\d+"/, "").replace(/\s+uniqueCount="\d+"/, "");
+        return `<sst${a} count="${count}" uniqueCount="${uniq}">`;
+      });
+    }
+    modified.set("xl/sharedStrings.xml", encoder.encode(sst));
+  }
+
   for (const [sheetName, edits] of editsBySheet) {
     const rid = nameToRid[sheetName];
     const target = rid && ridToTarget[rid];
@@ -322,8 +432,44 @@ export async function fillOfficialTemplate(
     const entry = byName.get(path);
     if (!entry) continue;
     let xml = await getText(entry);
-    for (const ed of edits) xml = setCellValue(xml, ed.ref, ed.value, ed.keepFormula);
+    for (const ed of edits) {
+      if (typeof ed.value === "string") {
+        const idx = strIndex.get(ed.value);
+        if (idx != null) xml = setSharedCell(xml, ed.ref, idx);
+      } else {
+        xml = setCellValue(xml, ed.ref, ed.value, ed.keepFormula);
+      }
+    }
     modified.set(path, encoder.encode(xml));
+
+    // For the per-Essential answer sheets, also select the matching option
+    // buttons in the sheet's legacy VML drawing so the radios show as filled.
+    if (/^E\d+$/i.test(sheetName)) {
+      const rowToIdx = new Map<number, number>();
+      for (const ed of edits) {
+        const em = /^E(\d+)$/.exec(ed.ref);
+        if (em && ed.keepFormula === false && typeof ed.value === "number") {
+          rowToIdx.set(parseInt(em[1], 10), ed.value);
+        }
+      }
+      if (rowToIdx.size) {
+        const m = /worksheets\/(sheet\d+)\.xml$/.exec(path);
+        const relsPath = m ? `xl/worksheets/_rels/${m[1]}.xml.rels` : null;
+        const relsE = relsPath ? byName.get(relsPath) : null;
+        if (relsE) {
+          const rels = await getText(relsE);
+          const vm = /Target="([^"]*vmlDrawing\d+\.vml)"/.exec(rels);
+          if (vm) {
+            const vmlPath = ("xl/worksheets/" + vm[1]).replace(/xl\/worksheets\/\.\.\//, "xl/").replace(/\/{2,}/g, "/");
+            const vmlEntry = byName.get(vmlPath);
+            if (vmlEntry) {
+              const vml = await getText(vmlEntry);
+              modified.set(vmlPath, encoder.encode(applyRadioChecks(vml, rowToIdx)));
+            }
+          }
+        }
+      }
+    }
   }
 
   modified.set("xl/workbook.xml", encoder.encode(setFullCalc(wbXml)));

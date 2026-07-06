@@ -12,10 +12,10 @@ import { CheckCircle2, Loader2, Circle } from "lucide-react";
 import type { ProgressEvent, DataReport } from "@/lib/types";
 
 const STEPS = [
-  { key: "data", label: "Gathering free open data" },
-  { key: "research", label: "Researching the city on the web" },
-  { key: "llm", label: "AI is analysing the scorecard" },
-  { key: "validate", label: "Checking the result" },
+  { key: "data", label: "Gathering free public data about the city" },
+  { key: "research", label: "Reading up on the city online" },
+  { key: "llm", label: "The AI is working through the scorecard" },
+  { key: "validate", label: "Double-checking what it found" },
   { key: "done", label: "Finishing up" },
 ];
 

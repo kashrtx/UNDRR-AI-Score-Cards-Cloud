@@ -23,36 +23,36 @@ const STEPS: Step[] = [
   {
     icon: <Compass size={26} />,
     title: "Welcome",
-    body: "This tool turns a city's UNDRR disaster-resilience scorecard into a clear analysis and a prioritized action plan — or helps you build one from scratch. Here's the quick tour (about 30 seconds).",
+    body: "This tool takes a city's UNDRR disaster resilience scorecard and turns it into a clear analysis with a practical action plan. If you don't have a scorecard yet, it can help you build one. Here's a quick look around, it only takes about half a minute.",
   },
   {
     icon: <Bot size={26} />,
-    title: "Assistant — build a scorecard",
-    body: "New to the scorecard, or only part-way through? Open the Assistant tab.",
+    title: "The Assistant builds a scorecard for you",
+    body: "New to the scorecard, or only part way through? Head to the Assistant tab.",
     bullets: [
-      "Type your city and let it research and fill all 47 indicators, or chat through specific ones.",
-      "Attach documents so it can learn about your city, and watch it work in real time.",
-      "Download the real official .xlsm, or load it straight into the analyzer.",
+      "Type in your city and it will do the research and fill in all 47 questions for you.",
+      "Prefer to go question by question? Just chat with it and it will help.",
+      "When you're happy, download the real official file or send it straight to the analysis.",
     ],
   },
   {
     icon: <BarChart3 size={26} />,
-    title: "Dashboard — analyze it",
-    body: "On the Dashboard, drop in a completed scorecard (or one from the Assistant) and press Run Analysis.",
+    title: "The Dashboard analyzes it",
+    body: "On the Dashboard, add a completed scorecard (your own, or one from the Assistant) and press Run Analysis.",
     bullets: [
-      "It gathers free open data about the city, then finds strengths and gaps.",
-      "You get a plain-language summary, a priority matrix, a costed action plan, and a projected score.",
+      "It quietly gathers free public data about your city while it works.",
+      "You get a plain language summary, a clear picture of strong and weak areas, an action plan, and where your score could go.",
     ],
   },
   {
     icon: <SettingsIcon size={26} />,
-    title: "Settings — pick your AI",
-    body: "Choose an AI model and paste a key. Gemini and OpenRouter have free tiers; NVIDIA NIM is great for the Assistant. You can also turn on web search and replay this tour any time.",
+    title: "Settings is where you pick the AI",
+    body: "Choose which AI writes the analysis and paste in a key. Gemini and OpenRouter both have free options, and NVIDIA NIM works nicely for the Assistant. You can turn on web search here too, and come back to watch this tour again any time.",
   },
   {
     icon: <ShieldCheck size={26} />,
-    title: "A helping hand, not the final word",
-    body: "Results are AI-generated and vary with the model you pick, so have qualified disaster-resilience professionals review them before acting. Everything runs in your browser — your data stays with you.",
+    title: "A helping hand, not the last word",
+    body: "The AI's answers can vary depending on which model you choose, so please have someone who knows disaster resilience look them over before you act on them. Everything happens right here in your browser, so your information stays with you.",
   },
 ];
 

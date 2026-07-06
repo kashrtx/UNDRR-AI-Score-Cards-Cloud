@@ -419,7 +419,7 @@ export default function Page() {
       {/* ── Main ───────────────────────────────── */}
       <main className="flex-1 max-w-[1600px] w-full mx-auto px-4 sm:px-6 py-5 sm:py-6">
         {/* Assistant stays mounted so a run keeps going even if you switch tabs
-            (e.g. to change the model in Settings) — just hidden when inactive. */}
+            (e.g. to change the model in Settings), just hidden when inactive. */}
         <div className={tab === "assistant" ? "" : "hidden"}>
           <AssistantTab
             settings={settings}
@@ -550,25 +550,49 @@ export default function Page() {
                 {/* Radar */}
                 <RadarChart essentials={scorecard.essentials} />
 
-                {/* Critical gaps */}
-                {scorecard.indicators.some((i) => i.score === 0) && (
-                  <div className="glass-card p-5">
-                    <h2 className="text-base font-semibold text-danger-400 flex items-center gap-2 mb-3">
-                      <XCircle size={16} /> Critical Gaps (Score 0/3)
-                    </h2>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                      {scorecard.indicators.filter((i) => i.score === 0).map((ind) => (
-                        <div key={ind.code} className="flex items-start gap-2 p-3 rounded-lg bg-danger-500/5 border border-danger-500/15">
-                          <span className="font-mono text-xs text-danger-400 shrink-0 mt-0.5">{ind.code}</span>
-                          <div>
-                            <p className="text-sm text-text-primary">{ind.text}</p>
-                            {ind.notes && <p className="text-xs text-text-secondary mt-0.5">{ind.notes}</p>}
-                          </div>
-                        </div>
-                      ))}
+                {/* Weakest areas — computed straight from the scorecard, so it
+                    shows something useful even for a high-scoring city. */}
+                {(() => {
+                  const weak = [...scorecard.indicators]
+                    .filter((i) => typeof i.score === "number")
+                    .sort((a, b) => (a.score as number) - (b.score as number));
+                  const low = weak.filter((i) => (i.score as number) <= 1);
+                  const show = (low.length ? low : weak.slice(0, 5));
+                  if (!show.length) return null;
+                  const heading = low.length
+                    ? "Where this city looks weakest"
+                    : "Its lowest-scoring areas";
+                  return (
+                    <div className="glass-card p-5">
+                      <h2 className="text-base font-semibold text-text-primary flex items-center gap-2 mb-1">
+                        <AlertTriangle size={16} className="text-warn-400" /> {heading}
+                      </h2>
+                      <p className="text-sm text-text-secondary mb-3">
+                        These come straight from the scores in your file. Run the analysis for the reasons behind them and what to do next.
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                        {show.map((ind) => {
+                          const s = ind.score as number;
+                          const t = s === 0
+                            ? { box: "bg-danger-500/5 border-danger-500/15", code: "text-danger-400" }
+                            : s === 1
+                            ? { box: "bg-warn-500/5 border-warn-500/15", code: "text-warn-400" }
+                            : { box: "bg-primary-500/5 border-primary-500/15", code: "text-primary-300" };
+                          return (
+                            <div key={ind.code} className={`flex items-start gap-2 p-3 rounded-lg border ${t.box}`}>
+                              <span className={`font-mono text-xs shrink-0 mt-0.5 ${t.code}`}>{ind.code}</span>
+                              <div className="min-w-0">
+                                <p className="text-sm text-text-primary">{ind.text}</p>
+                                <p className={`text-xs mt-0.5 ${t.code}`}>Scored {s} out of 3</p>
+                                {ind.notes && <p className="text-xs text-text-secondary mt-0.5">{ind.notes}</p>}
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
                     </div>
-                  </div>
-                )}
+                  );
+                })()}
 
                 {/* Live progress */}
                 {state === "analyzing" && (
@@ -754,7 +778,7 @@ export default function Page() {
       {/* ── Slim footer (unobtrusive safety note) ─ */}
       <footer className="mt-auto border-t border-border px-4 sm:px-6 py-3">
         <p className="max-w-[1600px] mx-auto text-xs text-text-secondary text-center">
-          AI-generated results vary by model — please have qualified disaster-resilience professionals review them before acting. Everything runs in your browser.
+          The AI's answers can vary depending on the model you pick, so please have someone who knows disaster resilience look them over before acting on them. Everything runs right here in your browser.
         </p>
       </footer>
     </div>

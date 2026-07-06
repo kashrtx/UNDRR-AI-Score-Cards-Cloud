@@ -17,18 +17,18 @@ export function GettingStarted({
   const steps = [
     {
       icon: <Upload size={18} className="text-accent-400" />,
-      title: "1 · Load a scorecard",
-      body: "Drag a completed UNDRR scorecard (.xlsm/.xlsx) onto the upload box, or click it to choose a file. Everything is processed in your browser session.",
+      title: "1. Add your scorecard",
+      body: "Drag a completed UNDRR scorecard onto the box, or click to pick the file (.xlsm, .xlsx, or .xls). It's read right here on your device, nothing is uploaded to us.",
     },
     {
       icon: <Play size={18} className="text-accent-400" />,
-      title: "2 · Click “Run Analysis”",
-      body: "The app gathers free open data about the city, then asks the AI to find strengths, gaps and a prioritised action plan. You'll see each step as it happens.",
+      title: "2. Press Run Analysis",
+      body: "It gathers free public data about your city, then has the AI look for what's working, what's weak, and what to do about it. You'll see each step as it happens.",
     },
     {
       icon: <Sparkles size={18} className="text-accent-400" />,
-      title: "3 · Read the results",
-      body: "You'll get a plain-language summary, a strengths/weaknesses list, a priority matrix, a costed action plan and a projected score.",
+      title: "3. Read what comes back",
+      body: "You get a summary in plain language, the city's strong and weak spots, a priority chart, an action plan with rough costs, and where your score could go.",
     },
   ];
 
@@ -68,9 +68,9 @@ export function GettingStarted({
         ))}
       </div>
       <p className="text-sm text-text-secondary mt-3">
-        The status bar at the top shows whether your AI provider is ready. If it isn&apos;t, open{" "}
-        <span className="text-primary-300">Settings</span> to pick a provider (Gemini and OpenRouter
-        have free tiers) and paste a key, or select your local Ollama model.
+        The bar at the top tells you whether your AI is ready to go. If it isn&apos;t, pop into{" "}
+        <button onClick={onOpenSettings} className="text-primary-300 hover:text-text-primary underline underline-offset-2">Settings</button>{" "}
+        to pick one and add a key. Gemini and OpenRouter both have free options, or you can point it at your own local model.
       </p>
     </div>
   );

@@ -154,6 +154,12 @@ export function SettingsTab({
   const currentBase = draft[baseField] as string;
   const setBase = (value: string) => setDraft({ ...draft, [baseField]: value } as AppSettings);
 
+  // True when the person has picked or typed something they haven't saved yet.
+  const dirty =
+    JSON.stringify(draft) !== JSON.stringify(settings) ||
+    !!keyInput.trim() ||
+    !!searchKeyInput.trim();
+
   const save = async () => {
     setSaving(true);
     setSaved(false);
@@ -540,21 +546,38 @@ export function SettingsTab({
         </details>
       </div>
 
-      {/* Save */}
-      <div className="flex items-center gap-3">
-        <button
-          onClick={save}
-          disabled={saving}
-          className="flex items-center gap-2 px-5 py-2 rounded-xl text-sm font-semibold btn-accent transition-all active:scale-95 disabled:opacity-50"
+      {/* Save — sticks to the bottom of the screen so it's always in view and
+          nudges you when you've changed something but haven't saved it. */}
+      <div className="sticky bottom-3 z-20 pt-1">
+        <div
+          className={`flex items-center justify-between gap-3 rounded-2xl border px-4 py-3 shadow-lg backdrop-blur transition-colors ${
+            dirty
+              ? "bg-accent-500/10 border-accent-500/40"
+              : "bg-surface/90 border-border"
+          }`}
         >
-          {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
-          Save settings
-        </button>
-        {saved && (
-          <span className="flex items-center gap-1.5 text-sm text-accent-400">
-            <CheckCircle2 size={15} /> Saved
+          <span className="text-sm flex items-center gap-2 min-w-0">
+            {saved ? (
+              <span className="flex items-center gap-1.5 text-accent-400 font-medium">
+                <CheckCircle2 size={16} /> Saved
+              </span>
+            ) : dirty ? (
+              <span className="text-text-primary font-medium truncate">
+                You have changes that aren&apos;t saved yet
+              </span>
+            ) : (
+              <span className="text-text-secondary truncate">Everything here is saved</span>
+            )}
           </span>
-        )}
+          <button
+            onClick={save}
+            disabled={saving || (!dirty && !saved)}
+            className="shrink-0 flex items-center gap-2 px-5 py-2.5 rounded-xl text-sm font-semibold btn-accent transition-all active:scale-95 disabled:opacity-40"
+          >
+            {saving ? <Loader2 size={16} className="animate-spin" /> : <Save size={16} />}
+            {dirty ? "Save changes" : "Saved"}
+          </button>
+        </div>
       </div>
     </div>
   );

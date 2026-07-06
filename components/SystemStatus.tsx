@@ -104,8 +104,8 @@ export function SystemStatus({
                 )}
               </div>
               <p className="text-xs text-text-secondary mt-1">
-                {scorecard.city.name}, {scorecard.city.country} · read{" "}
-                <span className="text-text-primary">{scorecard.indicators.length}</span> indicators across{" "}
+                {scorecard.city.name}, {scorecard.city.country} · we read{" "}
+                <span className="text-text-primary">{scorecard.indicators.length}</span> answers across{" "}
                 <span className="text-text-primary">{checks?.essentialsWithData}/10</span> Essentials · score{" "}
                 <span className="text-accent-400 font-medium">{scorecard.total}/{scorecard.totalMax}</span> ({pct}%)
               </p>
@@ -178,7 +178,7 @@ export function SystemStatus({
       <div className="flex items-center gap-3">
         <ShieldCheck size={15} className="text-accent-400" />
         <p className="text-xs text-text-secondary flex-1">
-          Open-data service ready, climate, infrastructure, seismic, national indicators &amp; disaster history are fetched automatically at analysis time.
+          Public data is ready to go. When you run the analysis, it pulls in things like climate, infrastructure, earthquake risk, national statistics, and past disasters for you, all on its own.
         </p>
       </div>
     </div>

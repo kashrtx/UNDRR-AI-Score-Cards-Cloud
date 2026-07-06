@@ -1,7 +1,7 @@
 "use client";
 
 /**
- * Assistant tab — an AI agent that helps fill out the UNDRR ARISE Preliminary
+ * Assistant tab, an AI agent that helps fill out the UNDRR ARISE Preliminary
  * scorecard. Highlights:
  *   • Streams the model's output live so you can see it working.
  *   • Stop any time and Continue later (even after switching model, or once a
@@ -44,6 +44,55 @@ const SCORE_LABELS: Record<string, string> = {
 const TEXT_EXT = /\.(txt|md|markdown|csv|tsv|json|log|rtf|html?|xml|yaml|yml)$/i;
 const MAX_ATTACH_CHARS = 12000;
 
+// Pull the model's own reasoning (the words it wrote before/around the JSON it
+// returns) out of a raw step so we can keep it for the reader. Models that only
+// return JSON leave nothing here, and that's fine, the summary line covers them.
+function extractReasoning(raw: string): string {
+  if (!raw) return "";
+  let text = raw;
+  const think = text.match(/<think>([\s\S]*?)<\/think>/i);
+  if (think) {
+    text = think[1];
+  } else {
+    const brace = text.search(/\{\s*["']?(thought|action)/i);
+    if (brace > 0) text = text.slice(0, brace);
+  }
+  text = text.replace(/```[a-z]*|```/gi, "").trim();
+  return text.length > 30 ? text : "";
+}
+
+// A single "thinking" step in the chat log. The friendly summary is always
+// shown; the model's fuller reasoning tucks away behind a toggle so nothing is
+// lost and nothing is overwhelming.
+function ReasoningItem({ summary, detail, seconds }: { summary: string; detail?: string; seconds?: number }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <div className="flex items-start gap-2 text-xs text-text-secondary">
+      <Lightbulb size={13} className="text-warn-400 shrink-0 mt-0.5" />
+      <div className="min-w-0 flex-1">
+        <span className="italic">{summary}</span>
+        {detail && (
+          <>
+            {" "}
+            <button
+              onClick={() => setOpen((v) => !v)}
+              className="not-italic underline decoration-dotted underline-offset-2 hover:text-text-primary"
+              aria-expanded={open}
+            >
+              {open ? "Hide thinking" : `Show thinking${seconds ? ` (${seconds}s)` : ""}`}
+            </button>
+            {open && (
+              <pre className="mt-1.5 whitespace-pre-wrap break-words text-[11px] leading-relaxed text-text-secondary bg-surface-overlay/50 border border-border rounded-lg p-2.5 max-h-64 overflow-y-auto">
+                {detail}
+              </pre>
+            )}
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 export function AssistantTab({
   settings,
   providerReady,
@@ -82,6 +131,7 @@ export function AssistantTab({
   attachRef.current = attachments;
   const streamBuf = useRef("");
   const streamScheduled = useRef(false);
+  const stepStartRef = useRef(0);
   const templateBufRef = useRef<ArrayBuffer | null>(null);
   const lastModeRef = useRef<"autonomous" | "assist">("assist");
   const [building, setBuilding] = useState(false);
@@ -181,7 +231,7 @@ export function AssistantTab({
     switch (e.type) {
       case "thinking":
         setThinking(e.on);
-        if (e.on) { streamBuf.current = ""; setStream(""); }
+        if (e.on) { streamBuf.current = ""; setStream(""); stepStartRef.current = Date.now(); }
         break;
       case "stream":
         streamBuf.current = (streamBuf.current + e.text).slice(-20000);
@@ -190,9 +240,17 @@ export function AssistantTab({
           setTimeout(() => { setStream(streamBuf.current); streamScheduled.current = false; }, 90);
         }
         break;
-      case "thought":
-        setChat((c) => [...c, { kind: "thought", text: e.text }]);
+      case "thought": {
+        // Freeze this step's thinking into the history so it can always be
+        // scrolled back to and expanded, instead of vanishing when the next
+        // step starts.
+        const seconds = Math.max(1, Math.round((Date.now() - stepStartRef.current) / 1000));
+        const detail = extractReasoning(streamBuf.current).slice(0, 8000);
+        setChat((c) => [...c, { kind: "reasoning", summary: e.text, detail: detail || undefined, seconds }]);
+        streamBuf.current = "";
+        setStream("");
         break;
+      }
       case "assistant":
         setChat((c) => [...c, { kind: "assistant", text: e.text }]);
         break;
@@ -207,10 +265,10 @@ export function AssistantTab({
         break;
       case "stopped":
         setContinuable(true);
-        setChat((c) => [...c, { kind: "tool", label: "Stopped", detail: "press Continue to resume" }]);
+        setChat((c) => [...c, { kind: "tool", label: "Paused", detail: "press Continue whenever you're ready" }]);
         break;
       case "error":
-        setChat((c) => [...c, { kind: "assistant", text: `⚠ Couldn't continue: ${e.text}.` }]);
+        setChat((c) => [...c, { kind: "assistant", text: `I couldn't keep going: ${e.text}.` }]);
         setContinuable(!!e.canContinue);
         break;
     }
@@ -275,7 +333,7 @@ export function AssistantTab({
     const already = filledCount(draftRef.current);
     const scope =
       already > 0
-        ? `Some indicators (${already} of ${TOTAL_INDICATORS}) are already filled from an uploaded file — keep those and complete the remaining ones for ${cityLine}. `
+        ? `Some indicators (${already} of ${TOTAL_INDICATORS}) are already filled in from the file you uploaded. I'll keep those and finish the rest for ${cityLine}. `
         : `Please fill out the whole scorecard for ${cityLine}. `;
     const msg =
       scope +
@@ -329,7 +387,7 @@ export function AssistantTab({
         ? `Loaded your file for ${knownCity}${knownCountry ? ", " + knownCountry : ""} with ${loaded} of ${TOTAL_INDICATORS} indicators already answered. Press "Fill it out for me" and I'll complete the rest.`
         : loaded > 0
         ? `Loaded ${loaded} of ${TOTAL_INDICATORS} answers, but I couldn't find the city in the file. Which city is this scorecard for? (You can also type it in the City box above.)`
-        : `That file looks blank — no answers yet. Enter the city above and press "Fill it out for me", and I'll complete the whole thing.`;
+        : `That file doesn't have any answers in it yet. Type your city above and press "Fill it out for me" and I'll take it from there.`;
       setChat((c) => [...c, { kind: "assistant", text: guidance }]);
     } catch (e) {
       setChat((c) => [...c, { kind: "assistant", text: `Could not read that file: ${e instanceof Error ? e.message : String(e)}. Make sure it's an official UNDRR Preliminary scorecard (.xlsm/.xlsx).` }]);
@@ -355,7 +413,7 @@ export function AssistantTab({
     const added: Attachment[] = [];
     for (const file of Array.from(files)) {
       if (!TEXT_EXT.test(file.name) && !file.type.startsWith("text/")) {
-        setChat((c) => [...c, { kind: "assistant", text: `I can read text documents (txt, md, csv, json, html). "${file.name}" is a ${file.name.split(".").pop()?.toUpperCase() || "binary"} file — please paste its key text into the chat and I'll use it.` }]);
+        setChat((c) => [...c, { kind: "assistant", text: `I can read text documents (txt, md, csv, json, html). "${file.name}" is a ${file.name.split(".").pop()?.toUpperCase() || "binary"} file, so I can't read it directly. If you paste the important text into the chat, I'll use it.` }]);
         continue;
       }
       try {
@@ -448,12 +506,18 @@ export function AssistantTab({
   const handleDownloadOfficial = useCallback(async () => {
     setBuilding(true);
     try {
+      const info = {
+        city: city.trim() || undefined,
+        country: country.trim() || undefined,
+        typeOfCity: "Municipality",
+        date: new Date().toISOString().slice(0, 10),
+      };
       let buf = templateBufRef.current || (await fetchBundled());
-      let edits = computeTemplateEdits(buf, draftRef.current);
+      let edits = computeTemplateEdits(buf, draftRef.current, info);
       if (editCount(edits) < 40) {
-        // Uploaded base wasn't a standard official template — use the bundled one.
+        // Uploaded base wasn't a standard official template, so use the bundled one.
         buf = await fetchBundled();
-        edits = computeTemplateEdits(buf, draftRef.current);
+        edits = computeTemplateEdits(buf, draftRef.current, info);
       }
       const blob = await fillOfficialTemplate(buf, edits);
       const url = URL.createObjectURL(blob);
@@ -464,13 +528,13 @@ export function AssistantTab({
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
-      setChat((c) => [...c, { kind: "tool", label: "Built official scorecard (.xlsm)", detail: "real template, formatting + macros kept" }]);
+      setChat((c) => [...c, { kind: "tool", label: "Built completed scorecard (.xlsm)", detail: "official template · answers, radios & city info filled" }]);
     } catch (e) {
       setChat((c) => [...c, { kind: "assistant", text: `Couldn't build the official file: ${e instanceof Error ? e.message : String(e)}. You can use the simple .xlsx instead, or Load into analyzer.` }]);
     } finally {
       setBuilding(false);
     }
-  }, [city]);
+  }, [city, country]);
   const setScore = (code: string, score: Score | null) =>
     setDraft((d) => { const n = { ...d, [code]: { ...d[code], score } }; draftRef.current = n; return n; });
   const setNote = (code: string, note: string) =>
@@ -551,6 +615,8 @@ export function AssistantTab({
                 <Lightbulb size={13} className="text-warn-400 shrink-0 mt-0.5" />
                 <span>{m.text}</span>
               </div>
+            ) : m.kind === "reasoning" ? (
+              <ReasoningItem key={i} summary={m.summary} detail={m.detail} seconds={m.seconds} />
             ) : (
               <div key={i} className={`flex ${m.kind === "user" ? "justify-end" : "justify-start"}`}>
                 <div className={`max-w-[85%] px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap ${
@@ -566,7 +632,7 @@ export function AssistantTab({
               <div className="flex items-center gap-2 text-xs text-text-secondary">
                 <Loader2 size={14} className="animate-spin text-accent-400" /> Thinking{elapsed > 0 ? `… (${elapsed}s)` : "…"}
               </div>
-              {stream && <LiveStream text={stream} label="Show live output" defaultOpen={false} />}
+              {stream && <LiveStream text={stream} label="Show what it's writing" defaultOpen={false} />}
             </div>
           )}
           {showContinue && (
@@ -648,7 +714,7 @@ export function AssistantTab({
                           <select value={entry?.score == null ? "" : String(entry.score)}
                             onChange={(ev) => setScore(ind.code, ev.target.value === "" ? null : (Number(ev.target.value) as Score))}
                             className={`shrink-0 text-xs rounded-lg px-2 py-1 border bg-surface-overlay text-text-primary ${entry?.score == null ? "border-border" : "border-accent-500/40"}`}>
-                            <option value="">—</option>
+                            <option value="">not set</option>
                             <option value="0">{SCORE_LABELS["0"]}</option>
                             <option value="1">{SCORE_LABELS["1"]}</option>
                             <option value="2">{SCORE_LABELS["2"]}</option>
@@ -674,12 +740,13 @@ export function AssistantTab({
             <ArrowRight size={16} /> Load into analyzer
           </button>
           <button onClick={handleDownloadOfficial} disabled={building}
+            title="The scorecard you just built, filled into the real UNDRR .xlsm template"
             className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium bg-surface-overlay border border-border text-text-primary disabled:opacity-60">
-            {building ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />} Download official scorecard (.xlsm)
+            {building ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />} Download completed scorecard (.xlsm)
           </button>
-          <button onClick={handleDownload} title="Plain spreadsheet (no template formatting)"
+          <button onClick={handleDownload} title="Plain spreadsheet without the official template formatting"
             className="text-xs text-text-secondary hover:text-text-primary ml-auto">
-            Simple .xlsx
+            Plain .xlsx
           </button>
         </div>
         {filled < TOTAL_INDICATORS && (

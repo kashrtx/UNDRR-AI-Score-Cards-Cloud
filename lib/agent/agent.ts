@@ -140,6 +140,7 @@ RULES:
 - Give EVERY scored indicator a one-sentence note naming the basis.
 - Score at most one or two Essentials (about ten indicators) per set_scores call, so the user sees steady progress and responses stay quick.
 - Do NOT re-score indicators that already have a score unless the user asked you to change them. Once every indicator you were asked to handle is set, call "finish".
+- Do NOT announce running totals or how many indicators you have completed ("I've done 12 of 47") — the app tracks and displays the authoritative progress. In your thought, just say which Essential or indicators you are about to score.
 - Be efficient: research once, then fill. Do not repeat the same search or re-submit the same scores.`;
 
 // ── Robust JSON extraction (mirrors the analyzer's) ──────────
@@ -359,8 +360,13 @@ export async function runAgentTurn(
         const n = applyScores(ctx.draft, action.scores || []);
         onEvent({ type: "draft" });
         const nowFilled = filledCount(ctx.draft);
+        const added = Math.max(0, nowFilled - prevFilled); // newly-filled indicators
         ctx.transcript.push({ role: "tool", content: `Applied ${n} score(s). ${nowFilled}/${TOTAL_INDICATORS} filled.` });
-        onEvent({ type: "tool", label: `Filled ${n} indicator${n === 1 ? "" : "s"}`, detail: `${nowFilled}/${TOTAL_INDICATORS} complete` });
+        onEvent({
+          type: "tool",
+          label: `${nowFilled}/${TOTAL_INDICATORS} indicators filled`,
+          detail: added > 0 ? `+${added} just now` : n > 0 ? `revised ${n}` : "no change",
+        });
 
         if (nowFilled <= prevFilled) stagnantScores++;
         else stagnantScores = 0;
