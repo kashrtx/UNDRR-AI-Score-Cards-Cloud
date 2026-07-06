@@ -2,7 +2,17 @@
 
 Upload a completed disaster resilience scorecard for a city, and this app turns it into a clear, readable analysis: what the city is doing well, where it is weak, and a prioritized list of actions that would raise its score the most.
 
+Do not have a completed scorecard yet? There is also an **Assistant** that fills one out with you. Tell it about your city and it researches and drafts every answer, or you chat through it step by step, then hand the result straight to the analyzer.
+
 It is built to be genuinely useful for a city planner, and genuinely cheap to run (it can live on a free Vercel account). If you are new to the project, this page should get you from "no idea" to "I understand what we built" in about ten minutes.
+
+---
+
+## The two tabs, in a nutshell
+
+**Assistant** helps you *create* a scorecard. You give it a city and whatever you know, and an AI agent researches the city, searches the web, and fills in the 47 indicators, building a live draft you can edit. When it looks right, one click loads it into the analyzer (or downloads it as a spreadsheet).
+
+**Dashboard** *analyzes* a scorecard, whether you uploaded a real one or built it in the Assistant. This is the part described in most of this guide.
 
 ---
 
@@ -74,6 +84,7 @@ Inside `lib/`, the brains are split by job:
 |---|---|
 | `lib/scorecard/` | Turn the messy Excel file into clean, typed data |
 | `lib/data/` | Fetch open data (each source is its own small file) and do web research |
+| `lib/agent/` | The Assistant's fill-out agent and its working draft |
 | `lib/llm/` | One file per AI provider, plus a factory that picks the right one |
 | `lib/analysis/` | Build the prompt, run the model, and validate the result |
 | `lib/settings/` | Save your choices and encrypt your API keys |
@@ -176,6 +187,7 @@ A quick map so you do not have to go hunting:
 - **Add a new AI provider:** add a file in `lib/llm/`, wire it into `lib/llm/index.ts`, and register it in `lib/settings/store.ts` and `components/SettingsTab.tsx`.
 - **Add a simple new data source:** often you only edit `lib/data/adapters/data-sources.json`, no code needed. For a trickier source, add a small adapter next to the others.
 - **Change how the web research behaves:** edit `lib/data/research.ts`.
+- **Change how the fill-out Assistant thinks or which tools it can call:** edit `lib/agent/agent.ts` (its instructions and the tool loop) and `lib/agent/draft.ts` (the draft it builds).
 - **Change the look, colors, or charts:** the pieces are in `components/`, and the color and theme tokens live in `app/globals.css`.
 
 ---

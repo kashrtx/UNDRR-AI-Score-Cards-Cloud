@@ -13,7 +13,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Play, Loader2, AlertTriangle, MapPin, Users, Calendar, Zap,
   CheckCircle2, XCircle, Info, Settings as SettingsIcon, LayoutDashboard, RotateCcw,
-  Download, FileJson, Eraser,
+  Download, FileJson, Eraser, Bot,
 } from "lucide-react";
 
 import { Logo } from "@/components/Logo";
@@ -29,6 +29,7 @@ import { GettingStarted } from "@/components/GettingStarted";
 import { AnalysisProgress } from "@/components/AnalysisProgress";
 import { DataSourcesPanel } from "@/components/DataSourcesPanel";
 import { SettingsTab } from "@/components/SettingsTab";
+import { AssistantTab } from "@/components/AssistantTab";
 import { SystemStatus } from "@/components/SystemStatus";
 import { ConfirmModal } from "@/components/ConfirmModal";
 
@@ -43,7 +44,7 @@ import type { AnalysisResult } from "@/lib/analysis/schema";
 import type { DataReport, ProgressEvent } from "@/lib/types";
 
 type AppState = "empty" | "ready" | "analyzing" | "results" | "error";
-type Tab = "dashboard" | "settings";
+type Tab = "dashboard" | "assistant" | "settings";
 
 const SCORECARD_KEY = "undrr.scorecard";
 const SCORECARD_NAME_KEY = "undrr.scorecard.name";
@@ -175,6 +176,15 @@ export default function Page() {
       }
     },
     [analysis, commitUpload]
+  );
+
+  // Called by the Assistant tab: load its draft as the active scorecard.
+  const handleLoadFromAssistant = useCallback(
+    (sc: NormalizedScorecard) => {
+      commitUpload(sc, `${sc.city.name} (assistant draft)`);
+      setTab("dashboard");
+    },
+    [commitUpload]
   );
 
   const buildPayload = useCallback((): ExportPayload | null => {
@@ -323,6 +333,14 @@ export default function Page() {
                 <LayoutDashboard size={15} /> <span className="hidden sm:inline">Dashboard</span>
               </button>
               <button
+                onClick={() => setTab("assistant")}
+                className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
+                  tab === "assistant" ? "bg-primary-700 text-white" : "text-text-secondary hover:text-text-primary"
+                }`}
+              >
+                <Bot size={15} /> <span className="hidden sm:inline">Assistant</span>
+              </button>
+              <button
                 onClick={() => setTab("settings")}
                 className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
                   tab === "settings" ? "bg-primary-700 text-white" : "text-text-secondary hover:text-text-primary"
@@ -382,6 +400,14 @@ export default function Page() {
         <div key={tab} className="tab-enter">
         {tab === "settings" && (
           <SettingsTab settings={settings} onChange={handleSettingsChange} />
+        )}
+
+        {tab === "assistant" && (
+          <AssistantTab
+            settings={settings}
+            providerReady={providerReady}
+            onLoadIntoAnalyzer={handleLoadFromAssistant}
+          />
         )}
 
         {tab === "dashboard" && (

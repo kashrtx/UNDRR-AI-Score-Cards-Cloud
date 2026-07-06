@@ -367,3 +367,28 @@ export async function researchCity(
   if (!answer && passages.length === 0 && facts.length === 0) return null;
   return { title, summary, answer, passages, facts, sources, webSearchMethod: method };
 }
+
+/**
+ * Generic web search for the fill-out assistant's agent tools. Uses the same
+ * provider preference as researchCity (Tavily → SearXNG → DuckDuckGo) but for an
+ * arbitrary query rather than a city profile.
+ */
+export async function agentWebSearch(
+  query: string,
+  searchApiKey?: string
+): Promise<{ answer?: string; results: Array<{ title: string; url: string; content: string }>; method: string }> {
+  const userKey = searchApiKey && searchApiKey.trim();
+  const envKey = process.env.TAVILY_API_KEY;
+  const searxUrl = process.env.SEARXNG_URL;
+  try {
+    if (userKey || (!searxUrl && envKey)) {
+      const r = await tavily((userKey || envKey) as string, query);
+      return { answer: r.answer ? trunc(r.answer, 1000) : undefined, results: r.results.slice(0, 6), method: "Tavily" };
+    } else if (searxUrl) {
+      return { results: (await searxng(searxUrl, query)).slice(0, 6), method: "SearXNG" };
+    }
+    return { results: (await duckduckgo(query)).slice(0, 6), method: "DuckDuckGo" };
+  } catch {
+    return { results: [], method: "none" };
+  }
+}
