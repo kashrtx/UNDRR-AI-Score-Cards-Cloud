@@ -39,6 +39,19 @@ export interface SessionMeta {
   title: string;
   updatedAt: number;
   filled: number;
+  preview: string;
+}
+
+function previewOf(chat: ChatItem[]): string {
+  for (let i = chat.length - 1; i >= 0; i--) {
+    const m = chat[i];
+    if (m.kind === "user" || m.kind === "assistant" || m.kind === "thought") {
+      if (m.text && m.text.trim()) return m.text.trim().slice(0, 100);
+    } else if (m.kind === "tool" && m.label) {
+      return m.label.slice(0, 100);
+    }
+  }
+  return "No messages yet";
 }
 
 const INDEX_KEY = "undrr.assistant.index";
@@ -99,7 +112,7 @@ export function saveSession(s: AssistantSession): void {
     s.title = titleFor(s);
     localStorage.setItem(sessionKey(s.id), JSON.stringify(s));
     const idx = (safeGet<SessionMeta[]>(INDEX_KEY) ?? []).filter((m) => m.id !== s.id);
-    idx.push({ id: s.id, title: s.title, updatedAt: s.updatedAt, filled: filledCount(s.draft) });
+    idx.push({ id: s.id, title: s.title, updatedAt: s.updatedAt, filled: filledCount(s.draft), preview: previewOf(s.chat || []) });
     localStorage.setItem(INDEX_KEY, JSON.stringify(idx));
   } catch {
     /* quota — non-fatal */

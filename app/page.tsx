@@ -30,6 +30,8 @@ import { AnalysisProgress } from "@/components/AnalysisProgress";
 import { DataSourcesPanel } from "@/components/DataSourcesPanel";
 import { SettingsTab } from "@/components/SettingsTab";
 import { AssistantTab } from "@/components/AssistantTab";
+import { LiveStream } from "@/components/LiveStream";
+import { Onboarding } from "@/components/Onboarding";
 import { SystemStatus } from "@/components/SystemStatus";
 import { ConfirmModal } from "@/components/ConfirmModal";
 
@@ -49,6 +51,8 @@ type Tab = "dashboard" | "assistant" | "settings";
 const SCORECARD_KEY = "undrr.scorecard";
 const SCORECARD_NAME_KEY = "undrr.scorecard.name";
 const ANALYSIS_KEY = "undrr.analysis";
+const ONBOARDED_KEY = "undrr.onboarded.v1";
+const TIPS_KEY = "undrr.tips.dismissed";
 
 const PROVIDER_LABEL: Record<ProviderId, string> = {
   claude: "Claude", gemini: "Gemini", openrouter: "OpenRouter",
@@ -83,6 +87,8 @@ export default function Page() {
   // Pending upload awaiting confirmation (because it would clear results)
   const [pendingUpload, setPendingUpload] = useState<{ sc: NormalizedScorecard; name: string } | null>(null);
   const [confirmRemove, setConfirmRemove] = useState(false);
+  const [showTour, setShowTour] = useState(false);
+  const [tipsDismissed, setTipsDismissed] = useState(true); // assume seen until mount says otherwise
 
   const abortRef = useRef<AbortController | null>(null);
 
@@ -92,6 +98,13 @@ export default function Page() {
     setSettings(s);
     setProviderReady(computeReady(s));
     setTavilyActive(!!s.useTavily && hasSearchKey());
+    try {
+      const onboarded = !!localStorage.getItem(ONBOARDED_KEY);
+      setShowTour(!onboarded);
+      setTipsDismissed(onboarded && !!localStorage.getItem(TIPS_KEY));
+    } catch {
+      /* ignore */
+    }
     try {
       const raw = localStorage.getItem(SCORECARD_KEY);
       if (raw) {
@@ -186,6 +199,26 @@ export default function Page() {
     },
     [commitUpload]
   );
+
+  const closeTour = useCallback(() => {
+    setShowTour(false);
+    setTipsDismissed(true);
+    try {
+      localStorage.setItem(ONBOARDED_KEY, "1");
+      localStorage.setItem(TIPS_KEY, "1");
+    } catch {
+      /* ignore */
+    }
+  }, []);
+  const replayTour = useCallback(() => setShowTour(true), []);
+  const dismissTips = useCallback(() => {
+    setTipsDismissed(true);
+    try {
+      localStorage.setItem(TIPS_KEY, "1");
+    } catch {
+      /* ignore */
+    }
+  }, []);
 
   const buildPayload = useCallback((): ExportPayload | null => {
     if (!scorecard || !analysis) return null;
@@ -383,31 +416,21 @@ export default function Page() {
         </div>
       </header>
 
-      {/* ── Disclaimer ─────────────────────────── */}
-      <div className="bg-warn-500/10 border-b border-warn-500/20 px-4 sm:px-6 py-2">
-        <div className="max-w-[1600px] mx-auto flex items-start gap-2 text-sm text-warn-400">
-          <Info size={14} className="shrink-0 mt-0.5" />
-          <span>
-            <strong>A helping hand, not the final word.</strong> These results are AI-generated and
-            will vary with the model you pick, so please have qualified disaster-resilience
-            professionals review them before acting.
-          </span>
-        </div>
-      </div>
-
       {/* ── Main ───────────────────────────────── */}
       <main className="flex-1 max-w-[1600px] w-full mx-auto px-4 sm:px-6 py-5 sm:py-6">
-        <div key={tab} className="tab-enter">
-        {tab === "settings" && (
-          <SettingsTab settings={settings} onChange={handleSettingsChange} />
-        )}
-
-        {tab === "assistant" && (
+        {/* Assistant stays mounted so a run keeps going even if you switch tabs
+            (e.g. to change the model in Settings) — just hidden when inactive. */}
+        <div className={tab === "assistant" ? "" : "hidden"}>
           <AssistantTab
             settings={settings}
             providerReady={providerReady}
             onLoadIntoAnalyzer={handleLoadFromAssistant}
           />
+        </div>
+
+        <div key={tab} className="tab-enter">
+        {tab === "settings" && (
+          <SettingsTab settings={settings} onChange={handleSettingsChange} onReplayTutorial={replayTour} />
         )}
 
         {tab === "dashboard" && (
@@ -449,7 +472,9 @@ export default function Page() {
             {/* Empty: no scorecard yet */}
             {state === "empty" && (
               <div className="space-y-6">
-                <GettingStarted onOpenSettings={() => setTab("settings")} />
+                {!tipsDismissed && (
+                  <GettingStarted onOpenSettings={() => setTab("settings")} onTakeTour={replayTour} onDismiss={dismissTips} />
+                )}
                 <div className="max-w-2xl mx-auto">
                   <ScorecardUpload onUploaded={handleUpload} />
                 </div>
@@ -458,8 +483,8 @@ export default function Page() {
 
             {(state === "ready" || state === "results" || state === "analyzing") && scorecard && (
               <div className="space-y-6">
-                {state === "ready" && !analysis && (
-                  <GettingStarted onOpenSettings={() => setTab("settings")} />
+                {state === "ready" && !analysis && !tipsDismissed && (
+                  <GettingStarted onOpenSettings={() => setTab("settings")} onTakeTour={replayTour} onDismiss={dismissTips} />
                 )}
 
                 {/* City overview + upload */}
@@ -552,10 +577,7 @@ export default function Page() {
                     <DataSourcesPanel report={dataReport} live />
                     {narration && (
                       <div className="glass-card p-5">
-                        <h3 className="text-sm font-semibold text-text-primary mb-2">Live AI output</h3>
-                        <pre className="text-xs text-text-secondary whitespace-pre-wrap max-h-64 overflow-auto font-mono leading-relaxed">
-                          {narration.slice(-4000)}
-                        </pre>
+                        <LiveStream text={narration} label="Live AI output" />
                       </div>
                     )}
                   </>
@@ -726,6 +748,15 @@ export default function Page() {
         keep a copy.
       </ConfirmModal>
 
+      {/* ── First-visit / replayable tour ──────── */}
+      <Onboarding open={showTour} onClose={closeTour} />
+
+      {/* ── Slim footer (unobtrusive safety note) ─ */}
+      <footer className="mt-auto border-t border-border px-4 sm:px-6 py-3">
+        <p className="max-w-[1600px] mx-auto text-xs text-text-secondary text-center">
+          AI-generated results vary by model — please have qualified disaster-resilience professionals review them before acting. Everything runs in your browser.
+        </p>
+      </footer>
     </div>
   );
 }

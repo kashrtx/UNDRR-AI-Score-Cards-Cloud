@@ -3,9 +3,17 @@
  * user has run their first analysis.
  */
 
-import { Upload, Play, Sparkles, Settings as SettingsIcon } from "lucide-react";
+import { Upload, Play, Sparkles, Settings as SettingsIcon, Compass, X } from "lucide-react";
 
-export function GettingStarted({ onOpenSettings }: { onOpenSettings: () => void }) {
+export function GettingStarted({
+  onOpenSettings,
+  onTakeTour,
+  onDismiss,
+}: {
+  onOpenSettings: () => void;
+  onTakeTour?: () => void;
+  onDismiss?: () => void;
+}) {
   const steps = [
     {
       icon: <Upload size={18} className="text-accent-400" />,
@@ -26,14 +34,27 @@ export function GettingStarted({ onOpenSettings }: { onOpenSettings: () => void 
 
   return (
     <div className="glass-card p-5">
-      <div className="flex items-center justify-between mb-3">
-        <h2 className="text-base font-semibold text-text-primary">New here? Here's what to do</h2>
-        <button
-          onClick={onOpenSettings}
-          className="flex items-center gap-1.5 text-xs text-primary-300 hover:text-text-primary transition-colors"
-        >
-          <SettingsIcon size={13} /> Choose the AI model
-        </button>
+      <div className="flex items-center justify-between mb-3 gap-2">
+        <h2 className="text-base font-semibold text-text-primary">New here? Here&apos;s what to do</h2>
+        <div className="flex items-center gap-2">
+          {onTakeTour && (
+            <button
+              onClick={onTakeTour}
+              className="flex items-center gap-1.5 text-xs text-primary-300 hover:text-text-primary transition-colors"
+            >
+              <Compass size={13} /> Take the tour
+            </button>
+          )}
+          {onDismiss && (
+            <button
+              onClick={onDismiss}
+              aria-label="Dismiss tips"
+              className="p-1 rounded-lg text-text-secondary hover:text-text-primary transition-colors"
+            >
+              <X size={15} />
+            </button>
+          )}
+        </div>
       </div>
       <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
         {steps.map((s) => (

@@ -10,7 +10,7 @@
 import { useEffect, useState, type ReactNode } from "react";
 import {
   Cloud, Cpu, Sparkles, Boxes, MonitorSmartphone, Save, Loader2,
-  CheckCircle2, XCircle, KeyRound, Trash2, Plug, Globe, Search,
+  CheckCircle2, XCircle, KeyRound, Trash2, Plug, Globe, Search, Compass,
 } from "lucide-react";
 import {
   type AppSettings, type ProviderId, type CloudProviderId,
@@ -99,9 +99,11 @@ const inputCls =
 export function SettingsTab({
   settings,
   onChange,
+  onReplayTutorial,
 }: {
   settings: AppSettings;
   onChange: (s: AppSettings) => void;
+  onReplayTutorial?: () => void;
 }) {
   const [draft, setDraft] = useState<AppSettings>(settings);
   const [keyInput, setKeyInput] = useState("");
@@ -202,6 +204,24 @@ export function SettingsTab({
 
   return (
     <div className="max-w-2xl mx-auto space-y-6">
+      {onReplayTutorial && (
+        <div className="glass-card p-4 flex items-center gap-3">
+          <div className="w-9 h-9 rounded-xl bg-accent-500/15 text-accent-400 flex items-center justify-center shrink-0">
+            <Compass size={18} />
+          </div>
+          <div className="flex-1 min-w-0">
+            <h3 className="text-sm font-semibold text-text-primary">How it works</h3>
+            <p className="text-xs text-text-secondary">Replay the quick guided tour of the app.</p>
+          </div>
+          <button
+            onClick={onReplayTutorial}
+            className="shrink-0 px-3 py-2 rounded-xl text-sm font-medium bg-surface-overlay border border-border text-text-primary hover:border-primary-500/40"
+          >
+            Take the tour
+          </button>
+        </div>
+      )}
+
       <div>
         <h2 className="text-lg font-semibold text-text-primary mb-1">AI provider</h2>
         <p className="text-sm text-text-secondary">

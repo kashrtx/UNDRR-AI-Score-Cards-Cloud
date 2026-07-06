@@ -14,7 +14,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Bot, Send, Sparkles, Upload, Loader2, Wrench, Download, ArrowRight, RotateCcw,
-  ClipboardCheck, Lightbulb, Plus, Trash2, Paperclip, X, Play, AlertTriangle,
+  ClipboardCheck, Lightbulb, Plus, Trash2, Paperclip, X, Play, AlertTriangle, History, ChevronDown,
 } from "lucide-react";
 import type { AppSettings } from "@/lib/settings/store";
 import { getSearchKey, hasSearchKey } from "@/lib/settings/store";
@@ -28,11 +28,14 @@ import {
 } from "@/lib/agent/draft";
 import { runAgentTurn, type AgentContext, type TranscriptItem, type AgentEvent } from "@/lib/agent/agent";
 import { exportScorecardXlsx } from "@/lib/export/scorecardXlsx";
+import { computeTemplateEdits, fillOfficialTemplate } from "@/lib/export/fillTemplate";
 import {
   createSession, listSessions, loadSession, saveSession, deleteSession, getActiveId, setActiveId,
   type AssistantSession, type SessionMeta, type ChatItem, type Attachment,
 } from "@/lib/agent/sessions";
 import { ConfirmModal } from "@/components/ConfirmModal";
+import { LiveStream } from "@/components/LiveStream";
+import { SessionMenu } from "@/components/SessionMenu";
 
 const SCORE_LABELS: Record<string, string> = {
   "0": "0 · None", "1": "1 · Limited", "2": "2 · Substantial", "3": "3 · Comprehensive",
@@ -67,6 +70,7 @@ export function AssistantTab({
   const [stream, setStream] = useState("");
   const [continuable, setContinuable] = useState(false);
   const [confirm, setConfirm] = useState<null | { title: string; body: string; onYes: () => void; danger?: boolean; yes: string }>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
 
   // Non-rendered working state
   const transcriptRef = useRef<TranscriptItem[]>([]);
@@ -78,10 +82,15 @@ export function AssistantTab({
   attachRef.current = attachments;
   const streamBuf = useRef("");
   const streamScheduled = useRef(false);
+  const templateBufRef = useRef<ArrayBuffer | null>(null);
+  const lastModeRef = useRef<"autonomous" | "assist">("assist");
+  const [building, setBuilding] = useState(false);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const docRef = useRef<HTMLInputElement | null>(null);
   const ready = useRef(false);
+  const mountedRef = useRef(true);
+  const runSessionRef = useRef<string>("");
 
   const filled = filledCount(draft);
   const pct = Math.round((filled / TOTAL_INDICATORS) * 100);
@@ -108,6 +117,7 @@ export function AssistantTab({
   const loadIntoState = useCallback((s: AssistantSession) => {
     activeMetaRef.current = { id: s.id, createdAt: s.createdAt };
     transcriptRef.current = s.transcript || [];
+    templateBufRef.current = null; // fresh sessions fill the bundled official template
     setActive(s.id);
     setActiveId(s.id);
     setCity(s.city || "");
@@ -144,6 +154,18 @@ export function AssistantTab({
     return () => clearTimeout(t);
   }, [city, country, info, chat, draft, attachments, saveActive]);
 
+  // On unmount (e.g. full page navigation), stop any run and persist.
+  const saveActiveRef = useRef(saveActive);
+  saveActiveRef.current = saveActive;
+  useEffect(
+    () => () => {
+      mountedRef.current = false;
+      abortRef.current?.abort();
+      try { saveActiveRef.current(); } catch { /* ignore */ }
+    },
+    []
+  );
+
   useEffect(() => {
     chatEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
   }, [chat, thinking, stream]);
@@ -162,10 +184,10 @@ export function AssistantTab({
         if (e.on) { streamBuf.current = ""; setStream(""); }
         break;
       case "stream":
-        streamBuf.current += e.text;
+        streamBuf.current = (streamBuf.current + e.text).slice(-20000);
         if (!streamScheduled.current) {
           streamScheduled.current = true;
-          setTimeout(() => { setStream(streamBuf.current.slice(-600)); streamScheduled.current = false; }, 90);
+          setTimeout(() => { setStream(streamBuf.current); streamScheduled.current = false; }, 90);
         }
         break;
       case "thought":
@@ -195,11 +217,13 @@ export function AssistantTab({
   }, []);
 
   const runTurn = useCallback(
-    async (userText: string | null, opts?: { silent?: boolean }) => {
+    async (userText: string | null, opts?: { mode?: "autonomous" | "assist" }) => {
       if (!providerReady) {
         setChat((c) => [...c, { kind: "assistant", text: "First choose an AI model and add a key in Settings, then come back here." }]);
         return;
       }
+      const mode = opts?.mode ?? lastModeRef.current;
+      lastModeRef.current = mode;
       let provider;
       try {
         provider = await createProvider(settings); // rebuilt each turn, so switching model then Continue works
@@ -216,18 +240,30 @@ export function AssistantTab({
         city: city.trim(),
         country: country.trim(),
         attachments: attachRef.current,
+        mode,
       };
       if (userText) transcriptRef.current.push({ role: "user", content: userText } as TranscriptItem);
+      // Guard: if the user switches session (or unmounts) mid-run, an aborted
+      // run must not write its old draft/events into the new session.
+      const runSession = activeMetaRef.current.id;
+      runSessionRef.current = runSession;
+      const emit = (e: AgentEvent) => {
+        if (!mountedRef.current || activeMetaRef.current.id !== runSession) return;
+        onEvent(e);
+      };
       setRunning(true);
       setContinuable(false);
       abortRef.current = new AbortController();
       try {
-        await runAgentTurn(ctx, onEvent, abortRef.current.signal);
+        await runAgentTurn(ctx, emit, abortRef.current.signal);
       } finally {
-        setRunning(false);
-        setThinking(false);
-        setStream("");
-        setDraft({ ...ctx.draft }); // triggers the debounced auto-save with fresh state
+        const sameSession = mountedRef.current && activeMetaRef.current.id === runSession;
+        if (mountedRef.current) {
+          setRunning(false);
+          setThinking(false);
+          setStream("");
+        }
+        if (sameSession) setDraft({ ...ctx.draft }); // fresh state → debounced auto-save
       }
     },
     [providerReady, settings, city, country, onEvent]
@@ -246,7 +282,7 @@ export function AssistantTab({
       (info.trim() ? `Here is what I know about the city: ${info.trim()}. ` : "") +
       `Research the city as needed, set every indicator with a short note, and only ask me if something truly cannot be researched.`;
     setChat((c) => [...c, { kind: "user", text: already > 0 ? `Complete the rest for ${cityLine}.` : `Fill it out for ${cityLine}.` }]);
-    void runTurn(msg);
+    void runTurn(msg, { mode: "autonomous" });
   }, [city, country, info, running, runTurn]);
 
   const handleSend = useCallback(() => {
@@ -254,13 +290,13 @@ export function AssistantTab({
     if (!text || running) return;
     setInput("");
     setChat((c) => [...c, { kind: "user", text }]);
-    void runTurn(text);
+    void runTurn(text, { mode: "assist" });
   }, [input, running, runTurn]);
 
   const handleContinue = useCallback(() => {
     if (running) return;
     setChat((c) => [...c, { kind: "tool", label: "Continuing", detail: `with ${settings.provider}` }]);
-    void runTurn("Continue completing the scorecard from where you left off.");
+    void runTurn("Continue from where you left off."); // keeps the last mode
   }, [running, runTurn, settings.provider]);
 
   const stop = useCallback(() => abortRef.current?.abort(), []);
@@ -269,6 +305,7 @@ export function AssistantTab({
   const applyScorecardFile = useCallback(async (file: File, intoNew: boolean) => {
     setChat((c) => [...c, { kind: "tool", label: "Reading file", detail: file.name }]);
     try {
+      templateBufRef.current = await file.arrayBuffer(); // use their file as the fill base when possible
       const sc = await uploadScorecard(file);
       const knownCity = sc.city?.name && sc.city.name !== "Unknown" ? sc.city.name : "";
       const knownCountry = sc.city?.country && sc.city.country !== "Unknown" ? sc.city.country : "";
@@ -349,14 +386,14 @@ export function AssistantTab({
   // ── Session management ──────────────────────────────
   const switchTo = useCallback((id: string) => {
     if (id === activeId) return;
-    if (running) stop();
+    if (running) { stop(); setRunning(false); setThinking(false); setStream(""); }
     saveActive();
     const s = loadSession(id);
     if (s) loadIntoState(s);
   }, [activeId, running, stop, saveActive, loadIntoState]);
 
   const newChat = useCallback(() => {
-    if (running) stop();
+    if (running) { stop(); setRunning(false); setThinking(false); setStream(""); }
     saveActive();
     const s = createSession();
     saveSession(s);
@@ -364,26 +401,29 @@ export function AssistantTab({
     loadIntoState(s);
   }, [running, stop, saveActive, loadIntoState]);
 
-  const deleteCurrent = useCallback(() => {
+  const requestDeleteSession = useCallback((id: string) => {
+    const meta = listSessions().find((s) => s.id === id);
     setConfirm({
       title: "Delete this chat?",
-      body: "This permanently removes this scorecard chat and its draft. This cannot be undone.",
+      body: `This permanently removes "${meta?.title || "this scorecard"}" and its draft. This cannot be undone.`,
       yes: "Delete",
       danger: true,
       onYes: () => {
         setConfirm(null);
-        if (running) stop();
-        const id = activeMetaRef.current.id;
+        const wasActive = id === activeMetaRef.current.id;
+        if (wasActive && running) stop();
         deleteSession(id);
         const list = listSessions();
         setSessions(list);
-        const nextExisting = list[0] && loadSession(list[0].id);
-        if (nextExisting) loadIntoState(nextExisting);
-        else {
-          const s = createSession();
-          saveSession(s);
-          setSessions(listSessions());
-          loadIntoState(s);
+        if (wasActive) {
+          const next = list[0] && loadSession(list[0].id);
+          if (next) loadIntoState(next);
+          else {
+            const s = createSession();
+            saveSession(s);
+            setSessions(listSessions());
+            loadIntoState(s);
+          }
         }
       },
     });
@@ -394,8 +434,43 @@ export function AssistantTab({
     () => ({ name: city.trim() || "Unknown", country: country.trim() || "Unknown" }),
     [city, country]
   );
+  const headerTitle = city.trim() ? (country.trim() ? `${city.trim()}, ${country.trim()}` : city.trim()) : "New scorecard";
   const handleLoad = useCallback(() => onLoadIntoAnalyzer(draftToScorecard(draftRef.current, cityInfo)), [cityInfo, onLoadIntoAnalyzer]);
   const handleDownload = useCallback(() => exportScorecardXlsx(draftToScorecard(draftRef.current, cityInfo)), [cityInfo]);
+
+  // Fill and download the REAL official .xlsm (formatting + macros preserved).
+  const fetchBundled = async (): Promise<ArrayBuffer> => {
+    const res = await fetch("/undrr-preliminary-template.xlsm");
+    if (!res.ok) throw new Error("Couldn't load the official template file.");
+    return res.arrayBuffer();
+  };
+  const editCount = (m: Map<string, unknown[]>) => [...m.values()].reduce((n, a) => n + a.length, 0);
+  const handleDownloadOfficial = useCallback(async () => {
+    setBuilding(true);
+    try {
+      let buf = templateBufRef.current || (await fetchBundled());
+      let edits = computeTemplateEdits(buf, draftRef.current);
+      if (editCount(edits) < 40) {
+        // Uploaded base wasn't a standard official template — use the bundled one.
+        buf = await fetchBundled();
+        edits = computeTemplateEdits(buf, draftRef.current);
+      }
+      const blob = await fillOfficialTemplate(buf, edits);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `UNDRR-ARISE-${(city.trim() || "scorecard").replace(/\s+/g, "-")}-${new Date().toISOString().slice(0, 10)}.xlsm`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+      setChat((c) => [...c, { kind: "tool", label: "Built official scorecard (.xlsm)", detail: "real template, formatting + macros kept" }]);
+    } catch (e) {
+      setChat((c) => [...c, { kind: "assistant", text: `Couldn't build the official file: ${e instanceof Error ? e.message : String(e)}. You can use the simple .xlsx instead, or Load into analyzer.` }]);
+    } finally {
+      setBuilding(false);
+    }
+  }, [city]);
   const setScore = (code: string, score: Score | null) =>
     setDraft((d) => { const n = { ...d, [code]: { ...d[code], score } }; draftRef.current = n; return n; });
   const setNote = (code: string, note: string) =>
@@ -404,28 +479,24 @@ export function AssistantTab({
   const showContinue = !running && continuable && filled < TOTAL_INDICATORS;
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 lg:h-[calc(100vh-13rem)]">
+    <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 lg:h-[calc(100vh-15rem)]">
       {/* ── Left: chat ─────────────────────────────── */}
       <section className="glass-card p-4 sm:p-5 flex flex-col h-[72vh] lg:h-full min-h-0 overflow-hidden">
         {/* Session bar */}
         <div className="flex items-center gap-2 mb-3 shrink-0">
           <Bot size={20} className="text-accent-400 shrink-0" />
           <h2 className="text-base font-semibold text-text-primary shrink-0">Assistant</h2>
-          <select
-            value={activeId}
-            onChange={(e) => switchTo(e.target.value)}
-            className="ml-auto max-w-[45%] text-xs rounded-lg px-2 py-1.5 bg-surface-overlay border border-border text-text-primary"
-            title="Switch scorecard chat"
+          <button
+            onClick={() => setMenuOpen(true)}
+            title="Chat history"
+            className="ml-auto flex items-center gap-1.5 max-w-[60%] text-sm rounded-lg px-2.5 py-1.5 bg-surface-overlay border border-border text-text-primary hover:border-primary-500/40"
           >
-            {sessions.map((s) => (
-              <option key={s.id} value={s.id}>{s.title} · {s.filled}/{TOTAL_INDICATORS}</option>
-            ))}
-          </select>
+            <History size={14} className="shrink-0 text-text-secondary" />
+            <span className="truncate">{headerTitle}</span>
+            <ChevronDown size={14} className="shrink-0 text-text-secondary" />
+          </button>
           <button onClick={newChat} title="New chat" className="shrink-0 p-1.5 rounded-lg bg-surface-overlay border border-border text-text-secondary hover:text-text-primary">
             <Plus size={15} />
-          </button>
-          <button onClick={deleteCurrent} title="Delete this chat" className="shrink-0 p-1.5 rounded-lg bg-surface-overlay border border-border text-text-secondary hover:text-danger-400">
-            <Trash2 size={15} />
           </button>
         </div>
 
@@ -495,11 +566,7 @@ export function AssistantTab({
               <div className="flex items-center gap-2 text-xs text-text-secondary">
                 <Loader2 size={14} className="animate-spin text-accent-400" /> Thinking{elapsed > 0 ? `… (${elapsed}s)` : "…"}
               </div>
-              {stream && (
-                <div className="text-[11px] font-mono text-text-secondary/70 bg-surface-overlay/50 border border-border rounded-lg p-2 max-h-24 overflow-hidden whitespace-pre-wrap break-words">
-                  {stream}
-                </div>
-              )}
+              {stream && <LiveStream text={stream} label="Show live output" defaultOpen={false} />}
             </div>
           )}
           {showContinue && (
@@ -606,14 +673,29 @@ export function AssistantTab({
           <button onClick={handleLoad} className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold btn-accent">
             <ArrowRight size={16} /> Load into analyzer
           </button>
-          <button onClick={handleDownload} className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium bg-surface-overlay border border-border text-text-primary">
-            <Download size={15} /> Download .xlsx
+          <button onClick={handleDownloadOfficial} disabled={building}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium bg-surface-overlay border border-border text-text-primary disabled:opacity-60">
+            {building ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />} Download official scorecard (.xlsm)
+          </button>
+          <button onClick={handleDownload} title="Plain spreadsheet (no template formatting)"
+            className="text-xs text-text-secondary hover:text-text-primary ml-auto">
+            Simple .xlsx
           </button>
         </div>
         {filled < TOTAL_INDICATORS && (
           <p className="text-xs text-text-secondary mt-2 shrink-0">Unfilled indicators count as 0 if you load now. Keep chatting to finish them.</p>
         )}
       </section>
+
+      <SessionMenu
+        open={menuOpen}
+        sessions={sessions}
+        activeId={activeId}
+        onSelect={(id) => { setMenuOpen(false); switchTo(id); }}
+        onNew={() => { setMenuOpen(false); newChat(); }}
+        onDelete={(id) => requestDeleteSession(id)}
+        onClose={() => setMenuOpen(false)}
+      />
 
       <ConfirmModal
         open={!!confirm}

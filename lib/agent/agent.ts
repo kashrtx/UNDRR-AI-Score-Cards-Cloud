@@ -41,6 +41,7 @@ export interface AgentContext {
   city?: string;
   country?: string;
   attachments?: Array<{ name: string; text: string }>;
+  mode?: "autonomous" | "assist";
 }
 
 const MAX_STEPS = 16;
@@ -133,13 +134,13 @@ HOW YOU WORK:
 
 RULES:
 - You need to know the target city. If no city has been provided, your FIRST action must be a "message" asking which city this scorecard is for. Do not guess a city.
-- Base every score on evidence: the user's statements, research results, or open data. Never invent specific facts, budgets, or programme names.
-- When an indicator depends on internal information only the city would know (plans, budgets, procedures) and you have no evidence, either ask the user with a "message", or set a conservative score with a note that clearly says it is an assumption to verify.
-- Give EVERY scored indicator a one-sentence note naming the basis (e.g. "Based on city's flood plan mentioned by user" or "Assumption — please verify").
-- Work in batches (for example, one Essential at a time), and re-check the "unfilled" list before finishing.
-- Be efficient: research once, then fill. Do not repeat the same search.
-- Some indicators may already be filled from an uploaded file. Keep those unless the user asks otherwise, and focus on the unfilled ones.
-- If the user asked you to fill it autonomously, only use "message" when you genuinely need information you cannot research (or the city is missing).`;
+- SCOPE: If the user asks for help with only specific indicators or a limited change ("help me with P3.2", "review Essential 5", "what about early warning?"), do ONLY that and then finish or ask a follow-up. Do NOT fill or re-score everything. Only complete the whole scorecard when the user clearly asks you to (e.g. "fill it out for me", "complete the rest").
+- Base every score on evidence: the user's statements, research results, open data, or attached documents. Never invent specific facts, budgets, or programme names.
+- When an indicator depends on internal information only the city would know and you have no evidence, either ask the user with a "message", or set a conservative score with a note that clearly says it is an assumption to verify.
+- Give EVERY scored indicator a one-sentence note naming the basis.
+- Score at most one or two Essentials (about ten indicators) per set_scores call, so the user sees steady progress and responses stay quick.
+- Do NOT re-score indicators that already have a score unless the user asked you to change them. Once every indicator you were asked to handle is set, call "finish".
+- Be efficient: research once, then fill. Do not repeat the same search or re-submit the same scores.`;
 
 // ── Robust JSON extraction (mirrors the analyzer's) ──────────
 function extractJson(text: string): string {
@@ -175,7 +176,11 @@ function parseAction(raw: string): AgentAction | null {
 }
 
 // ── Tools ────────────────────────────────────────────────────
-async function researchTool(city: string, country: string | undefined, searchKey?: string | null): Promise<string> {
+async function researchTool(
+  city: string,
+  country: string | undefined,
+  searchKey?: string | null
+): Promise<{ text: string; method: string }> {
   try {
     const [dataRes, refRes] = await Promise.allSettled([
       fetch("/api/data/fetch", {
@@ -191,6 +196,7 @@ async function researchTool(city: string, country: string | undefined, searchKey
     ]);
 
     const lines: string[] = [];
+    let method = "open data";
     if (dataRes.status === "fulfilled" && dataRes.value) {
       const dp = dataRes.value as { data?: Array<{ label: string; value: unknown; unit?: string }> };
       const pts = (dp.data || [])
@@ -200,32 +206,31 @@ async function researchTool(city: string, country: string | undefined, searchKey
     }
     if (refRes.status === "fulfilled" && refRes.value) {
       const rf = refRes.value as { answer?: string; passages?: Array<{ text: string }>; webSearchMethod?: string };
-      if (rf.webSearchMethod) lines.push(`(web search via ${rf.webSearchMethod})`);
+      if (rf.webSearchMethod) method = `${rf.webSearchMethod} + open data`;
       if (rf.answer) lines.push("", "Web summary:", rf.answer.slice(0, 900));
       for (const p of (rf.passages || []).slice(0, 4)) lines.push("- " + p.text.slice(0, 240));
     }
-    return lines.length ? lines.join("\n") : "No open data or web results were found for that city.";
+    return { text: lines.length ? lines.join("\n") : "No open data or web results were found for that city.", method };
   } catch (e) {
-    return `Research failed: ${e instanceof Error ? e.message : String(e)}`;
+    return { text: `Research failed: ${e instanceof Error ? e.message : String(e)}`, method: "failed" };
   }
 }
 
-async function searchTool(query: string, searchKey?: string | null): Promise<string> {
+async function searchTool(query: string, searchKey?: string | null): Promise<{ text: string; method: string }> {
   try {
     const res = await fetch("/api/search", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ query, searchApiKey: searchKey || undefined }),
     });
-    if (!res.ok) return `Search failed (HTTP ${res.status}).`;
+    if (!res.ok) return { text: `Search failed (HTTP ${res.status}).`, method: "failed" };
     const r = (await res.json()) as { answer?: string; method?: string; results?: Array<{ title: string; content: string }> };
     const lines: string[] = [];
-    if (r.method) lines.push(`(via ${r.method})`);
     if (r.answer) lines.push(r.answer.slice(0, 800));
     for (const it of (r.results || []).slice(0, 5)) lines.push(`- ${it.title}: ${(it.content || "").slice(0, 200)}`);
-    return lines.length ? lines.join("\n") : "No results.";
+    return { text: lines.length ? lines.join("\n") : "No results.", method: r.method || "web" };
   } catch (e) {
-    return `Search failed: ${e instanceof Error ? e.message : String(e)}`;
+    return { text: `Search failed: ${e instanceof Error ? e.message : String(e)}`, method: "failed" };
   }
 }
 
@@ -254,9 +259,15 @@ function buildUser(ctx: AgentContext): string {
       "\n\n"
     : "";
 
+  const modeLine =
+    ctx.mode === "autonomous"
+      ? "TASK: complete the entire scorecard (all indicators)."
+      : "TASK: respond to the user's specific request only; do not fill or change everything unless they asked.";
+
   return `${attBlock}${history || "(no messages yet)"}
 
 ${cityLine}
+${modeLine}
 CURRENT DRAFT: ${filled}/${TOTAL_INDICATORS} filled.${draftLines ? ` Scores so far: ${draftLines}.` : ""}
 ${unfilled.length ? `Still unfilled: ${unfilled.join(", ")}.` : "All indicators are filled."}
 
@@ -274,6 +285,10 @@ export async function runAgentTurn(
   signal?: AbortSignal
 ): Promise<void> {
   let parseFailures = 0;
+  let prevFilled = filledCount(ctx.draft);
+  let stagnantScores = 0; // consecutive set_scores that add nothing
+  const autonomous = ctx.mode === "autonomous";
+
   for (let step = 0; step < MAX_STEPS; step++) {
     if (signal?.aborted) {
       onEvent({ type: "stopped" });
@@ -323,25 +338,47 @@ export async function runAgentTurn(
 
     switch (action.action) {
       case "research_city": {
-        const city = action.city || ctx.city || "";
-        onEvent({ type: "tool", label: `Researching ${city || "the city"}`, detail: "open data + web" });
-        const obs = await researchTool(city, action.country || ctx.country, ctx.searchKey);
-        ctx.transcript.push({ role: "tool", content: `research_city(${city}):\n${obs}` });
+        const cityName = action.city || ctx.city || "";
+        onEvent({ type: "tool", label: `Researching ${cityName || "the city"}…` });
+        const { text, method } = await researchTool(cityName, action.country || ctx.country, ctx.searchKey);
+        ctx.transcript.push({ role: "tool", content: `research_city(${cityName}):\n${text}` });
+        onEvent({ type: "tool", label: `Researched ${cityName || "the city"}`, detail: method });
+        stagnantScores = 0;
         break;
       }
       case "web_search": {
         const q = action.query || "";
-        onEvent({ type: "tool", label: "Web search", detail: q.slice(0, 80) });
-        const obs = await searchTool(q, ctx.searchKey);
-        ctx.transcript.push({ role: "tool", content: `web_search(${q}):\n${obs}` });
+        onEvent({ type: "tool", label: "Web search", detail: q.slice(0, 70) });
+        const { text, method } = await searchTool(q, ctx.searchKey);
+        ctx.transcript.push({ role: "tool", content: `web_search(${q}):\n${text}` });
+        onEvent({ type: "tool", label: `Searched (${method})`, detail: q.slice(0, 60) });
+        stagnantScores = 0;
         break;
       }
       case "set_scores": {
         const n = applyScores(ctx.draft, action.scores || []);
         onEvent({ type: "draft" });
-        const filled = filledCount(ctx.draft);
-        ctx.transcript.push({ role: "tool", content: `Applied ${n} score(s). ${filled}/${TOTAL_INDICATORS} filled.` });
-        onEvent({ type: "tool", label: `Filled ${n} indicator${n === 1 ? "" : "s"}`, detail: `${filled}/${TOTAL_INDICATORS} complete` });
+        const nowFilled = filledCount(ctx.draft);
+        ctx.transcript.push({ role: "tool", content: `Applied ${n} score(s). ${nowFilled}/${TOTAL_INDICATORS} filled.` });
+        onEvent({ type: "tool", label: `Filled ${n} indicator${n === 1 ? "" : "s"}`, detail: `${nowFilled}/${TOTAL_INDICATORS} complete` });
+
+        if (nowFilled <= prevFilled) stagnantScores++;
+        else stagnantScores = 0;
+        prevFilled = nowFilled;
+
+        if (nowFilled === TOTAL_INDICATORS) {
+          ctx.transcript.push({ role: "tool", content: "All indicators now have a score. Call finish now (do not re-score existing answers unless the user asks)." });
+        }
+        if (stagnantScores >= 3) {
+          const done = nowFilled === TOTAL_INDICATORS;
+          const msg = done
+            ? "All indicators are filled. I'll stop here so you can review — tell me if you'd like any specific changes."
+            : "I'm not making further progress on my own. I'll pause so you can tell me what to adjust or what information to use.";
+          ctx.transcript.push({ role: "assistant", content: msg });
+          onEvent({ type: "assistant", text: msg });
+          onEvent(done ? { type: "done" } : { type: "stopped" });
+          return;
+        }
         break;
       }
       case "message": {
@@ -352,8 +389,7 @@ export async function runAgentTurn(
       }
       case "finish": {
         const remaining = unfilledCodes(ctx.draft);
-        if (remaining.length > 0) {
-          // Don't let it finish early: push it to complete every indicator.
+        if (autonomous && remaining.length > 0) {
           onEvent({ type: "tool", label: `Not done yet — ${remaining.length} still to fill`, detail: "completing them" });
           ctx.transcript.push({
             role: "tool",
@@ -361,7 +397,7 @@ export async function runAgentTurn(
           });
           break;
         }
-        const text = action.text || "All done. Review the draft, then load it into the analyzer or download it.";
+        const text = action.text || "Done. Review the draft, then load it into the analyzer or download it.";
         ctx.transcript.push({ role: "assistant", content: text });
         onEvent({ type: "assistant", text });
         onEvent({ type: "done" });
@@ -374,10 +410,10 @@ export async function runAgentTurn(
 
   const remaining = unfilledCodes(ctx.draft).length;
   const msg =
-    remaining > 0
-      ? `I've done a lot of steps and there are still ${remaining} indicator(s) to go. Say "continue" and I'll keep filling them, or review what's there so far.`
-      : "All indicators are filled. Review the draft, then load it into the analyzer or download it.";
+    remaining > 0 && autonomous
+      ? `I've done a lot of steps and there are still ${remaining} indicator(s) to go. Press Continue and I'll keep filling them.`
+      : "Pausing here — review the draft, and tell me anything you'd like to change.";
   ctx.transcript.push({ role: "assistant", content: msg });
   onEvent({ type: "assistant", text: msg });
-  if (remaining === 0) onEvent({ type: "done" });
+  onEvent(remaining === 0 ? { type: "done" } : { type: "stopped" });
 }
