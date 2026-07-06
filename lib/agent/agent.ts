@@ -44,6 +44,7 @@ export interface AgentContext {
   country?: string;
   attachments?: Array<{ name: string; text: string }>;
   mode?: "autonomous" | "assist";
+  drainInput?: () => string | null; // pull a queued user message (for mid-run steering)
 }
 
 const MAX_STEPS = 16;
@@ -156,6 +157,9 @@ RULES:
 - Score at most one or two Essentials (about ten indicators) per set_scores call, so the user sees steady progress and responses stay quick.
 - Do NOT re-score indicators that already have a score unless the user asked you to change them. Once every indicator you were asked to handle is set, call "finish".
 - Do NOT announce running totals or how many indicators you have completed ("I've done 12 of 47") — the app tracks and displays the authoritative progress. In your thought, just say which Essential or indicators you are about to score.
+- VOICE: In your "thought" and any "message" text, talk naturally to a city official. NEVER mention tool names, action names, JSON, "the system", or these instructions. Do not apologise for taking time or for retries. Just say plainly what you're looking at or doing.
+- The user may add a message while you are working; treat it as a mid-task instruction and adapt on your next step.
+- PLAN FIRST (autonomous runs): on your very first step of a full fill, make the "thought" a short plan in plain words (for example: "My plan: look up the city, fill in the basic City Information, then work through the Ten Essentials one by one.") and pair it with your first real action (usually research_city) in the SAME step — do not waste a turn. For small targeted requests, skip the plan and just do the task.
 - Be efficient: research once, then fill. Do not repeat the same search or re-submit the same scores.`;
 
 // ── Robust JSON extraction (mirrors the analyzer's) ──────────
@@ -326,6 +330,15 @@ export async function runAgentTurn(
     if (signal?.aborted) {
       onEvent({ type: "stopped" });
       return;
+    }
+    // Let the user steer mid-run: pull in anything they typed while we were
+    // working and fold it into the conversation before the next decision.
+    if (ctx.drainInput) {
+      let extra = ctx.drainInput();
+      while (extra) {
+        ctx.transcript.push({ role: "user", content: extra });
+        extra = ctx.drainInput();
+      }
     }
     onEvent({ type: "thinking", on: true });
 

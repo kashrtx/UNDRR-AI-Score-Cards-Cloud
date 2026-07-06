@@ -149,6 +149,9 @@ export function AssistantTab({
   const mountedRef = useRef(true);
   const runSessionRef = useRef<string>("");
   const ctxRef = useRef<AgentContext | null>(null);
+  const queuedInputRef = useRef<string[]>([]);
+  const undoSnapshotRef = useRef<Draft | null>(null);
+  const [canUndo, setCanUndo] = useState(false);
 
   const filled = filledCount(draft);
   const pct = Math.round((filled / TOTAL_INDICATORS) * 100);
@@ -190,6 +193,9 @@ export function AssistantTab({
     setStream("");
     stuckToBottomRef.current = true;
     setShowJump(false);
+    queuedInputRef.current = [];
+    undoSnapshotRef.current = null;
+    setCanUndo(false);
   }, []);
 
   // First mount: restore or create a session
@@ -289,7 +295,10 @@ export function AssistantTab({
         setChat((c) => [...c, { kind: "tool", label: e.label, detail: e.detail }]);
         break;
       case "draft":
-        setDraft({ ...draftRef.current });
+        // Read the live object the agent is mutating (ctx.draft), NOT the last
+        // rendered copy — otherwise the panel freezes at the first batch and
+        // only catches up when the run ends.
+        setDraft({ ...(ctxRef.current?.draft || draftRef.current) });
         break;
       case "info":
         if (ctxRef.current?.info) setProfile({ ...ctxRef.current.info });
@@ -324,6 +333,9 @@ export function AssistantTab({
         return;
       }
       const searchKey = hasSearchKey() ? await getSearchKey() : null;
+      // Snapshot the draft so the whole run can be undone in one click.
+      undoSnapshotRef.current = JSON.parse(JSON.stringify(draftRef.current));
+      queuedInputRef.current = [];
       const ctx: AgentContext = {
         provider,
         transcript: transcriptRef.current,
@@ -334,6 +346,7 @@ export function AssistantTab({
         country: country.trim(),
         attachments: attachRef.current,
         mode,
+        drainInput: () => queuedInputRef.current.shift() ?? null,
       };
       ctxRef.current = ctx;
       if (userText) transcriptRef.current.push({ role: "user", content: userText } as TranscriptItem);
@@ -360,11 +373,24 @@ export function AssistantTab({
         if (sameSession) {
           setDraft({ ...ctx.draft }); // fresh state → debounced auto-save
           setProfile({ ...ctx.info });
+          // Offer a one-click undo if the run actually changed the scores.
+          const before = undoSnapshotRef.current;
+          const changed = before && JSON.stringify(before) !== JSON.stringify(ctx.draft);
+          setCanUndo(!!changed);
         }
       }
     },
     [providerReady, settings, city, country, onEvent]
   );
+
+  const undoLastRun = useCallback(() => {
+    const snap = undoSnapshotRef.current;
+    if (!snap) return;
+    setDraft({ ...snap });
+    draftRef.current = { ...snap };
+    setCanUndo(false);
+    setChat((c) => [...c, { kind: "tool", label: "Undid the last run", detail: "scores restored to before it started" }]);
+  }, []);
 
   const handleStartAutonomous = useCallback(() => {
     if (!city.trim() || running) return;
@@ -384,9 +410,15 @@ export function AssistantTab({
 
   const handleSend = useCallback(() => {
     const text = input.trim();
-    if (!text || running) return;
+    if (!text) return;
     setInput("");
     setChat((c) => [...c, { kind: "user", text }]);
+    if (running) {
+      // Steer mid-run: queue it for the next step (like Cursor/Copilot).
+      queuedInputRef.current.push(text);
+      setChat((c) => [...c, { kind: "tool", label: "I'll pick that up on the next step", detail: undefined }]);
+      return;
+    }
     void runTurn(text, { mode: "assist" });
   }, [input, running, runTurn]);
 
@@ -601,9 +633,9 @@ export function AssistantTab({
   const showContinue = !running && continuable && filled < TOTAL_INDICATORS;
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-2 gap-5 lg:h-[calc(100vh-15rem)]">
+    <div className="grid grid-cols-1 lg:grid-cols-[1.1fr_1fr] gap-5 lg:h-[calc(100vh-11rem)]">
       {/* ── Left: chat ─────────────────────────────── */}
-      <section className="glass-card p-4 sm:p-5 flex flex-col h-[72vh] lg:h-full min-h-0 overflow-hidden">
+      <section className="glass-card p-4 sm:p-5 flex flex-col h-[80vh] lg:h-full min-h-0 overflow-hidden">
         {/* Session bar */}
         <div className="flex items-center gap-2 mb-3 shrink-0">
           <Bot size={20} className="text-accent-400 shrink-0" />
@@ -711,10 +743,21 @@ export function AssistantTab({
               {stream && <LiveStream text={stream} label="Show what it's writing" defaultOpen={false} />}
             </div>
           )}
-          {showContinue && (
-            <button onClick={handleContinue} className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold btn-accent">
-              <Play size={15} /> Continue
-            </button>
+          {(showContinue || (!running && canUndo)) && (
+            <div className="flex flex-wrap items-center gap-2">
+              {showContinue && (
+                <button onClick={handleContinue} className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold btn-accent">
+                  <Play size={15} /> Continue
+                </button>
+              )}
+              {!running && canUndo && (
+                <button onClick={undoLastRun}
+                  title="Restore the scores to how they were before the last run"
+                  className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium bg-surface-overlay border border-border text-text-primary">
+                  <RotateCcw size={15} /> Undo last run
+                </button>
+              )}
+            </div>
           )}
           <div ref={chatEndRef} />
         </div>
@@ -750,12 +793,20 @@ export function AssistantTab({
             onChange={(e) => { if (e.target.files?.length) void onDocsPicked(e.target.files); e.currentTarget.value = ""; }} />
           <textarea value={input} onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-            rows={1} placeholder="Reply, or ask it to adjust something…"
+            rows={1} placeholder={running ? "Add a note to steer it, picked up on the next step…" : "Reply, or ask it to adjust something…"}
             className="flex-1 px-3 py-2.5 rounded-xl bg-surface-overlay border border-border text-text-primary text-sm resize-none max-h-32" />
           {running ? (
-            <button onClick={stop} className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-medium bg-surface-overlay border border-border text-text-primary">
-              <Loader2 size={15} className="animate-spin" /> Stop
-            </button>
+            <>
+              <button onClick={handleSend} disabled={!input.trim()}
+                title="Add this while it works — it's picked up on the next step"
+                className="flex items-center justify-center px-3.5 py-2.5 rounded-xl btn-accent disabled:opacity-40" aria-label="Queue message">
+                <Send size={16} />
+              </button>
+              <button onClick={stop} title="Stop the run"
+                className="flex items-center gap-1.5 px-3 py-2.5 rounded-xl text-sm font-medium bg-surface-overlay border border-border text-text-primary shrink-0">
+                <Loader2 size={15} className="animate-spin" /> Stop
+              </button>
+            </>
           ) : (
             <button onClick={handleSend} disabled={!input.trim()}
               className="flex items-center justify-center px-3.5 py-2.5 rounded-xl btn-accent disabled:opacity-50" aria-label="Send">
@@ -766,7 +817,7 @@ export function AssistantTab({
       </section>
 
       {/* ── Right: live draft ──────────────────────── */}
-      <section className="glass-card p-4 sm:p-5 flex flex-col h-[72vh] lg:h-full min-h-0 overflow-hidden">
+      <section className="glass-card p-4 sm:p-5 flex flex-col h-[80vh] lg:h-full min-h-0 overflow-hidden">
         <div className="flex items-center justify-between mb-1 shrink-0">
           <div className="flex items-center gap-2">
             <ClipboardCheck size={20} className="text-accent-400" />
@@ -850,25 +901,20 @@ export function AssistantTab({
           <button onClick={handleLoad} className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold btn-accent">
             <ArrowRight size={16} /> Load into analyzer
           </button>
-          <button onClick={handleDownloadOfficial} disabled={building}
-            title={
-              filled === 0
-                ? "Download the official UNDRR .xlsm, blank and ready to fill in"
-                : filled === TOTAL_INDICATORS
-                ? "The finished scorecard, written into the real UNDRR .xlsm template"
-                : "What's been filled in so far, written into the real UNDRR .xlsm template"
-            }
-            className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium bg-surface-overlay border border-border text-text-primary disabled:opacity-60">
-            {building ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}{" "}
+          <button onClick={handleDownload}
+            title="A clean spreadsheet that opens and edits perfectly in Excel — every answer is a plain 0-3 number, no fragile form controls."
+            className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium bg-surface-overlay border border-border text-text-primary">
+            <Download size={15} />{" "}
             {filled === 0
-              ? "Download blank official sheet (.xlsm)"
+              ? "Download scorecard (.xlsx)"
               : filled === TOTAL_INDICATORS
-              ? "Download completed scorecard (.xlsm)"
-              : "Download scorecard so far (.xlsm)"}
+              ? "Download completed scorecard (.xlsx)"
+              : "Download scorecard so far (.xlsx)"}
           </button>
-          <button onClick={handleDownload} title="Plain spreadsheet without the official template formatting"
-            className="text-xs text-text-secondary hover:text-text-primary ml-auto">
-            Plain .xlsx
+          <button onClick={handleDownloadOfficial} disabled={building}
+            title="Fills the real UNDRR .xlsm template. Some option-button selections may need a manual check in Excel — the .xlsx above is the reliable copy."
+            className="flex items-center gap-1.5 text-xs text-text-secondary hover:text-text-primary ml-auto disabled:opacity-60">
+            {building ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />} Official UNDRR template (.xlsm)
           </button>
         </div>
         {filled < TOTAL_INDICATORS && (
