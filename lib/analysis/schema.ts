@@ -40,11 +40,17 @@ export const ActionSchema = z.object({
 
 export type Action = z.infer<typeof ActionSchema>;
 
+// ── Confidence in a statement (well-documented vs inferred) ──
+
+export const ConfidenceSchema = z.enum(["high", "medium", "low"]);
+export type Confidence = z.infer<typeof ConfidenceSchema>;
+
 // ── Sourced statement (strength or weakness) ─────────────────
 
 export const SourcedStatementSchema = z.object({
   text: z.string(),
   sourceRefs: z.array(z.string()),
+  confidence: ConfidenceSchema.optional(),      // how well-evidenced the claim is
 });
 
 export type SourcedStatement = z.infer<typeof SourcedStatementSchema>;

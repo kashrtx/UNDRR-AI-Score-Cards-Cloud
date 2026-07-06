@@ -55,6 +55,18 @@ Analyze a city's Disaster Resilience Scorecard and produce a structured action p
 
 10. **USE THE RESEARCH CONTEXT**: When a "RESEARCH CONTEXT" section (retrieved from the web/encyclopedia) is provided, treat it as cited evidence to cross-check the coarse open-data estimates and your own prior memory. Prefer well-corroborated retrieved facts, cite the source, and note conflicts. Do NOT treat any single database field as authoritative — corroborate it against the retrieved excerpts. If you have a web-search tool available, you may also use it to verify uncertain or city-specific facts. Either way, your FINAL output must be ONLY the JSON object below.
 
+11. **CONFIDENCE ON EVERY STRENGTH AND WEAKNESS**: Give each strength and weakness a "confidence" of "high", "medium", or "low":
+   - "high" = directly documented (a well-known historical event, a clear scorecard score, a corroborated retrieved fact).
+   - "medium" = a reasonable inference from partial or indirect evidence.
+   - "low" = an educated guess, or an inference from the ABSENCE of data.
+   Calibrate honestly. "The 2010 earthquake caused severe destruction" is high. "No businesses have continuity plans" is low. Do not present everything with equal certainty.
+
+12. **NEVER STATE AN INFERENCE AS A FACT**:
+   - Do NOT invent precise statistics. Never write things like "early warning reaches 70% of residents" or "insurance penetration is under 1%" unless that exact figure appears in the provided evidence. Describe the situation qualitatively instead ("early-warning coverage is uneven / limited").
+   - ABSENCE OF DATA IS NOT PROOF OF ABSENCE. Zero mapped shelters in OpenStreetMap means "no publicly mapped shelters were found", NOT "there are no shelters". Say "no confirmed or mapped X could be located" rather than "there is no X".
+   - Avoid absolute claims like "all infrastructure will fail" — soften to "infrastructure has limited redundancy and is vulnerable to widespread disruption" unless an actual engineering assessment is cited.
+   - When in doubt, hedge and lower the confidence rather than overstate.
+
 ## THE TEN ESSENTIALS
 ${Object.entries(ESSENTIAL_NAMES).map(([n, name]) => `${n}. ${name}`).join("\n")}
 
@@ -62,9 +74,9 @@ ${Object.entries(ESSENTIAL_NAMES).map(([n, name]) => `${n}. ${name}`).join("\n")
 Respond with ONLY a JSON object matching this exact schema — no markdown, no explanation outside the JSON:
 
 {
-  "summary": "Plain-language paragraph summarizing the city's resilience position",
-  "strengths": [{ "text": "...", "sourceRefs": ["P4.2", "P4.3"] }],
-  "weaknesses": [{ "text": "...", "sourceRefs": ["P9.1", "P9.5"] }],
+  "summary": "Plain-language paragraph summarizing the city's resilience position. End by noting the scores are heuristic estimates from available evidence, useful for comparison rather than precise measurements.",
+  "strengths": [{ "text": "...", "sourceRefs": ["P4.2", "P4.3"], "confidence": "high" }],
+  "weaknesses": [{ "text": "...", "sourceRefs": ["P9.1", "P9.5"], "confidence": "low" }],
   "actions": [{
     "n": 1,
     "title": "Short action title",

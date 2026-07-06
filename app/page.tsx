@@ -67,6 +67,24 @@ function modelOf(s: AppSettings): string {
   return modelForSettings(s);
 }
 
+function ConfidenceBadge({ level }: { level?: "high" | "medium" | "low" }) {
+  if (!level) return null;
+  const s =
+    level === "high"
+      ? { c: "text-accent-400 border-accent-500/30 bg-accent-500/10", t: "Well documented" }
+      : level === "medium"
+      ? { c: "text-warn-400 border-warn-500/30 bg-warn-500/10", t: "Reasonable inference" }
+      : { c: "text-text-secondary border-border bg-surface-overlay/60", t: "Low certainty" };
+  return (
+    <span
+      title={s.t}
+      className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded-full border font-medium ${s.c}`}
+    >
+      {level} confidence
+    </span>
+  );
+}
+
 export default function Page() {
   const [tab, setTab] = useState<Tab>("dashboard");
   const [settings, setSettings] = useState<AppSettings | null>(null);
@@ -647,6 +665,7 @@ export default function Page() {
                         <Info size={13} className="shrink-0 mt-0.5 text-primary-300" />
                         This analysis reflects the judgement of the AI model above. A different model
                         (or a re-run) may surface different strengths, gaps and recommendations, compare models for important decisions.
+                        The scores are heuristic estimates, best read comparatively rather than as exact measurements, and the label on each point shows how well-evidenced it is (low usually means an inference worth checking locally).
                       </p>
 
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-5">
@@ -658,7 +677,10 @@ export default function Page() {
                             {analysis.strengths.map((s, i) => (
                               <li key={i} className="flex items-start gap-2 text-sm text-text-secondary p-2.5 rounded-lg bg-accent-500/5 border border-accent-500/15">
                                 <span className="flex-1">{s.text}</span>
-                                <ProvenanceBadge sourceRefs={s.sourceRefs} />
+                                <div className="flex flex-col items-end gap-1 shrink-0">
+                                  <ConfidenceBadge level={s.confidence} />
+                                  <ProvenanceBadge sourceRefs={s.sourceRefs} />
+                                </div>
                               </li>
                             ))}
                           </ul>
@@ -671,7 +693,10 @@ export default function Page() {
                             {analysis.weaknesses.map((w, i) => (
                               <li key={i} className="flex items-start gap-2 text-sm text-text-secondary p-2.5 rounded-lg bg-danger-500/5 border border-danger-500/15">
                                 <span className="flex-1">{w.text}</span>
-                                <ProvenanceBadge sourceRefs={w.sourceRefs} />
+                                <div className="flex flex-col items-end gap-1 shrink-0">
+                                  <ConfidenceBadge level={w.confidence} />
+                                  <ProvenanceBadge sourceRefs={w.sourceRefs} />
+                                </div>
                               </li>
                             ))}
                           </ul>
