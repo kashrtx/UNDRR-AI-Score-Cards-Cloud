@@ -24,12 +24,14 @@ export type TranscriptItem =
 
 export type AgentEvent =
   | { type: "thinking"; on: boolean }
+  | { type: "stream"; text: string }
   | { type: "thought"; text: string }
   | { type: "assistant"; text: string }
   | { type: "tool"; label: string; detail?: string }
   | { type: "draft" }
   | { type: "done" }
-  | { type: "error"; text: string };
+  | { type: "stopped" }
+  | { type: "error"; text: string; canContinue?: boolean };
 
 export interface AgentContext {
   provider: LLMProvider;
@@ -38,6 +40,7 @@ export interface AgentContext {
   searchKey?: string | null;
   city?: string;
   country?: string;
+  attachments?: Array<{ name: string; text: string }>;
 }
 
 const MAX_STEPS = 16;
@@ -74,9 +77,10 @@ async function completeWithRetry(
 ): Promise<string> {
   const waits = [5000, 12000];
   let lastErr: unknown;
+  const handlers = { onToken: (t: string) => onEvent({ type: "stream", text: t }) };
   for (let attempt = 0; attempt <= waits.length; attempt++) {
     try {
-      return await ctx.provider.complete(SYSTEM, user, undefined, signal);
+      return await ctx.provider.complete(SYSTEM, user, handlers, signal);
     } catch (e) {
       lastErr = e;
       if (signal?.aborted) throw e;
@@ -243,7 +247,14 @@ function buildUser(ctx: AgentContext): string {
     ? `Target city: ${ctx.city}${ctx.country && ctx.country.trim() ? ", " + ctx.country : ""}.`
     : "No city has been provided yet — ask the user which city this is for before scoring.";
 
-  return `${history || "(no messages yet)"}
+  const atts = ctx.attachments || [];
+  const attBlock = atts.length
+    ? "REFERENCE DOCUMENTS THE USER ATTACHED (use these as evidence where relevant):\n" +
+      atts.map((a) => `--- ${a.name} ---\n${a.text.slice(0, 4000)}${a.text.length > 4000 ? "\n…(truncated)" : ""}`).join("\n\n") +
+      "\n\n"
+    : "";
+
+  return `${attBlock}${history || "(no messages yet)"}
 
 ${cityLine}
 CURRENT DRAFT: ${filled}/${TOTAL_INDICATORS} filled.${draftLines ? ` Scores so far: ${draftLines}.` : ""}
@@ -264,7 +275,10 @@ export async function runAgentTurn(
 ): Promise<void> {
   let parseFailures = 0;
   for (let step = 0; step < MAX_STEPS; step++) {
-    if (signal?.aborted) return;
+    if (signal?.aborted) {
+      onEvent({ type: "stopped" });
+      return;
+    }
     onEvent({ type: "thinking", on: true });
 
     let raw = "";
@@ -272,16 +286,24 @@ export async function runAgentTurn(
       raw = await completeWithRetry(ctx, buildUser(ctx), onEvent, signal);
     } catch (e) {
       onEvent({ type: "thinking", on: false });
-      if (signal?.aborted) return;
+      if (signal?.aborted) {
+        onEvent({ type: "stopped" });
+        return;
+      }
       if (isRateLimit(e)) {
         onEvent({
           type: "error",
+          canContinue: true,
           text:
-            "the model hit its rate limit or quota. Free tiers (like Gemini) allow only a few calls a minute, and the assistant makes several. Wait a minute and continue, or switch to a model with more headroom such as NVIDIA NIM in Settings",
+            "the model hit its rate limit or quota. Free tiers (like Gemini) allow only a few calls a minute, and the assistant makes several. Wait a minute and press Continue, or switch to a model with more headroom (such as NVIDIA NIM) in Settings and then Continue",
         });
         return;
       }
-      onEvent({ type: "error", text: e instanceof Error ? e.message : String(e) });
+      onEvent({
+        type: "error",
+        canContinue: true,
+        text: (e instanceof Error ? e.message : String(e)) + " — you can press Continue to retry, or switch model in Settings first",
+      });
       return;
     }
     onEvent({ type: "thinking", on: false });
@@ -290,7 +312,7 @@ export async function runAgentTurn(
     if (!action) {
       parseFailures++;
       if (parseFailures >= 3) {
-        onEvent({ type: "error", text: "the model kept replying in a format I couldn't read. Try again, or switch to another model in Settings" });
+        onEvent({ type: "error", canContinue: true, text: "the model kept replying in a format I couldn't read. Press Continue to retry, or switch to another model in Settings" });
         return;
       }
       ctx.transcript.push({ role: "tool", content: "Your last reply was not a single valid JSON action. Reply with exactly one JSON object with a \"thought\" and an \"action\"." });

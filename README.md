@@ -10,7 +10,7 @@ It is built to be genuinely useful for a city planner, and genuinely cheap to ru
 
 ## The two tabs, in a nutshell
 
-**Assistant** helps you *create* a scorecard. You give it a city and whatever you know, and an AI agent researches the city, searches the web, and fills in the 47 indicators, building a live draft you can edit. When it looks right, one click loads it into the analyzer (or downloads it as a spreadsheet).
+**Assistant** helps you *create* a scorecard. You give it a city and whatever you know, and an AI agent researches the city, searches the web, and fills in the 47 indicators, building a live draft you can edit. You can watch it think in real time, stop and continue later (even after switching model), attach reference documents for it to learn from, and keep a saved history of scorecards you can switch between. When it looks right, one click loads it into the analyzer (or downloads it as a spreadsheet).
 
 **Dashboard** *analyzes* a scorecard, whether you uploaded a real one or built it in the Assistant. This is the part described in most of this guide.
 
@@ -187,7 +187,7 @@ A quick map so you do not have to go hunting:
 - **Add a new AI provider:** add a file in `lib/llm/`, wire it into `lib/llm/index.ts`, and register it in `lib/settings/store.ts` and `components/SettingsTab.tsx`.
 - **Add a simple new data source:** often you only edit `lib/data/adapters/data-sources.json`, no code needed. For a trickier source, add a small adapter next to the others.
 - **Change how the web research behaves:** edit `lib/data/research.ts`.
-- **Change how the fill-out Assistant thinks or which tools it can call:** edit `lib/agent/agent.ts` (its instructions and the tool loop) and `lib/agent/draft.ts` (the draft it builds).
+- **Change how the fill-out Assistant thinks or which tools it can call:** edit `lib/agent/agent.ts` (its instructions and the tool loop) and `lib/agent/draft.ts` (the draft it builds). Saved chat history lives in `lib/agent/sessions.ts`.
 - **Change the look, colors, or charts:** the pieces are in `components/`, and the color and theme tokens live in `app/globals.css`.
 
 ---
