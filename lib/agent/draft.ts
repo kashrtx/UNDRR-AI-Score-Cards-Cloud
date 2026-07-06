@@ -70,6 +70,11 @@ export function applyInfo(info: CityInfo, patch: Record<string, unknown>): { inf
     next.hazards = patch.hazards.split(/[,;]/).map((h) => h.trim()).filter(Boolean).slice(0, 12);
     changed++;
   }
+  // Density is arithmetic, not a guess: derive it whenever we know both
+  // population and area and it wasn't given directly.
+  if (next.density == null && typeof next.population === "number" && typeof next.areaKm2 === "number" && next.areaKm2 > 0) {
+    next.density = Math.round(next.population / next.areaKm2);
+  }
   return { info: next, changed };
 }
 

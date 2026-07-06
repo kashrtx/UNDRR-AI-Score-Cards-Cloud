@@ -120,12 +120,18 @@ const SYSTEM = `You are a careful, friendly assistant that helps a city official
 
 You are like a person with the real scorecard file open, filling it in as you go. Fill BOTH the City Information page and the indicators.
 
-CITY INFORMATION FIELDS you can record with set_info (fill any you can find from research; leave the rest):
+CITY INFORMATION FIELDS you can record with set_info:
   typeOfCity (e.g. "Municipality"), authorityTitle (e.g. "Mayor"), population (number),
   areaKm2 (number), density (per km², number), youthPct, seniorPct, femaleHeadedPct,
   literacyPct, povertyPct, incomeUsd (average household income), nonCitizenPct,
   hazards (list of the main hazards), mostLikelyHazard (the single most likely known hazard),
   mostSevere (the most severe disaster known, a short phrase).
+  On a full fill, actively try to complete this profile: the demographic figures
+  (population, youth %, senior %, literacy %, poverty %, average household income)
+  are usually published in national census / city-statistics data, so look them
+  up with web_search or research_city rather than skipping them. You do NOT need
+  to send density — it is computed for you from population and area. For any
+  single field you genuinely cannot find, leave it out; NEVER invent a number.
 
 SCORING RUBRIC (0-3):
   0 = No / none / not in place at all.
@@ -459,15 +465,32 @@ export async function runAgentTurn(
           });
           break;
         }
-        // One-time nudge: don't finish an autonomous run with a blank City
-        // Information page if research clearly turned up city facts.
-        const infoEmpty = !ctx.info || (ctx.info.population == null && !ctx.info.mostSevere && !ctx.info.mostLikelyHazard && !(ctx.info.hazards && ctx.info.hazards.length));
-        if (autonomous && infoEmpty && !infoNudged) {
+        // One-time nudge: don't finish an autonomous run while required City
+        // Information fields are still blank. List exactly what's missing so the
+        // agent researches and fills what it can (leaving truly-unknown blank).
+        const info = ctx.info || ({} as CityInfo);
+        const wantStr: Array<[keyof CityInfo, string]> = [
+          ["typeOfCity", "type of city"], ["authorityTitle", "title of highest authority"],
+          ["mostLikelyHazard", "most likely hazard"], ["mostSevere", "most severe disaster"],
+        ];
+        const wantNum: Array<[keyof CityInfo, string]> = [
+          ["population", "population"], ["areaKm2", "area (km²)"], ["youthPct", "youth %"],
+          ["seniorPct", "senior %"], ["literacyPct", "literacy %"], ["povertyPct", "poverty %"],
+          ["incomeUsd", "average household income"],
+        ];
+        const missing = [
+          ...wantStr.filter(([k]) => !info[k]).map(([, l]) => l),
+          ...wantNum.filter(([k]) => info[k] == null).map(([, l]) => l),
+        ];
+        if (autonomous && missing.length >= 2 && !infoNudged) {
           infoNudged = true;
-          onEvent({ type: "tool", label: "One more thing", detail: "recording city information" });
+          onEvent({ type: "tool", label: "Filling in the city profile", detail: `${missing.length} field(s) still blank` });
           ctx.transcript.push({
             role: "tool",
-            content: "Before finishing, record the City Information page with set_info (population, area, main hazards, most severe disaster, income if known) using what your research found. Then finish.",
+            content:
+              `The City Information page still has blank fields: ${missing.join(", ")}. ` +
+              `Look these up (census / city statistics / reliable sources) and record them with set_info. ` +
+              `For any value you genuinely cannot find, leave it out — do NOT invent a number. Then finish.`,
           });
           break;
         }
