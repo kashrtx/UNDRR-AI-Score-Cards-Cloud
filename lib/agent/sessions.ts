@@ -5,7 +5,7 @@
  * city. Nothing leaves the browser.
  */
 
-import type { Draft } from "./draft";
+import type { Draft, CityInfo } from "./draft";
 import type { TranscriptItem } from "./agent";
 import { filledCount } from "./draft";
 
@@ -30,6 +30,7 @@ export interface AssistantSession {
   chat: ChatItem[];
   transcript: TranscriptItem[];
   draft: Draft;
+  profile?: CityInfo;
   attachments: Attachment[];
   createdAt: number;
   updatedAt: number;

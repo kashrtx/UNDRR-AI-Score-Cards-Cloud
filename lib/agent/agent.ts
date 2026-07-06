@@ -15,7 +15,7 @@
 import type { LLMProvider } from "@/lib/llm";
 import { PRELIMINARY_INDICATORS, TOTAL_INDICATORS } from "@/lib/scorecard/preliminaryTemplate";
 import { ESSENTIAL_NAMES } from "@/lib/scorecard/schema";
-import { applyScores, filledCount, unfilledCodes, type Draft } from "./draft";
+import { applyScores, applyInfo, filledCount, unfilledCodes, type Draft, type CityInfo } from "./draft";
 
 export type TranscriptItem =
   | { role: "user"; content: string }
@@ -29,6 +29,7 @@ export type AgentEvent =
   | { type: "assistant"; text: string }
   | { type: "tool"; label: string; detail?: string }
   | { type: "draft" }
+  | { type: "info" }
   | { type: "done" }
   | { type: "stopped" }
   | { type: "error"; text: string; canContinue?: boolean };
@@ -37,6 +38,7 @@ export interface AgentContext {
   provider: LLMProvider;
   transcript: TranscriptItem[];
   draft: Draft;
+  info: CityInfo; // the City Information page (name, country + profile fields), mutated by set_info
   searchKey?: string | null;
   city?: string;
   country?: string;
@@ -111,7 +113,18 @@ function indicatorList(): string {
   return parts.join("\n");
 }
 
-const SYSTEM = `You are a careful, friendly assistant that helps a city official complete the UNDRR ARISE "Disaster Resilience Scorecard for Cities" (Preliminary version). There are ${TOTAL_INDICATORS} indicators grouped under the Ten Essentials. Each indicator is scored 0 to 3.
+const SYSTEM = `You are a careful, friendly assistant that helps a city official complete the UNDRR ARISE "Disaster Resilience Scorecard for Cities" (Preliminary version). The scorecard has two parts you can fill:
+  1. A CITY INFORMATION page (basic facts about the city).
+  2. ${TOTAL_INDICATORS} scored indicators grouped under the Ten Essentials, each scored 0 to 3.
+
+You are like a person with the real scorecard file open, filling it in as you go. Fill BOTH the City Information page and the indicators.
+
+CITY INFORMATION FIELDS you can record with set_info (fill any you can find from research; leave the rest):
+  typeOfCity (e.g. "Municipality"), authorityTitle (e.g. "Mayor"), population (number),
+  areaKm2 (number), density (per km², number), youthPct, seniorPct, femaleHeadedPct,
+  literacyPct, povertyPct, incomeUsd (average household income), nonCitizenPct,
+  hazards (list of the main hazards), mostLikelyHazard (the single most likely known hazard),
+  mostSevere (the most severe disaster known, a short phrase).
 
 SCORING RUBRIC (0-3):
   0 = No / none / not in place at all.
@@ -128,12 +141,14 @@ HOW YOU WORK:
 - Choose the single best next action:
   {"thought":"...","action":"research_city","city":"<name>","country":"<name>"}  — gather open data + web facts about the city (climate, hazards, infrastructure, population). Do this once early when you know the city.
   {"thought":"...","action":"web_search","query":"<query>"}  — look up a specific fact (e.g. "Toronto emergency management office budget", "Toronto early warning system").
+  {"thought":"...","action":"set_info","profile":{"population":134000,"areaKm2":385,"mostLikelyHazard":"Earthquake","mostSevere":"2010 M7.0 earthquake","hazards":["Earthquake","Flooding","Hurricane"]}}  — record City Information fields you have learned. Send only the fields you know.
   {"thought":"...","action":"set_scores","scores":[{"code":"P1.1","score":2,"note":"<one short sentence on the basis>"}, ...]}  — fill one or more indicators. Include a note for EVERY indicator you score.
   {"thought":"...","action":"message","text":"<what you want to say or ask the user>"}  — talk to the user and WAIT for their reply. Use this to ask for information only the city would know, or when the city name is missing.
-  {"thought":"...","action":"finish","text":"<friendly wrap-up>"}  — only when ALL ${TOTAL_INDICATORS} indicators have a score.
+  {"thought":"...","action":"finish","text":"<friendly wrap-up>"}  — only when the City Information you could find is recorded AND all ${TOTAL_INDICATORS} indicators have a score.
 
 RULES:
 - You need to know the target city. If no city has been provided, your FIRST action must be a "message" asking which city this scorecard is for. Do not guess a city.
+- After researching, record what you learned about the city with set_info BEFORE or ALONGSIDE scoring — do not skip the City Information page. If the user ever asks about "the info page" or "city info", they mean this; use set_info.
 - SCOPE: If the user asks for help with only specific indicators or a limited change ("help me with P3.2", "review Essential 5", "what about early warning?"), do ONLY that and then finish or ask a follow-up. Do NOT fill or re-score everything. Only complete the whole scorecard when the user clearly asks you to (e.g. "fill it out for me", "complete the rest").
 - Base every score on evidence: the user's statements, research results, open data, or attached documents. Never invent specific facts, budgets, or programme names.
 - When an indicator depends on internal information only the city would know and you have no evidence, either ask the user with a "message", or set a conservative score with a note that clearly says it is an assumption to verify.
@@ -164,6 +179,8 @@ interface AgentAction {
   query?: string;
   text?: string;
   scores?: Array<{ code?: string; score?: number; note?: string }>;
+  profile?: Record<string, unknown>;
+  info?: Record<string, unknown>;
 }
 
 function parseAction(raw: string): AgentAction | null {
@@ -262,13 +279,27 @@ function buildUser(ctx: AgentContext): string {
 
   const modeLine =
     ctx.mode === "autonomous"
-      ? "TASK: complete the entire scorecard (all indicators)."
+      ? "TASK: complete the ENTIRE scorecard — record the City Information you can find (set_info) AND score all indicators."
       : "TASK: respond to the user's specific request only; do not fill or change everything unless they asked.";
+
+  // Summarise what the City Information page already holds, and what's still blank.
+  const info = ctx.info || ({} as CityInfo);
+  const infoParts: string[] = [];
+  if (info.population != null) infoParts.push(`population ${info.population}`);
+  if (info.areaKm2 != null) infoParts.push(`area ${info.areaKm2} km²`);
+  if (info.incomeUsd != null) infoParts.push(`income $${info.incomeUsd}`);
+  if (info.mostLikelyHazard) infoParts.push(`most-likely hazard "${info.mostLikelyHazard}"`);
+  if (info.mostSevere) infoParts.push(`most-severe "${info.mostSevere}"`);
+  if (info.hazards && info.hazards.length) infoParts.push(`hazards ${info.hazards.join("/")}`);
+  const infoLine = infoParts.length
+    ? `CITY INFORMATION recorded so far: ${infoParts.join("; ")}.`
+    : "CITY INFORMATION page is still EMPTY — record what you can with set_info.";
 
   return `${attBlock}${history || "(no messages yet)"}
 
 ${cityLine}
 ${modeLine}
+${infoLine}
 CURRENT DRAFT: ${filled}/${TOTAL_INDICATORS} filled.${draftLines ? ` Scores so far: ${draftLines}.` : ""}
 ${unfilled.length ? `Still unfilled: ${unfilled.join(", ")}.` : "All indicators are filled."}
 
@@ -288,6 +319,7 @@ export async function runAgentTurn(
   let parseFailures = 0;
   let prevFilled = filledCount(ctx.draft);
   let stagnantScores = 0; // consecutive set_scores that add nothing
+  let infoNudged = false;
   const autonomous = ctx.mode === "autonomous";
 
   for (let step = 0; step < MAX_STEPS; step++) {
@@ -387,6 +419,17 @@ export async function runAgentTurn(
         }
         break;
       }
+      case "set_info": {
+        const patch = (action.profile || action.info || {}) as Record<string, unknown>;
+        const { info, changed } = applyInfo(ctx.info || ({ name: ctx.city || "", country: ctx.country || "" } as CityInfo), patch);
+        ctx.info = info;
+        onEvent({ type: "info" });
+        const keys = Object.keys(patch).filter((k) => patch[k] != null && patch[k] !== "");
+        ctx.transcript.push({ role: "tool", content: `Recorded City Information: ${keys.join(", ") || "(nothing usable)"}.` });
+        onEvent({ type: "tool", label: "City information updated", detail: keys.slice(0, 6).join(", ") });
+        stagnantScores = 0;
+        break;
+      }
       case "message": {
         const text = action.text || "…";
         ctx.transcript.push({ role: "assistant", content: text });
@@ -403,6 +446,18 @@ export async function runAgentTurn(
           });
           break;
         }
+        // One-time nudge: don't finish an autonomous run with a blank City
+        // Information page if research clearly turned up city facts.
+        const infoEmpty = !ctx.info || (ctx.info.population == null && !ctx.info.mostSevere && !ctx.info.mostLikelyHazard && !(ctx.info.hazards && ctx.info.hazards.length));
+        if (autonomous && infoEmpty && !infoNudged) {
+          infoNudged = true;
+          onEvent({ type: "tool", label: "One more thing", detail: "recording city information" });
+          ctx.transcript.push({
+            role: "tool",
+            content: "Before finishing, record the City Information page with set_info (population, area, main hazards, most severe disaster, income if known) using what your research found. Then finish.",
+          });
+          break;
+        }
         const text = action.text || "Done. Review the draft, then load it into the analyzer or download it.";
         ctx.transcript.push({ role: "assistant", content: text });
         onEvent({ type: "assistant", text });
@@ -410,7 +465,7 @@ export async function runAgentTurn(
         return;
       }
       default:
-        ctx.transcript.push({ role: "tool", content: `Unknown action "${action.action}". Use research_city, web_search, set_scores, message, or finish.` });
+        ctx.transcript.push({ role: "tool", content: `Unknown action "${action.action}". Use research_city, web_search, set_info, set_scores, message, or finish.` });
     }
   }
 

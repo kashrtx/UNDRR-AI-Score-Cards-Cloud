@@ -110,6 +110,7 @@ export function AssistantTab({
   const [info, setInfo] = useState("");
   const [chat, setChat] = useState<ChatItem[]>([]);
   const [draft, setDraft] = useState<Draft>(() => emptyDraft());
+  const [profile, setProfile] = useState<CityInfo>({ name: "", country: "" });
   const [attachments, setAttachments] = useState<Attachment[]>([]);
 
   const [input, setInput] = useState("");
@@ -127,6 +128,9 @@ export function AssistantTab({
   const abortRef = useRef<AbortController | null>(null);
   const draftRef = useRef<Draft>(draft);
   draftRef.current = draft;
+  const profileRef = useRef<CityInfo>(profile);
+  profileRef.current = profile;
+  const [setupOpen, setSetupOpen] = useState(true);
   const attachRef = useRef<Attachment[]>(attachments);
   attachRef.current = attachments;
   const streamBuf = useRef("");
@@ -136,11 +140,15 @@ export function AssistantTab({
   const lastModeRef = useRef<"autonomous" | "assist">("assist");
   const [building, setBuilding] = useState(false);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
+  const chatScrollRef = useRef<HTMLDivElement | null>(null);
+  const stuckToBottomRef = useRef(true);
+  const [showJump, setShowJump] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
   const docRef = useRef<HTMLInputElement | null>(null);
   const ready = useRef(false);
   const mountedRef = useRef(true);
   const runSessionRef = useRef<string>("");
+  const ctxRef = useRef<AgentContext | null>(null);
 
   const filled = filledCount(draft);
   const pct = Math.round((filled / TOTAL_INDICATORS) * 100);
@@ -153,6 +161,7 @@ export function AssistantTab({
     chat,
     transcript: transcriptRef.current,
     draft: draftRef.current,
+    profile: profileRef.current,
     attachments: attachRef.current,
     createdAt: activeMetaRef.current.createdAt,
     updatedAt: Date.now(),
@@ -175,9 +184,12 @@ export function AssistantTab({
     setInfo(s.info || "");
     setChat(s.chat || []);
     setDraft(Object.keys(s.draft || {}).length ? s.draft : emptyDraft());
+    setProfile(s.profile && s.profile.name != null ? s.profile : { name: s.city || "", country: s.country || "" });
     setAttachments(s.attachments || []);
     setContinuable(false);
     setStream("");
+    stuckToBottomRef.current = true;
+    setShowJump(false);
   }, []);
 
   // First mount: restore or create a session
@@ -202,7 +214,7 @@ export function AssistantTab({
     if (!ready.current || !activeMetaRef.current.id) return;
     const t = setTimeout(saveActive, 500);
     return () => clearTimeout(t);
-  }, [city, country, info, chat, draft, attachments, saveActive]);
+  }, [city, country, info, chat, draft, profile, attachments, saveActive]);
 
   // On unmount (e.g. full page navigation), stop any run and persist.
   const saveActiveRef = useRef(saveActive);
@@ -216,9 +228,28 @@ export function AssistantTab({
     []
   );
 
+  // Only pull the view to the newest message if the reader is already near the
+  // bottom. If they've scrolled up to read, leave them be (and show a "jump to
+  // latest" button instead).
   useEffect(() => {
-    chatEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    if (stuckToBottomRef.current) {
+      chatEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+    }
   }, [chat, thinking, stream]);
+
+  const onChatScroll = useCallback(() => {
+    const el = chatScrollRef.current;
+    if (!el) return;
+    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
+    stuckToBottomRef.current = atBottom;
+    setShowJump(!atBottom);
+  }, []);
+
+  const jumpToLatest = useCallback(() => {
+    stuckToBottomRef.current = true;
+    setShowJump(false);
+    chatEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, []);
 
   useEffect(() => {
     if (!thinking) { setElapsed(0); return; }
@@ -260,6 +291,9 @@ export function AssistantTab({
       case "draft":
         setDraft({ ...draftRef.current });
         break;
+      case "info":
+        if (ctxRef.current?.info) setProfile({ ...ctxRef.current.info });
+        break;
       case "done":
         setContinuable(false);
         break;
@@ -294,12 +328,14 @@ export function AssistantTab({
         provider,
         transcript: transcriptRef.current,
         draft: draftRef.current,
+        info: { ...profileRef.current, name: city.trim() || profileRef.current.name || "", country: country.trim() || profileRef.current.country || "" },
         searchKey,
         city: city.trim(),
         country: country.trim(),
         attachments: attachRef.current,
         mode,
       };
+      ctxRef.current = ctx;
       if (userText) transcriptRef.current.push({ role: "user", content: userText } as TranscriptItem);
       // Guard: if the user switches session (or unmounts) mid-run, an aborted
       // run must not write its old draft/events into the new session.
@@ -321,7 +357,10 @@ export function AssistantTab({
           setThinking(false);
           setStream("");
         }
-        if (sameSession) setDraft({ ...ctx.draft }); // fresh state → debounced auto-save
+        if (sameSession) {
+          setDraft({ ...ctx.draft }); // fresh state → debounced auto-save
+          setProfile({ ...ctx.info });
+        }
       }
     },
     [providerReady, settings, city, country, onEvent]
@@ -489,8 +528,8 @@ export function AssistantTab({
 
   // ── Draft edits + handoff ───────────────────────────
   const cityInfo: CityInfo = useMemo(
-    () => ({ name: city.trim() || "Unknown", country: country.trim() || "Unknown" }),
-    [city, country]
+    () => ({ ...profile, name: city.trim() || profile.name || "Unknown", country: country.trim() || profile.country || "Unknown" }),
+    [city, country, profile]
   );
   const headerTitle = city.trim() ? (country.trim() ? `${city.trim()}, ${country.trim()}` : city.trim()) : "New scorecard";
   const handleLoad = useCallback(() => onLoadIntoAnalyzer(draftToScorecard(draftRef.current, cityInfo)), [cityInfo, onLoadIntoAnalyzer]);
@@ -506,11 +545,25 @@ export function AssistantTab({
   const handleDownloadOfficial = useCallback(async () => {
     setBuilding(true);
     try {
+      const p = profileRef.current;
       const info = {
-        city: city.trim() || undefined,
-        country: country.trim() || undefined,
-        typeOfCity: "Municipality",
+        city: city.trim() || p.name || undefined,
+        country: country.trim() || p.country || undefined,
+        typeOfCity: p.typeOfCity || "Municipality",
         date: new Date().toISOString().slice(0, 10),
+        authorityTitle: p.authorityTitle,
+        population: p.population,
+        areaKm2: p.areaKm2,
+        density: p.density,
+        youthPct: p.youthPct,
+        seniorPct: p.seniorPct,
+        femaleHeadedPct: p.femaleHeadedPct,
+        literacyPct: p.literacyPct,
+        povertyPct: p.povertyPct,
+        incomeUsd: p.incomeUsd,
+        nonCitizenPct: p.nonCitizenPct,
+        mostLikelyHazard: p.mostLikelyHazard || (p.hazards && p.hazards[0]),
+        mostSevereHazard: p.mostSevere,
       };
       let buf = templateBufRef.current || (await fetchBundled());
       let edits = computeTemplateEdits(buf, draftRef.current, info);
@@ -528,7 +581,12 @@ export function AssistantTab({
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
-      setChat((c) => [...c, { kind: "tool", label: "Built completed scorecard (.xlsm)", detail: "official template · answers, radios & city info filled" }]);
+      const n = filledCount(draftRef.current);
+      const label =
+        n === 0 ? "Downloaded blank official sheet (.xlsm)"
+        : n === TOTAL_INDICATORS ? "Downloaded completed scorecard (.xlsm)"
+        : "Downloaded scorecard so far (.xlsm)";
+      setChat((c) => [...c, { kind: "tool", label, detail: "real UNDRR template, formatting and macros kept" }]);
     } catch (e) {
       setChat((c) => [...c, { kind: "assistant", text: `Couldn't build the official file: ${e instanceof Error ? e.message : String(e)}. You can use the simple .xlsx instead, or Load into analyzer.` }]);
     } finally {
@@ -564,8 +622,23 @@ export function AssistantTab({
           </button>
         </div>
 
-        {/* Setup (always visible) */}
-        <div className="shrink-0 space-y-2.5 rounded-xl border border-border p-3 bg-surface-overlay/30 mb-3">
+        {/* Setup (collapsible, so the chat has room to breathe) */}
+        <div className="shrink-0 rounded-xl border border-border bg-surface-overlay/30 mb-3">
+          <button
+            onClick={() => setSetupOpen((v) => !v)}
+            aria-expanded={setupOpen}
+            className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left"
+          >
+            <span className="text-sm font-medium text-text-primary truncate">
+              {setupOpen ? "City & setup" : city.trim() ? headerTitle : "City & setup"}
+            </span>
+            <span className="flex items-center gap-1 text-xs text-text-secondary shrink-0">
+              {setupOpen ? "Hide" : "Show"}
+              <ChevronDown size={15} className={`transition-transform ${setupOpen ? "" : "-rotate-90"}`} />
+            </span>
+          </button>
+          {setupOpen && (
+          <div className="space-y-2.5 px-3 pb-3">
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <div>
               <label className="text-[11px] text-text-secondary">City</label>
@@ -594,10 +667,13 @@ export function AssistantTab({
               onChange={(e) => { const f = e.target.files?.[0]; if (f) onScorecardPicked(f); e.currentTarget.value = ""; }} />
           </div>
           {!providerReady && <p className="text-xs text-warn-400">Choose an AI model and add a key in Settings first.</p>}
+          </div>
+          )}
         </div>
 
         {/* Chat log */}
-        <div className="flex-1 overflow-y-auto min-h-0 space-y-3 pr-1">
+        <div className="relative flex-1 min-h-0 flex flex-col">
+        <div ref={chatScrollRef} onScroll={onChatScroll} className="flex-1 overflow-y-auto min-h-0 space-y-3 pr-1">
           {chat.length === 0 && (
             <p className="text-sm text-text-secondary">
               Fill in your city above and press &ldquo;Fill it out for me,&rdquo; or just type below to work through it together. You can attach reference documents with the paperclip.
@@ -641,6 +717,15 @@ export function AssistantTab({
             </button>
           )}
           <div ref={chatEndRef} />
+        </div>
+          {showJump && (
+            <button
+              onClick={jumpToLatest}
+              className="absolute bottom-2 left-1/2 -translate-x-1/2 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-surface border border-border shadow-lg text-text-primary hover:border-accent-500/50 transition-colors"
+            >
+              <ChevronDown size={14} /> Jump to latest
+            </button>
+          )}
         </div>
 
         {/* Attachment chips */}
@@ -694,6 +779,32 @@ export function AssistantTab({
         </div>
 
         <div className="flex-1 overflow-y-auto min-h-0 pr-1 space-y-4">
+          {(() => {
+            const p = profile;
+            const bits: string[] = [];
+            if (p.population != null) bits.push(`Population ${p.population.toLocaleString()}`);
+            if (p.areaKm2 != null) bits.push(`${p.areaKm2.toLocaleString()} km²`);
+            if (p.density != null) bits.push(`${p.density.toLocaleString()}/km²`);
+            if (p.incomeUsd != null) bits.push(`Income $${p.incomeUsd.toLocaleString()}`);
+            if (p.povertyPct != null) bits.push(`Poverty ${p.povertyPct}%`);
+            if (p.literacyPct != null) bits.push(`Literacy ${p.literacyPct}%`);
+            if (p.mostLikelyHazard) bits.push(`Main hazard: ${p.mostLikelyHazard}`);
+            if (p.mostSevere) bits.push(`Worst: ${p.mostSevere}`);
+            if (!bits.length && !(p.hazards && p.hazards.length)) return null;
+            return (
+              <div className="rounded-xl border border-border bg-surface-overlay/40 p-3">
+                <h3 className="text-sm font-semibold text-text-primary mb-1.5">City information</h3>
+                {p.hazards && p.hazards.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 mb-1.5">
+                    {p.hazards.map((h) => (
+                      <span key={h} className="px-2 py-0.5 text-[11px] rounded-full bg-danger-500/10 text-danger-400 border border-danger-500/20">{h}</span>
+                    ))}
+                  </div>
+                )}
+                {bits.length > 0 && <p className="text-xs text-text-secondary leading-relaxed">{bits.join(" · ")}</p>}
+              </div>
+            );
+          })()}
           {Array.from({ length: 10 }, (_, k) => k + 1).map((e) => {
             const inds = PRELIMINARY_INDICATORS.filter((i) => i.essential === e);
             const done = inds.filter((i) => draft[i.code]?.score != null).length;
@@ -740,9 +851,20 @@ export function AssistantTab({
             <ArrowRight size={16} /> Load into analyzer
           </button>
           <button onClick={handleDownloadOfficial} disabled={building}
-            title="The scorecard you just built, filled into the real UNDRR .xlsm template"
+            title={
+              filled === 0
+                ? "Download the official UNDRR .xlsm, blank and ready to fill in"
+                : filled === TOTAL_INDICATORS
+                ? "The finished scorecard, written into the real UNDRR .xlsm template"
+                : "What's been filled in so far, written into the real UNDRR .xlsm template"
+            }
             className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium bg-surface-overlay border border-border text-text-primary disabled:opacity-60">
-            {building ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />} Download completed scorecard (.xlsm)
+            {building ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}{" "}
+            {filled === 0
+              ? "Download blank official sheet (.xlsm)"
+              : filled === TOTAL_INDICATORS
+              ? "Download completed scorecard (.xlsm)"
+              : "Download scorecard so far (.xlsm)"}
           </button>
           <button onClick={handleDownload} title="Plain spreadsheet without the official template formatting"
             className="text-xs text-text-secondary hover:text-text-primary ml-auto">

@@ -30,7 +30,17 @@ export interface TemplateInfo {
   country?: string;
   typeOfCity?: string;
   date?: string;
+  authorityTitle?: string;
   population?: number;
+  areaKm2?: number;
+  density?: number;
+  youthPct?: number;
+  seniorPct?: number;
+  femaleHeadedPct?: number;
+  literacyPct?: number;
+  povertyPct?: number;
+  incomeUsd?: number;
+  nonCitizenPct?: number;
   mostLikelyHazard?: string;
   mostSevereHazard?: string;
 }
@@ -50,14 +60,27 @@ export function computeTemplateEdits(
     edits.get(sheet)!.push({ ref, value, keepFormula });
   };
 
-  // ── City Information sheet ("Info"): fill the identity block + hazards ──
+  // ── City Information sheet ("Info") ──
+  // The top "This Assessment" block merges its label across B:C, so the value
+  // goes in column D. The "City Profile" block below is not merged; its values
+  // sit in column C. (Verified against a real completed scorecard.)
   if (info) {
     const infoCells: Array<[string, string | number | undefined]> = [
-      ["C4", info.city],
-      ["C5", info.typeOfCity],
-      ["C6", info.country],
-      ["C7", info.date],
+      ["D4", info.city],
+      ["D5", info.typeOfCity],
+      ["D6", info.country],
+      ["D7", info.date],
+      ["C10", info.authorityTitle],
       ["C11", info.population],
+      ["C12", info.areaKm2],
+      ["C13", info.density],
+      ["C14", info.youthPct],
+      ["C15", info.seniorPct],
+      ["C16", info.femaleHeadedPct],
+      ["C17", info.literacyPct],
+      ["C18", info.povertyPct],
+      ["C19", info.incomeUsd],
+      ["C20", info.nonCitizenPct],
       ["C21", info.mostLikelyHazard],
       ["C22", info.mostSevereHazard],
     ];
@@ -361,9 +384,17 @@ function applyRadioChecks(vml: string, rowToIdx: Map<number, number>): string {
     if (curRow == null || !rowToIdx.has(curRow)) return block;
     const wantIdx = rowToIdx.get(curRow)!;
     // Remove any existing Checked, then stamp it on the selected option only.
+    // Excel's VML schema is order-sensitive: <x:Checked> must sit right after
+    // <x:TextVAlign>, otherwise Excel silently ignores it and the button looks
+    // empty. So insert it there rather than at the end of the block.
     let b = block.replace(/\s*<x:Checked>[\s\S]*?<\/x:Checked>/g, "");
     if (pos === wantIdx) {
-      b = b.replace("</x:ClientData>", "<x:Checked>1</x:Checked>\r\n  </x:ClientData>");
+      if (/<\/x:TextVAlign>/.test(b)) {
+        b = b.replace(/(<\/x:TextVAlign>)/, `$1\r\n   <x:Checked>1</x:Checked>`);
+      } else {
+        // Fallback: before the closing tag (rare, only if TextVAlign is absent).
+        b = b.replace("</x:ClientData>", "<x:Checked>1</x:Checked>\r\n  </x:ClientData>");
+      }
     }
     return b;
   });

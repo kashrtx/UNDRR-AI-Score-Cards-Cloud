@@ -22,9 +22,55 @@ export type Draft = Record<string, DraftEntry>;
 export interface CityInfo {
   name: string;
   country: string;
+  typeOfCity?: string;
+  assessedDate?: string;
+  authorityTitle?: string;
   population?: number;
+  areaKm2?: number;
+  density?: number;
+  youthPct?: number;
+  seniorPct?: number;
+  femaleHeadedPct?: number;
+  literacyPct?: number;
+  povertyPct?: number;
+  incomeUsd?: number;
+  nonCitizenPct?: number;
   hazards?: string[];
+  mostLikelyHazard?: string;
   mostSevere?: string;
+}
+
+const INFO_NUM_FIELDS = [
+  "population", "areaKm2", "density", "youthPct", "seniorPct", "femaleHeadedPct",
+  "literacyPct", "povertyPct", "incomeUsd", "nonCitizenPct",
+] as const;
+const INFO_STR_FIELDS = [
+  "typeOfCity", "authorityTitle", "mostLikelyHazard", "mostSevere",
+] as const;
+
+/** Merge a patch of City-Information fields into the profile, coercing types. */
+export function applyInfo(info: CityInfo, patch: Record<string, unknown>): { info: CityInfo; changed: number } {
+  const next: CityInfo = { ...info };
+  let changed = 0;
+  for (const k of INFO_NUM_FIELDS) {
+    const v = patch[k];
+    if (v == null || v === "") continue;
+    const n = typeof v === "number" ? v : parseFloat(String(v).replace(/[, ]/g, ""));
+    if (Number.isFinite(n)) { (next as unknown as Record<string, unknown>)[k] = n; changed++; }
+  }
+  for (const k of INFO_STR_FIELDS) {
+    const v = patch[k];
+    if (v == null || v === "") continue;
+    (next as unknown as Record<string, unknown>)[k] = String(v).slice(0, 300); changed++;
+  }
+  if (Array.isArray(patch.hazards)) {
+    const hs = (patch.hazards as unknown[]).map((h) => String(h).trim()).filter(Boolean).slice(0, 12);
+    if (hs.length) { next.hazards = hs; changed++; }
+  } else if (typeof patch.hazards === "string" && patch.hazards.trim()) {
+    next.hazards = patch.hazards.split(/[,;]/).map((h) => h.trim()).filter(Boolean).slice(0, 12);
+    changed++;
+  }
+  return { info: next, changed };
 }
 
 export function emptyDraft(): Draft {
@@ -115,8 +161,9 @@ export function draftToScorecard(draft: Draft, city: CityInfo): NormalizedScorec
       population: city.population,
       hazards: city.hazards && city.hazards.length ? city.hazards : undefined,
       mostSevere: city.mostSevere || undefined,
+      incomeUsd: city.incomeUsd,
     },
-    assessedDate: new Date().toISOString().slice(0, 10),
+    assessedDate: city.assessedDate || new Date().toISOString().slice(0, 10),
     indicators,
     essentials,
     total,
