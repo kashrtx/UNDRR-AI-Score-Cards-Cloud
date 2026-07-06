@@ -901,20 +901,20 @@ export function AssistantTab({
           <button onClick={handleLoad} className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold btn-accent">
             <ArrowRight size={16} /> Load into analyzer
           </button>
-          <button onClick={handleDownload}
-            title="A clean spreadsheet that opens and edits perfectly in Excel — every answer is a plain 0-3 number, no fragile form controls."
-            className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium bg-surface-overlay border border-border text-text-primary">
-            <Download size={15} />{" "}
-            {filled === 0
-              ? "Download scorecard (.xlsx)"
-              : filled === TOTAL_INDICATORS
-              ? "Download completed scorecard (.xlsx)"
-              : "Download scorecard so far (.xlsx)"}
-          </button>
           <button onClick={handleDownloadOfficial} disabled={building}
-            title="Fills the real UNDRR .xlsm template. Some option-button selections may need a manual check in Excel — the .xlsx above is the reliable copy."
-            className="flex items-center gap-1.5 text-xs text-text-secondary hover:text-text-primary ml-auto disabled:opacity-60">
-            {building ? <Loader2 size={13} className="animate-spin" /> : <Download size={13} />} Official UNDRR template (.xlsm)
+            title="The finished scorecard written into the real UNDRR .xlsm: City Information filled, the matching radio button selected in every question, and totals recalculated."
+            className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium bg-surface-overlay border border-border text-text-primary disabled:opacity-60">
+            {building ? <Loader2 size={15} className="animate-spin" /> : <Download size={15} />}{" "}
+            {filled === 0
+              ? "Download official scorecard (.xlsm)"
+              : filled === TOTAL_INDICATORS
+              ? "Download completed scorecard (.xlsm)"
+              : "Download scorecard so far (.xlsm)"}
+          </button>
+          <button onClick={handleDownload}
+            title="A plain spreadsheet where every answer is a simple 0-3 number and totals are formulas — no form controls at all. Handy if you'd rather not use the official template."
+            className="flex items-center gap-1.5 text-xs text-text-secondary hover:text-text-primary ml-auto">
+            <Download size={13} /> Plain spreadsheet (.xlsx)
           </button>
         </div>
         {filled < TOTAL_INDICATORS && (

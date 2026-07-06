@@ -400,7 +400,82 @@ function applyRadioChecks(vml: string, rowToIdx: Map<number, number>): string {
   });
 }
 
-// ── Public API ───────────────────────────────────────────────
+// ── Modern option-button state (xl/ctrlProps/*.xml) ──────────
+// Modern Excel (2010+) reads a radio's selected state from its ctrlProp's
+// `checked` attribute — NOT the legacy VML. Setting only the linked cell leaves
+// the dot empty (the conditional-format highlight still moves, which is why a
+// filled file used to show "highlighted but not selected"). We group the radios
+// geometrically: each Group Box is a rectangle, every radio whose anchor row
+// falls inside it belongs to that group, and top-to-bottom order is the option
+// index (1 = "score 3" … 4 = "score 0"). This is robust even when a radio is
+// stored out of document order (which the real template does). Returns a map of
+// ctrlProp path -> new XML with checked="Checked" on the selected button.
+const ANCHOR_FROM = /<from>\s*<(?:\w+:)?col>(\d+)<\/(?:\w+:)?col>\s*<(?:\w+:)?colOff>-?\d+<\/(?:\w+:)?colOff>\s*<(?:\w+:)?row>(\d+)<\/(?:\w+:)?row>/;
+const ANCHOR_TO = /<to>\s*<(?:\w+:)?col>\d+<\/(?:\w+:)?col>\s*<(?:\w+:)?colOff>-?\d+<\/(?:\w+:)?colOff>\s*<(?:\w+:)?row>(\d+)<\/(?:\w+:)?row>/;
+
+async function planCtrlPropChecks(
+  sheetXml: string,
+  relsXml: string,
+  rowToIdx: Map<number, number>,
+  readCtrlProp: (path: string) => Promise<string | null>
+): Promise<Map<string, Uint8Array>> {
+  const out = new Map<string, Uint8Array>();
+  const enc = new TextEncoder();
+
+  // rId -> ctrlProp path (Targets look like ../ctrlProps/ctrlProp2.xml)
+  const ridToPath = new Map<string, string>();
+  for (const m of relsXml.matchAll(/<Relationship[^>]*\bId="([^"]+)"[^>]*\bTarget="([^"]*ctrlProps\/ctrlProp\d+\.xml)"/g)) {
+    ridToPath.set(m[1], ("xl/" + m[2].replace(/^\.\.\//, "").replace(/^\/?xl\//, "")).replace(/\/{2,}/g, "/"));
+  }
+  if (!ridToPath.size) return out;
+
+  type Ctrl = { path: string; fromCol: number; fromRow: number; toRow: number; type: string; linkRow: number | null };
+  const ctrls: Ctrl[] = [];
+  for (const m of sheetXml.matchAll(/<control [^>]*\br:id="(rId\d+)"[^>]*>([\s\S]*?)<\/control>/g)) {
+    const path = ridToPath.get(m[1]);
+    if (!path) continue;
+    const body = m[2];
+    const fm = ANCHOR_FROM.exec(body);
+    if (!fm) continue;
+    const tm = ANCHOR_TO.exec(body);
+    const cp = await readCtrlProp(path);
+    if (!cp) continue;
+    const type = (/objectType="(\w+)"/.exec(cp) || [, ""])[1] as string;
+    const fl = /fmlaLink="\$?[A-Z]+\$?(\d+)"/.exec(cp);
+    ctrls.push({
+      path,
+      fromCol: parseInt(fm[1], 10),
+      fromRow: parseInt(fm[2], 10),
+      toRow: tm ? parseInt(tm[1], 10) : parseInt(fm[2], 10),
+      type,
+      linkRow: fl ? parseInt(fl[1], 10) : null,
+    });
+  }
+
+  const boxes = ctrls.filter((c) => c.type === "GBox");
+  const radios = ctrls.filter((c) => c.type === "Radio");
+
+  for (const box of boxes) {
+    const members = radios
+      .filter((r) => r.fromRow >= box.fromRow && r.fromRow <= box.toRow)
+      .sort((a, b) => a.fromRow - b.fromRow || a.fromCol - b.fromCol);
+    if (!members.length) continue;
+    const first = members.find((r) => r.linkRow != null);
+    const linkRow = first?.linkRow ?? null;
+    if (linkRow == null || !rowToIdx.has(linkRow)) continue; // unfilled → leave blank
+    const idx = rowToIdx.get(linkRow)!; // 1..4
+    const chosen = members[idx - 1];
+    if (!chosen) continue;
+    const cp = await readCtrlProp(chosen.path);
+    if (!cp) continue;
+    // Set checked="Checked" on the chosen radio (replace any existing).
+    let next = cp.replace(/\s+checked="[^"]*"/g, "");
+    next = next.replace(/objectType="Radio"/, 'objectType="Radio" checked="Checked"');
+    out.set(chosen.path, enc.encode(next));
+  }
+  return out;
+}
+
 export async function fillOfficialTemplate(
   templateBuf: ArrayBuffer,
   editsBySheet: Map<string, CellEdit[]>
@@ -463,6 +538,7 @@ export async function fillOfficialTemplate(
     const entry = byName.get(path);
     if (!entry) continue;
     let xml = await getText(entry);
+    const origSheetXml = xml;
     for (const ed of edits) {
       if (typeof ed.value === "string") {
         const idx = strIndex.get(ed.value);
@@ -498,6 +574,14 @@ export async function fillOfficialTemplate(
               modified.set(vmlPath, encoder.encode(applyRadioChecks(vml, rowToIdx)));
             }
           }
+          // Modern Excel: stamp checked="Checked" on the right ctrlProp so the
+          // radio DOT actually fills in (the real fix for "highlighted but not
+          // selected"). Grouped by geometry so it's correct even out of order.
+          const cpMods = await planCtrlPropChecks(origSheetXml, rels, rowToIdx, async (p) => {
+            const e = byName.get(p);
+            return e ? await getText(e) : null;
+          });
+          for (const [p, data] of cpMods) modified.set(p, data);
         }
       }
     }
