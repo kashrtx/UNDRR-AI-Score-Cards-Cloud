@@ -22,6 +22,7 @@ import { createProvider } from "@/lib/llm";
 const MODELS: Record<ProviderId, string[]> = {
   gemini: ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.1-pro-preview", "gemini-2.5-pro", "gemini-2.5-flash-lite"],
   openrouter: [
+    "nvidia/nemotron-3-ultra-550b-a55b:free",
     "meta-llama/llama-3.3-70b-instruct:free",
     "google/gemini-2.0-flash-exp:free",
     "deepseek/deepseek-chat:free",
@@ -31,10 +32,16 @@ const MODELS: Record<ProviderId, string[]> = {
   openai: ["gpt-5.5", "gpt-5.4", "gpt-5.1"],
   xai: ["grok-4.3", "grok-4.1-fast-reasoning", "grok-4.1-fast-non-reasoning", "grok-code-fast-1"],
   zai: ["glm-4.7", "glm-5.2", "glm-5.1", "glm-4.7-flash", "glm-4.5-flash"],
-  nvidia: ["meta/llama-3.3-70b-instruct", "meta/llama-3.1-405b-instruct", "deepseek-ai/deepseek-r1", "moonshotai/kimi-k2-instruct", "qwen/qwen3-coder-480b-a35b-instruct", "zai-org/glm-4.7"],
+  nvidia: ["z-ai/glm-5.2", "moonshotai/kimi-k2-instruct", "deepseek-ai/deepseek-r1", "qwen/qwen3-coder-480b-a35b-instruct", "meta/llama-3.3-70b-instruct", "meta/llama-3.1-405b-instruct"],
   meta: ["Llama-4-Maverick-17B-128E-Instruct-FP8", "Llama-4-Scout-17B-16E-Instruct-FP8"],
   lmstudio: ["local-model", "qwen2.5-7b-instruct", "llama-3.2-3b-instruct"],
   ollama: ["llama3.1:8b", "llama3.2", "qwen2.5", "mistral"],
+};
+
+// The single model we recommend per provider (shown as "recommended").
+const RECOMMENDED_MODEL: Partial<Record<ProviderId, string>> = {
+  nvidia: "z-ai/glm-5.2",
+  openrouter: "nvidia/nemotron-3-ultra-550b-a55b:free",
 };
 
 const PROVIDER_META: Record<ProviderId, { title: string; subtitle: string; icon: ReactNode }> = {
@@ -70,7 +77,7 @@ const PROVIDER_META: Record<ProviderId, { title: string; subtitle: string; icon:
   },
   nvidia: {
     title: "NVIDIA NIM (free)",
-    subtitle: "100+ open models free, including Llama, DeepSeek, Kimi and GLM.",
+    subtitle: "100+ open models, free. Lots of choices — if unsure, use the recommended GLM 5.2. Works well for the Assistant.",
     icon: <Cpu size={18} className="text-accent-400" />,
   },
   meta: {
@@ -289,6 +296,23 @@ export function SettingsTab({
               ? "Should match a model loaded in LM Studio (it also uses the loaded model if unsure)."
               : "Pick a preset or type any model id the provider supports."}
           </span>
+          {RECOMMENDED_MODEL[provider] && (
+            <span className="text-xs text-text-secondary mt-1 flex flex-wrap items-center gap-1.5">
+              Recommended: <code className="font-mono text-primary-300">{RECOMMENDED_MODEL[provider]}</code>
+              {currentModel !== RECOMMENDED_MODEL[provider] && (
+                <button type="button" onClick={() => setModel(RECOMMENDED_MODEL[provider]!)}
+                  className="underline text-primary-300 hover:text-primary-200">use this</button>
+              )}
+            </span>
+          )}
+          {provider === "gemini" && (
+            <span className="text-xs mt-1.5 block bg-warn-500/10 border border-warn-500/30 text-warn-400 rounded-lg p-2.5">
+              Heads up: Gemini&apos;s free tier is tightly rate-limited, so the Assistant&apos;s
+              &quot;Fill it out for me&quot; (which makes many calls in a row) often stops partway.
+              It&apos;s fine for the Dashboard analysis. For filling out a whole scorecard,
+              OpenRouter or NVIDIA NIM (both free) tend to work more reliably.
+            </span>
+          )}
         </label>
 
         {/* Cloud: API key */}
@@ -511,6 +535,11 @@ export function SettingsTab({
             className={`${inputCls} font-mono`}
             placeholder={searchKeyPresent ? "Key saved. Type to replace it, or leave blank." : "tvly-..."}
           />
+          <span className="text-xs text-text-secondary mt-1 block">
+            Get a free key at{" "}
+            <a className="text-primary-300 underline" href="https://app.tavily.com/home" target="_blank" rel="noreferrer">app.tavily.com</a>
+            {" "}(sign up, then copy the key from your dashboard, it starts with <code className="font-mono">tvly-</code>).
+          </span>
           {searchKeyPresent && (
             <button
               onClick={() => { clearSearchKey(); setSearchKeyPresent(false); setDraft({ ...draft, useTavily: false }); }}

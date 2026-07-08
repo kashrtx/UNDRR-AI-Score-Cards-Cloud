@@ -67,6 +67,11 @@ Analyze a city's Disaster Resilience Scorecard and produce a structured action p
    - Avoid absolute claims like "all infrastructure will fail" — soften to "infrastructure has limited redundancy and is vulnerable to widespread disruption" unless an actual engineering assessment is cited.
    - When in doubt, hedge and lower the confidence rather than overstate.
 
+13. **RISK LENS (hazard / exposure / vulnerability)**: Provide a "riskProfile" with three short plain-language paragraphs that a non-expert can follow, grounded in the scorecard and any city data:
+   - "hazard": which natural/human events realistically threaten this city (use the city's known hazards; don't invent new ones).
+   - "exposure": what and who is in harm's way if such an event occurs (people, homes, critical infrastructure, economic activity) — describe qualitatively, no invented figures.
+   - "vulnerability": given the city's CURRENT preparedness as reflected in the scorecard scores, what level of damage or disruption is plausible, and why (tie it to weak Essentials). Keep the same honesty and hedging rules as above.
+
 ## THE TEN ESSENTIALS
 ${Object.entries(ESSENTIAL_NAMES).map(([n, name]) => `${n}. ${name}`).join("\n")}
 
@@ -75,6 +80,7 @@ Respond with ONLY a JSON object matching this exact schema — no markdown, no e
 
 {
   "summary": "Plain-language paragraph summarizing the city's resilience position. End by noting the scores are heuristic estimates from available evidence, useful for comparison rather than precise measurements.",
+  "riskProfile": { "hazard": "…", "exposure": "…", "vulnerability": "…" },
   "strengths": [{ "text": "...", "sourceRefs": ["P4.2", "P4.3"], "confidence": "high" }],
   "weaknesses": [{ "text": "...", "sourceRefs": ["P9.1", "P9.5"], "confidence": "low" }],
   "actions": [{

@@ -159,6 +159,10 @@ export function buildReportHtml(p: ExportPayload): string {
   .conf-high { color: #047857; background: #ecfdf5; border-color: #a7f3d0; }
   .conf-medium { color: #b45309; background: #fffbeb; border-color: #fde68a; }
   .conf-low { color: #64748b; background: #f8fafc; border-color: #e2e8f0; }
+  .cols3 { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 12px; margin: 8px 0; }
+  .cols3 .rl { border: 1px solid var(--line); border-radius: 8px; padding: 10px 12px; }
+  .cols3 .rl h3 { margin: 0 0 4px; font-size: 13px; color: var(--ac); }
+  .cols3 .rl p { margin: 0; font-size: 12px; }
   .gap { color: var(--muted); font-size:12px; margin-top:2px; }
   .phase { font-size:11px; font-weight:700; padding:2px 7px; border-radius:20px; }
   .phase-Now { background:#ecfdf5; color:#047857; } .phase-Next { background:#fffbeb; color:#b45309; } .phase-Later { background:#eef2ff; color:#4338ca; }
@@ -191,6 +195,12 @@ export function buildReportHtml(p: ExportPayload): string {
 
   <h2>Summary</h2>
   <p>${esc(a.summary)}</p>
+  ${a.riskProfile ? `<h2>Risk lens</h2>
+  <div class="cols3">
+    <div class="rl"><h3>Hazard</h3><p>${esc(a.riskProfile.hazard)}</p></div>
+    <div class="rl"><h3>Exposure</h3><p>${esc(a.riskProfile.exposure)}</p></div>
+    <div class="rl"><h3>Vulnerability</h3><p>${esc(a.riskProfile.vulnerability)}</p></div>
+  </div>` : ""}
   <div class="disc">The scores and projected figures here are heuristic estimates drawn from the scorecard and available evidence. Read them comparatively, to see where a city is relatively stronger or weaker, rather than as precise measurements. Confidence labels next to each point show how well-evidenced it is: <strong>high</strong> means documented, <strong>low</strong> means an inference (often from missing data) that should be verified locally.</div>
 
   <div class="cols">

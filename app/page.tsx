@@ -668,6 +668,25 @@ export default function Page() {
                         The scores are heuristic estimates, best read comparatively rather than as exact measurements, and the label on each point shows how well-evidenced it is (low usually means an inference worth checking locally).
                       </p>
 
+                      {analysis.riskProfile && (
+                        <div className="mt-5">
+                          <h3 className="text-sm font-semibold text-text-primary mb-2">Risk lens</h3>
+                          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+                            {([
+                              ["Hazard", analysis.riskProfile.hazard, "what threatens the city"],
+                              ["Exposure", analysis.riskProfile.exposure, "what's in harm's way"],
+                              ["Vulnerability", analysis.riskProfile.vulnerability, "likely impact given readiness"],
+                            ] as const).map(([label, body, sub]) => (
+                              <div key={label} className="rounded-xl border border-border bg-surface-overlay/30 p-3">
+                                <div className="text-xs font-semibold text-primary-300">{label}</div>
+                                <div className="text-[11px] text-text-secondary mb-1.5">{sub}</div>
+                                <p className="text-xs text-text-secondary leading-relaxed">{body}</p>
+                              </div>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-5">
                         <div>
                           <h3 className="text-sm font-semibold text-accent-400 flex items-center gap-1.5 mb-2">

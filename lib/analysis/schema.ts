@@ -55,10 +55,23 @@ export const SourcedStatementSchema = z.object({
 
 export type SourcedStatement = z.infer<typeof SourcedStatementSchema>;
 
+// ── Risk lens: hazard / exposure / vulnerability ─────────────
+// A plain-language framing of the city's risk, derived from the scorecard and
+// research. Each field is one short paragraph. Optional so older analyses and
+// smaller models still validate.
+
+export const RiskProfileSchema = z.object({
+  hazard: z.string(),         // what events threaten the city
+  exposure: z.string(),       // what/who is in harm's way
+  vulnerability: z.string(),  // likely impact given current preparedness
+});
+export type RiskProfile = z.infer<typeof RiskProfileSchema>;
+
 // ── Full analysis result ─────────────────────────────────────
 
 export const AnalysisResultSchema = z.object({
   summary: z.string(),                          // plain-language situation summary
+  riskProfile: RiskProfileSchema.optional(),
   strengths: z.array(SourcedStatementSchema),
   weaknesses: z.array(SourcedStatementSchema),
   actions: z.array(ActionSchema),
