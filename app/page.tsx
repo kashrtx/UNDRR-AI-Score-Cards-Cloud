@@ -56,7 +56,7 @@ const TIPS_KEY = "undrr.tips.dismissed";
 
 const PROVIDER_LABEL: Record<ProviderId, string> = {
   claude: "Claude", gemini: "Gemini", openrouter: "OpenRouter",
-  openai: "OpenAI", xai: "xAI Grok", zai: "z.AI GLM", nvidia: "NVIDIA NIM", meta: "Meta Llama",
+  openai: "OpenAI", xai: "xAI Grok", zai: "z.AI GLM", nvidia: "NVIDIA NIM", meta: "Meta Llama", azure: "Microsoft Azure",
   ollama: "Ollama (local)", lmstudio: "LM Studio (local)",
 };
 

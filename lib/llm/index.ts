@@ -8,6 +8,7 @@ import { ClaudeProvider } from "./claude";
 import { GeminiProvider } from "./gemini";
 import { OpenRouterProvider } from "./openrouter";
 import { OpenAICompatibleProvider } from "./openaiCompatible";
+import { AzureOpenAIProvider } from "./azure";
 import { OllamaProvider } from "./ollama";
 import { LMStudioProvider } from "./lmstudio";
 import { AppSettings, getApiKey, providerSupportsWebSearch } from "@/lib/settings/store";
@@ -54,6 +55,13 @@ export async function createProvider(
     case "meta": {
       const key = (await getApiKey("meta")) ?? "";
       return new OpenAICompatibleProvider("meta", settings.metaModel, key);
+    }
+    case "azure": {
+      const key = (await getApiKey("azure")) ?? "";
+      return new AzureOpenAIProvider(
+        { endpoint: settings.azureEndpoint, deployment: settings.azureDeployment, apiVersion: settings.azureApiVersion },
+        key
+      );
     }
     case "ollama":
       return new OllamaProvider(settings.ollamaModel, settings.ollamaBaseUrl);

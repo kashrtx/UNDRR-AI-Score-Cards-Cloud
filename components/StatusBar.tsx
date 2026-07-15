@@ -20,6 +20,7 @@ const LABEL: Record<ProviderId, string> = {
   zai: "z.AI GLM",
   nvidia: "NVIDIA NIM",
   meta: "Meta Llama",
+  azure: "Microsoft Azure",
   ollama: "Local (Ollama)",
   lmstudio: "Local (LM Studio)",
 };

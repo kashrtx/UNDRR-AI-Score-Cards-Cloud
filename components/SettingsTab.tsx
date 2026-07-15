@@ -7,10 +7,10 @@
  * our server or stored in the repo.
  */
 
-import { useEffect, useState, type ReactNode } from "react";
+import { useEffect, useState, useRef, type ReactNode } from "react";
 import {
   Cloud, Cpu, Sparkles, Boxes, MonitorSmartphone, Save, Loader2,
-  CheckCircle2, XCircle, KeyRound, Trash2, Plug, Globe, Search, Compass,
+  CheckCircle2, XCircle, KeyRound, Trash2, Plug, Globe, Search, Compass, ArrowDown,
 } from "lucide-react";
 import {
   type AppSettings, type ProviderId, type CloudProviderId,
@@ -34,6 +34,7 @@ const MODELS: Record<ProviderId, string[]> = {
   zai: ["glm-4.7", "glm-5.2", "glm-5.1", "glm-4.7-flash", "glm-4.5-flash"],
   nvidia: ["z-ai/glm-5.2", "moonshotai/kimi-k2-instruct", "deepseek-ai/deepseek-r1", "qwen/qwen3-coder-480b-a35b-instruct", "meta/llama-3.3-70b-instruct", "meta/llama-3.1-405b-instruct"],
   meta: ["Llama-4-Maverick-17B-128E-Instruct-FP8", "Llama-4-Scout-17B-16E-Instruct-FP8"],
+  azure: [],
   lmstudio: ["local-model", "qwen2.5-7b-instruct", "llama-3.2-3b-instruct"],
   ollama: ["llama3.1:8b", "llama3.2", "qwen2.5", "mistral"],
 };
@@ -85,6 +86,11 @@ const PROVIDER_META: Record<ProviderId, { title: string; subtitle: string; icon:
     subtitle: "Llama 4 via Meta's API (experimental). Llama is also free on NVIDIA NIM.",
     icon: <Cloud size={18} className="text-accent-400" />,
   },
+  azure: {
+    title: "Microsoft (Azure OpenAI)",
+    subtitle: "Microsoft's own API, the engine behind Copilot. Needs an Azure endpoint, deployment name, and key.",
+    icon: <Cloud size={18} className="text-accent-400" />,
+  },
   lmstudio: {
     title: "Local (LM Studio)",
     subtitle: "Free & private. OpenAI-compatible; usually works with no extra setup.",
@@ -98,7 +104,7 @@ const PROVIDER_META: Record<ProviderId, { title: string; subtitle: string; icon:
 };
 
 // Display order, cloud first (the friction-free path), then local.
-const ORDER: ProviderId[] = ["gemini", "openrouter", "nvidia", "zai", "claude", "openai", "xai", "meta", "lmstudio", "ollama"];
+const ORDER: ProviderId[] = ["gemini", "openrouter", "nvidia", "zai", "claude", "openai", "xai", "meta", "azure", "lmstudio", "ollama"];
 
 const inputCls =
   "mt-1 w-full px-3 py-2 rounded-lg bg-surface border border-border text-sm text-text-primary focus:border-accent-500/60 outline-none";
@@ -120,6 +126,21 @@ export function SettingsTab({
   const [testing, setTesting] = useState(false);
   const [testMsg, setTestMsg] = useState<{ ok: boolean; message: string } | null>(null);
   const [searchKeyInput, setSearchKeyInput] = useState("");
+  const bottomRef = useRef<HTMLDivElement>(null);
+  const [moreBelow, setMoreBelow] = useState(false);
+
+  // Show a friendly "more below" pointer whenever the end of the settings page
+  // is off-screen, so novice users always know there's more to scroll to.
+  useEffect(() => {
+    const el = bottomRef.current;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const obs = new IntersectionObserver(
+      (entries) => setMoreBelow(!entries[0].isIntersecting),
+      { rootMargin: "0px 0px -40px 0px" }
+    );
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, []);
   const [searchKeyPresent, setSearchKeyPresent] = useState(false);
 
   useEffect(() => setDraft(settings), [settings]);
@@ -152,6 +173,7 @@ export function SettingsTab({
     : provider === "zai" ? "zaiModel"
     : provider === "nvidia" ? "nvidiaModel"
     : provider === "meta" ? "metaModel"
+    : provider === "azure" ? "azureDeployment"
     : provider === "lmstudio" ? "lmstudioModel"
     : "ollamaModel";
   const currentModel = draft[modelField] as string;
@@ -235,10 +257,22 @@ export function SettingsTab({
         </div>
       )}
 
+      <div className="glass-card p-4 border-l-4 border-l-accent-500">
+        <h3 className="text-sm font-semibold text-text-primary mb-2">New here? It only takes three steps</h3>
+        <ol className="text-sm text-text-secondary space-y-1.5">
+          <li><span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-accent-500/20 text-accent-400 text-xs font-bold mr-1.5">1</span> Pick an AI helper from the boxes below (the free ones are listed first).</li>
+          <li><span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-accent-500/20 text-accent-400 text-xs font-bold mr-1.5">2</span> Paste its key where it asks, then press <strong>Test</strong> to make sure it works.</li>
+          <li><span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-accent-500/20 text-accent-400 text-xs font-bold mr-1.5">3</span> Scroll down for optional web search and other settings, then press <strong>Save</strong>.</li>
+        </ol>
+        <p className="text-xs text-text-secondary mt-2.5">Keep scrolling, there is more further down the page than fits on one screen.</p>
+      </div>
+
       <div>
-        <h2 className="text-lg font-semibold text-text-primary mb-1">AI provider</h2>
+        <h2 className="text-lg font-semibold text-text-primary mb-1">
+          <span className="text-accent-400">Step 1.</span> Choose your AI helper
+        </h2>
         <p className="text-sm text-text-secondary">
-          Choose who writes the analysis. All AI calls run in your browser, your key is sent
+          This is who writes the analysis. All AI calls run in your browser, your key is sent
           only to the provider you pick, never to this site.
         </p>
       </div>
@@ -278,15 +312,18 @@ export function SettingsTab({
 
       {/* Provider-specific configuration */}
       <div className="glass-card p-5 space-y-4">
+        <h2 className="text-lg font-semibold text-text-primary">
+          <span className="text-accent-400">Step 2.</span> Set up {PROVIDER_META[provider].title}
+        </h2>
         {/* Model picker */}
         <label className="block">
-          <span className="text-sm text-text-primary">Model</span>
+          <span className="text-sm text-text-primary">{provider === "azure" ? "Deployment name" : "Model"}</span>
           <input
             list="model-presets"
             value={currentModel}
             onChange={(e) => setModel(e.target.value)}
             className={`${inputCls} font-mono`}
-            placeholder={MODELS[provider][0]}
+            placeholder={provider === "azure" ? "e.g. gpt-4o (the name you gave your deployment)" : MODELS[provider][0]}
           />
           <datalist id="model-presets">
             {MODELS[provider].map((m) => <option key={m} value={m} />)}
@@ -294,8 +331,34 @@ export function SettingsTab({
           <span className="text-xs text-text-secondary">
             {provider === "lmstudio"
               ? "Should match a model loaded in LM Studio (it also uses the loaded model if unsure)."
+              : provider === "azure"
+              ? "The deployment name from your Azure resource (not the base model name), unless they match."
               : "Pick a preset or type any model id the provider supports."}
           </span>
+          {provider === "azure" && (
+            <div className="mt-2 space-y-2">
+              <label className="block">
+                <span className="text-sm text-text-primary">Azure endpoint</span>
+                <input
+                  value={draft.azureEndpoint}
+                  onChange={(e) => setDraft({ ...draft, azureEndpoint: e.target.value })}
+                  className={`${inputCls} font-mono`}
+                  placeholder="https://your-resource.openai.azure.com"
+                />
+                <span className="text-xs text-text-secondary">From the Azure portal, your resource&apos;s &quot;Keys and Endpoint&quot; page.</span>
+              </label>
+              <label className="block">
+                <span className="text-sm text-text-primary">API version</span>
+                <input
+                  value={draft.azureApiVersion}
+                  onChange={(e) => setDraft({ ...draft, azureApiVersion: e.target.value })}
+                  className={`${inputCls} font-mono`}
+                  placeholder="2024-10-21"
+                />
+                <span className="text-xs text-text-secondary">Leave the default unless Azure tells you otherwise.</span>
+              </label>
+            </div>
+          )}
           {RECOMMENDED_MODEL[provider] && (
             <span className="text-xs text-text-secondary mt-1 flex flex-wrap items-center gap-1.5">
               Recommended: <code className="font-mono text-primary-300">{RECOMMENDED_MODEL[provider]}</code>
@@ -336,6 +399,7 @@ export function SettingsTab({
                   : provider === "nvidia" ? "nvapi-…"
                   : provider === "zai" ? "your z.AI key"
                   : provider === "meta" ? "LLM|… (Meta API key)"
+                  : provider === "azure" ? "your Azure OpenAI key (Key 1 or Key 2)"
                   : "AIza…"
               }
             />
@@ -365,8 +429,16 @@ export function SettingsTab({
               {provider === "meta" && (
                 <a className="text-primary-300 underline" href="https://llama.developer.meta.com" target="_blank" rel="noreferrer">llama.developer.meta.com</a>
               )}
+              {provider === "azure" && (
+                <a className="text-primary-300 underline" href="https://portal.azure.com" target="_blank" rel="noreferrer">portal.azure.com</a>
+              )}
               .
             </span>
+            {provider === "azure" && (
+              <span className="text-xs text-text-secondary block mt-1.5 bg-surface-overlay/40 border border-border rounded-lg p-2.5">
+                This is Microsoft Azure OpenAI, the same technology behind Microsoft Copilot and the way Microsoft hands out an actual API key. In the Azure portal, open your Azure OpenAI resource, copy the Endpoint and one of the Keys from &quot;Keys and Endpoint,&quot; and enter the name of the model deployment you created above. Note: consumer Copilot and Microsoft 365 Copilot do not provide a plain API key, so they cannot be used here.
+              </span>
+            )}
             {(provider === "openai" || provider === "xai" || provider === "zai" || provider === "nvidia" || provider === "meta") && (
               <span className="text-xs text-text-secondary block mt-1.5 bg-surface-overlay/40 border border-border rounded-lg p-2.5">
                 These providers block direct browser calls, so requests go through
@@ -608,6 +680,20 @@ export function SettingsTab({
           </button>
         </div>
       </div>
+
+      {/* Sentinel: when this is off-screen we show the "more below" pointer. */}
+      <div ref={bottomRef} aria-hidden="true" className="h-1" />
+
+      {moreBelow && (
+        <button
+          type="button"
+          onClick={() => window.scrollBy({ top: Math.round(window.innerHeight * 0.7), behavior: "smooth" })}
+          className="fixed bottom-5 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 px-4 py-2.5 rounded-full text-sm font-semibold bg-accent-500 text-white shadow-lg shadow-accent-500/30 animate-bounce"
+          aria-label="Scroll down to see more settings"
+        >
+          <ArrowDown size={16} /> More settings below
+        </button>
+      )}
     </div>
   );
 }

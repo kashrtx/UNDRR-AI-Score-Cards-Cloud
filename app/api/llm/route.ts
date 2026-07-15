@@ -33,7 +33,12 @@ const BASE: Record<string, string> = {
 };
 
 export async function POST(req: NextRequest) {
-  let payload: { provider?: string; apiKey?: string; body?: unknown };
+  let payload: {
+    provider?: string;
+    apiKey?: string;
+    body?: unknown;
+    azure?: { endpoint?: string; deployment?: string; apiVersion?: string };
+  };
   try {
     payload = await req.json();
   } catch {
@@ -43,22 +48,55 @@ export async function POST(req: NextRequest) {
     });
   }
 
-  const base = payload.provider ? BASE[payload.provider] : undefined;
-  if (!base || !payload.apiKey || !payload.body) {
+  if (!payload.apiKey || !payload.body) {
     return new Response(
-      JSON.stringify({ error: { message: "Missing or unknown provider, apiKey, or body." } }),
+      JSON.stringify({ error: { message: "Missing apiKey or body." } }),
       { status: 400, headers: { "content-type": "application/json" } }
     );
   }
 
+  // Build the upstream URL + auth headers. Azure OpenAI (Microsoft's API-key
+  // service, and what Copilot runs on) has its own URL shape and uses an
+  // `api-key` header instead of a bearer token.
+  let url: string;
+  const headers: Record<string, string> = { "content-type": "application/json" };
+  if (payload.provider === "azure") {
+    const az = payload.azure || {};
+    const endpoint = (az.endpoint || "").trim().replace(/\/+$/, "");
+    const deployment = (az.deployment || "").trim();
+    const apiVersion = (az.apiVersion || "2024-10-21").trim();
+    let host: string;
+    try {
+      host = new URL(endpoint).hostname;
+    } catch {
+      return new Response(JSON.stringify({ error: { message: "Invalid Azure endpoint URL." } }), { status: 400, headers: { "content-type": "application/json" } });
+    }
+    // SSRF guard: only allow Azure hostnames.
+    if (!/\.(openai\.azure\.com|cognitiveservices\.azure\.com|services\.ai\.azure\.com|azure-api\.net)$/i.test(host)) {
+      return new Response(JSON.stringify({ error: { message: "Azure endpoint must be an *.azure.com resource." } }), { status: 400, headers: { "content-type": "application/json" } });
+    }
+    if (!deployment) {
+      return new Response(JSON.stringify({ error: { message: "Missing Azure deployment name." } }), { status: 400, headers: { "content-type": "application/json" } });
+    }
+    url = `${endpoint}/openai/deployments/${encodeURIComponent(deployment)}/chat/completions?api-version=${encodeURIComponent(apiVersion)}`;
+    headers["api-key"] = payload.apiKey;
+  } else {
+    const base = payload.provider ? BASE[payload.provider] : undefined;
+    if (!base) {
+      return new Response(
+        JSON.stringify({ error: { message: "Missing or unknown provider." } }),
+        { status: 400, headers: { "content-type": "application/json" } }
+      );
+    }
+    url = `${base}/chat/completions`;
+    headers.authorization = `Bearer ${payload.apiKey}`;
+  }
+
   let upstream: Response;
   try {
-    upstream = await fetch(`${base}/chat/completions`, {
+    upstream = await fetch(url, {
       method: "POST",
-      headers: {
-        "content-type": "application/json",
-        authorization: `Bearer ${payload.apiKey}`,
-      },
+      headers,
       body: JSON.stringify(payload.body),
       signal: req.signal,
     });

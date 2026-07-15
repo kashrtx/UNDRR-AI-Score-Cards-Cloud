@@ -18,7 +18,7 @@ import type { AppSettings, ProviderId } from "@/lib/settings/store";
 
 const LABEL: Record<ProviderId, string> = {
   claude: "Claude", gemini: "Gemini", openrouter: "OpenRouter",
-  openai: "OpenAI", xai: "xAI Grok", zai: "z.AI GLM", nvidia: "NVIDIA NIM", meta: "Meta Llama",
+  openai: "OpenAI", xai: "xAI Grok", zai: "z.AI GLM", nvidia: "NVIDIA NIM", meta: "Meta Llama", azure: "Microsoft Azure",
   ollama: "Local (Ollama)", lmstudio: "Local (LM Studio)",
 };
 function icon(p: ProviderId, cls: string) {
