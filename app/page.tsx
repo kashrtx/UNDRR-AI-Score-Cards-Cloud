@@ -568,7 +568,7 @@ export default function Page() {
                 {/* Radar */}
                 <RadarChart essentials={scorecard.essentials} />
 
-                {/* Weakest areas — computed straight from the scorecard, so it
+                {/* Weakest areas, computed straight from the scorecard, so it
                     shows something useful even for a high-scoring city. */}
                 {(() => {
                   const weak = [...scorecard.indicators]

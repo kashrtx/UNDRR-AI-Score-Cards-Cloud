@@ -15,6 +15,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Bot, Send, Sparkles, Upload, Loader2, Wrench, Download, ArrowRight, RotateCcw,
   ClipboardCheck, Lightbulb, Plus, Trash2, Paperclip, X, Play, AlertTriangle, History, ChevronDown,
+  Maximize2, Minimize2,
 } from "lucide-react";
 import type { AppSettings } from "@/lib/settings/store";
 import { getSearchKey, hasSearchKey } from "@/lib/settings/store";
@@ -28,6 +29,7 @@ import {
 } from "@/lib/agent/draft";
 import { runAgentTurn, type AgentContext, type TranscriptItem, type AgentEvent } from "@/lib/agent/agent";
 import { exportScorecardXlsx } from "@/lib/export/scorecardXlsx";
+import { renderMarkdown, deEmDash } from "@/lib/ui/markdown";
 import { computeTemplateEdits, fillOfficialTemplate } from "@/lib/export/fillTemplate";
 import {
   createSession, listSessions, loadSession, saveSession, deleteSession, getActiveId, setActiveId,
@@ -180,6 +182,7 @@ export function AssistantTab({
   const profileRef = useRef<CityInfo>(profile);
   profileRef.current = profile;
   const [setupOpen, setSetupOpen] = useState(true);
+  const [chatExpanded, setChatExpanded] = useState(false);
   const attachRef = useRef<Attachment[]>(attachments);
   attachRef.current = attachments;
   const streamBuf = useRef("");
@@ -345,7 +348,7 @@ export function AssistantTab({
         break;
       case "draft":
         // Read the live object the agent is mutating (ctx.draft), NOT the last
-        // rendered copy — otherwise the panel freezes at the first batch and
+        // rendered copy, otherwise the panel freezes at the first batch and
         // only catches up when the run ends.
         setDraft({ ...(ctxRef.current?.draft || draftRef.current) });
         break;
@@ -409,6 +412,7 @@ export function AssistantTab({
       };
       setRunning(true);
       setContinuable(false);
+      setSetupOpen(false); // give the chat room once it's working; user can reopen
       abortRef.current = new AbortController();
       try {
         await runAgentTurn(ctx, emit, abortRef.current.signal);
@@ -540,7 +544,7 @@ export function AssistantTab({
           if (text && text.length > 20) {
             added.push({ name: file.name, text: text.slice(0, MAX_ATTACH_CHARS) });
           } else {
-            setChat((c) => [...c, { kind: "assistant", text: `I opened "${file.name}" but couldn't pull much text out of it — it may be a scanned image rather than a text PDF. If you paste the key details into the chat, I'll use them.` }]);
+            setChat((c) => [...c, { kind: "assistant", text: `I opened "${file.name}" but couldn't pull much text out of it, it may be a scanned image rather than a text PDF. If you paste the key details into the chat, I'll use them.` }]);
           }
         } catch {
           setChat((c) => [...c, { kind: "assistant", text: `I couldn't read "${file.name}" as a PDF here. If you copy the important text into the chat, I'll work from that.` }]);
@@ -697,9 +701,11 @@ export function AssistantTab({
   const showContinue = !running && continuable && filled < TOTAL_INDICATORS;
 
   return (
-    <div className="grid grid-cols-1 lg:grid-cols-[1.1fr_1fr] gap-5 lg:h-[calc(100vh-11rem)]">
+    <div className={chatExpanded
+      ? "grid grid-cols-1 gap-5 lg:h-[calc(100vh-8rem)]"
+      : "grid grid-cols-1 lg:grid-cols-[1.1fr_1fr] gap-5 lg:h-[calc(100vh-11rem)]"}>
       {/* ── Left: chat ─────────────────────────────── */}
-      <section className="glass-card p-4 sm:p-5 flex flex-col h-[80vh] lg:h-full min-h-0 overflow-hidden">
+      <section className={`glass-card p-4 sm:p-5 flex flex-col min-h-0 overflow-hidden ${chatExpanded ? "h-[calc(100vh-8rem)]" : "h-[80vh] lg:h-full"}`}>
         {/* Session bar */}
         <div className="flex items-center gap-2 mb-3 shrink-0">
           <Bot size={20} className="text-accent-400 shrink-0" />
@@ -707,11 +713,16 @@ export function AssistantTab({
           <button
             onClick={() => setMenuOpen(true)}
             title="Chat history"
-            className="ml-auto flex items-center gap-1.5 max-w-[60%] text-sm rounded-lg px-2.5 py-1.5 bg-surface-overlay border border-border text-text-primary hover:border-primary-500/40"
+            className="ml-auto flex items-center gap-1.5 max-w-[55%] text-sm rounded-lg px-2.5 py-1.5 bg-surface-overlay border border-border text-text-primary hover:border-primary-500/40"
           >
             <History size={14} className="shrink-0 text-text-secondary" />
             <span className="truncate">{headerTitle}</span>
             <ChevronDown size={14} className="shrink-0 text-text-secondary" />
+          </button>
+          <button onClick={() => setChatExpanded((v) => !v)}
+            title={chatExpanded ? "Exit full-screen chat" : "Expand the chat to full screen"}
+            className="shrink-0 p-1.5 rounded-lg bg-surface-overlay border border-border text-text-secondary hover:text-text-primary">
+            {chatExpanded ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
           </button>
           <button onClick={newChat} title="New chat" className="shrink-0 p-1.5 rounded-lg bg-surface-overlay border border-border text-text-secondary hover:text-text-primary">
             <Plus size={15} />
@@ -785,17 +796,22 @@ export function AssistantTab({
             ) : m.kind === "thought" ? (
               <div key={i} className="flex items-start gap-2 text-xs text-text-secondary italic">
                 <Lightbulb size={13} className="text-warn-400 shrink-0 mt-0.5" />
-                <span>{m.text}</span>
+                <span>{deEmDash(m.text)}</span>
               </div>
             ) : m.kind === "reasoning" ? (
               <ReasoningItem key={i} summary={m.summary} detail={m.detail} seconds={m.seconds} />
             ) : (
               <div key={i} className={`flex ${m.kind === "user" ? "justify-end" : "justify-start"}`}>
-                <div className={`max-w-[85%] px-3.5 py-2.5 rounded-2xl text-sm leading-relaxed whitespace-pre-wrap ${
-                  m.kind === "user"
-                    ? "bg-primary-500/15 border border-primary-500/25 text-text-primary rounded-br-sm"
-                    : "bg-surface-overlay border border-border text-text-primary rounded-bl-sm"
-                }`}>{m.text}</div>
+                {m.kind === "assistant" ? (
+                  <div
+                    className="msg-md max-w-[85%] px-3.5 py-2.5 rounded-2xl rounded-bl-sm text-sm leading-relaxed bg-surface-overlay border border-border text-text-primary space-y-2"
+                    dangerouslySetInnerHTML={{ __html: renderMarkdown(m.text) }}
+                  />
+                ) : (
+                  <div className="max-w-[85%] px-3.5 py-2.5 rounded-2xl rounded-br-sm text-sm leading-relaxed whitespace-pre-wrap bg-primary-500/15 border border-primary-500/25 text-text-primary">
+                    {deEmDash(m.text)}
+                  </div>
+                )}
               </div>
             )
           )}
@@ -817,13 +833,13 @@ export function AssistantTab({
               {!running && canUndo && !showContinue && (
                 <div className="rounded-xl border border-border bg-surface-overlay/30 p-3">
                   <p className="text-xs text-text-secondary mb-2">
-                    Not quite right? Tell me what to change and I&apos;ll refine it — I can revisit any answer, not just the last one.
+                    Not quite right? Tell me what to change and I&apos;ll refine it, I can revisit any answer, not just the last one.
                   </p>
                   <div className="flex flex-wrap gap-1.5">
                     {[
-                      "A few of these scores look too high — can you reconsider them?",
+                      "A few of these scores look too high, can you reconsider them?",
                       "Explain why you scored the weakest Essential the way you did.",
-                      "I have local details to add — let me tell you about a few indicators.",
+                      "I have local details to add, let me tell you about a few indicators.",
                     ].map((q) => (
                       <button key={q} onClick={() => { setInput(q); }}
                         className="text-[11px] px-2.5 py-1 rounded-full bg-surface-overlay border border-border text-text-secondary hover:text-text-primary">
@@ -879,7 +895,7 @@ export function AssistantTab({
           {running ? (
             <>
               <button onClick={handleSend} disabled={!input.trim()}
-                title="Add this while it works — it's picked up on the next step"
+                title="Add this while it works, it's picked up on the next step"
                 className="flex items-center justify-center px-3.5 py-2.5 rounded-xl btn-accent disabled:opacity-40" aria-label="Queue message">
                 <Send size={16} />
               </button>
@@ -898,7 +914,7 @@ export function AssistantTab({
       </section>
 
       {/* ── Right: live draft ──────────────────────── */}
-      <section className="glass-card p-4 sm:p-5 flex flex-col h-[80vh] lg:h-full min-h-0 overflow-hidden">
+      <section className={`glass-card p-4 sm:p-5 flex-col h-[80vh] lg:h-full min-h-0 overflow-hidden ${chatExpanded ? "hidden" : "flex"}`}>
         <div className="flex items-center justify-between mb-1 shrink-0">
           <div className="flex items-center gap-2">
             <ClipboardCheck size={20} className="text-accent-400" />
@@ -993,7 +1009,7 @@ export function AssistantTab({
               : "Download scorecard so far (.xlsm)"}
           </button>
           <button onClick={handleDownload}
-            title="A plain spreadsheet where every answer is a simple 0-3 number and totals are formulas — no form controls at all. Handy if you'd rather not use the official template."
+            title="A plain spreadsheet where every answer is a simple 0-3 number and totals are formulas, no form controls at all. Handy if you'd rather not use the official template."
             className="flex items-center gap-1.5 text-xs text-text-secondary hover:text-text-primary ml-auto">
             <Download size={13} /> Plain spreadsheet (.xlsx)
           </button>

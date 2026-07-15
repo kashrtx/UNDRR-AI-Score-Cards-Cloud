@@ -77,7 +77,7 @@ const PROVIDER_META: Record<ProviderId, { title: string; subtitle: string; icon:
   },
   nvidia: {
     title: "NVIDIA NIM (free)",
-    subtitle: "100+ open models, free. Lots of choices — if unsure, use the recommended GLM 5.2. Works well for the Assistant.",
+    subtitle: "100+ open models, free. Lots of choices, if unsure, use the recommended GLM 5.2. Works well for the Assistant.",
     icon: <Cpu size={18} className="text-accent-400" />,
   },
   meta: {
@@ -575,7 +575,7 @@ export function SettingsTab({
         </details>
       </div>
 
-      {/* Save — sticks to the bottom of the screen so it's always in view and
+      {/* Save, sticks to the bottom of the screen so it's always in view and
           nudges you when you've changed something but haven't saved it. */}
       <div className="sticky bottom-3 z-20 pt-1">
         <div
