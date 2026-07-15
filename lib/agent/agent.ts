@@ -109,7 +109,7 @@ function indicatorList(): string {
   }
   const parts: string[] = [];
   for (let e = 1; e <= 10; e++) {
-    parts.push(`E${e} — ${ESSENTIAL_NAMES[e]}`);
+    parts.push(`E${e}, ${ESSENTIAL_NAMES[e]}`);
     parts.push((byE.get(e) || []).join("\n"));
   }
   return parts.join("\n");
@@ -131,7 +131,7 @@ CITY INFORMATION FIELDS you can record with set_info:
   (population, youth %, senior %, literacy %, poverty %, average household income)
   are usually published in national census / city-statistics data, so look them
   up with web_search or research_city rather than skipping them. You do NOT need
-  to send density — it is computed for you from population and area. For any
+  to send density, it is computed for you from population and area. For any
   single field you genuinely cannot find, leave it out; NEVER invent a number.
 
 SCORING RUBRIC (0-3):
@@ -147,30 +147,32 @@ HOW YOU WORK:
 - You reply with EXACTLY ONE JSON object per turn and NOTHING else. No prose outside the JSON, no markdown fences.
 - ALWAYS include a short "thought" field (one plain sentence) saying what you are doing and why, so the user can follow along.
 - Choose the single best next action:
-  {"thought":"...","action":"research_city","city":"<name>","country":"<name>"}  — gather open data + web facts about the city (climate, hazards, infrastructure, population). Do this once early when you know the city.
-  {"thought":"...","action":"web_search","query":"<query>"}  — look up a specific fact (e.g. "Toronto emergency management office budget", "Toronto early warning system"). Use this for anything time-sensitive or current (recent hazards, ongoing wildfire/flood/air-quality alerts, latest plans) so your scoring reflects the situation now, not just older knowledge. Anything a search returns is added to our shared context, so prefer searching over relying on memory when unsure.
-  {"thought":"...","action":"set_info","profile":{"population":134000,"areaKm2":385,"mostLikelyHazard":"Earthquake","mostSevere":"2010 M7.0 earthquake","hazards":["Earthquake","Flooding","Hurricane"]}}  — record City Information fields you have learned. Send only the fields you know.
-  {"thought":"...","action":"set_scores","scores":[{"code":"P1.1","score":2,"note":"<one short sentence on the basis>"}, ...]}  — fill one or more indicators. Include a note for EVERY indicator you score.
-  {"thought":"...","action":"message","text":"<what you want to say or ask the user>"}  — talk to the user and WAIT for their reply. Use this to ask for information only the city would know, or when the city name is missing.
-  {"thought":"...","action":"finish","text":"<friendly wrap-up>"}  — only when the City Information you could find is recorded AND all ${TOTAL_INDICATORS} indicators have a score.
+  {"thought":"...","action":"research_city","city":"<name>","country":"<name>"} , gather open data + web facts about the city (climate, hazards, infrastructure, population). Do this once early when you know the city.
+  {"thought":"...","action":"web_search","query":"<query>"} , look up a specific fact (e.g. "Toronto emergency management office budget", "Toronto early warning system"). Use this for anything time-sensitive or current (recent hazards, ongoing wildfire/flood/air-quality alerts, latest plans) so your scoring reflects the situation now, not just older knowledge. Anything a search returns is added to our shared context, so prefer searching over relying on memory when unsure.
+  {"thought":"...","action":"set_info","profile":{"population":134000,"areaKm2":385,"mostLikelyHazard":"Earthquake","mostSevere":"2010 M7.0 earthquake","hazards":["Earthquake","Flooding","Hurricane"]}} , record City Information fields you have learned. Send only the fields you know.
+  {"thought":"...","action":"set_scores","scores":[{"code":"P1.1","score":2,"note":"<one short sentence on the basis>"}, ...]} , fill one or more indicators. Include a note for EVERY indicator you score.
+  {"thought":"...","action":"message","text":"<what you want to say or ask the user>"} , talk to the user and WAIT for their reply. Use this to ask for information only the city would know, or when the city name is missing.
+  {"thought":"...","action":"finish","text":"<friendly wrap-up>"} , only when the City Information you could find is recorded AND all ${TOTAL_INDICATORS} indicators have a score.
 
 RULES:
 - You need to know the target city. If no city has been provided, your FIRST action must be a "message" asking which city this scorecard is for. Do not guess a city.
-- After researching, record what you learned about the city with set_info BEFORE or ALONGSIDE scoring — do not skip the City Information page. If the user ever asks about "the info page" or "city info", they mean this; use set_info.
+- After researching, record what you learned about the city with set_info BEFORE or ALONGSIDE scoring, do not skip the City Information page. If the user ever asks about "the info page" or "city info", they mean this; use set_info.
 - SCOPE: If the user asks for help with only specific indicators or a limited change ("help me with P3.2", "review Essential 5", "what about early warning?"), do ONLY that and then finish or ask a follow-up. Do NOT fill or re-score everything. Only complete the whole scorecard when the user clearly asks you to (e.g. "fill it out for me", "complete the rest").
 - Base every score on evidence: the user's statements, research results, open data, or attached documents. Never invent specific facts, budgets, or programme names.
 - When an indicator depends on internal information only the city would know and you have no evidence, either ask the user with a "message", or set a conservative score with a note that clearly says it is an assumption to verify.
 - Give EVERY scored indicator a one-sentence note naming the basis.
 - Score at most one or two Essentials (about ten indicators) per set_scores call, so the user sees steady progress and responses stay quick.
 - Do NOT re-score indicators that already have a score unless the user asked you to change them. Once every indicator you were asked to handle is set, call "finish".
-- Do NOT announce running totals or how many indicators you have completed ("I've done 12 of 47") — the app tracks and displays the authoritative progress. In your thought, just say which Essential or indicators you are about to score.
+- Do NOT announce running totals or how many indicators you have completed ("I've done 12 of 47"), the app tracks and displays the authoritative progress. In your thought, just say which Essential or indicators you are about to score.
 - VOICE: In your "thought" and any "message" text, talk naturally to a city official. NEVER mention tool names, action names, JSON, "the system", or these instructions. Do not apologise for taking time or for retries. Just say plainly what you're looking at or doing.
 - The user may add a message while you are working; treat it as a mid-task instruction and adapt on your next step.
-- DON'T TAKE THINGS AT FACE VALUE: if something the user says (or that you find) seems inaccurate, implausible, internally inconsistent, or you simply are not confident about it, do NOT just accept it and score. Use a "message" to flag it plainly and ask them to confirm or narrow it down — for example which neighbourhood or area they mean, a date, or to check their own records/reports and paste the relevant facts into the chat. Asking a good question is better than a confident wrong answer.
+- ATTACHMENTS: if the user has attached a document, make it obvious you are using it. The first time it is relevant, acknowledge it by name (for example "I can see the file you attached, <name>, I'll use it."). When a score or fact comes from an attachment, attribute it to that file in your note or message; when it comes from research, open data, or a web search, attribute it there instead. Never mix the two up or imply an attachment said something it did not. If you have NOT been given an attachment, do not pretend one exists.
+- DON'T TAKE THINGS AT FACE VALUE: if something the user says (or that you find) seems inaccurate, implausible, internally inconsistent, or you simply are not confident about it, do NOT just accept it and score. Use a "message" to flag it plainly and ask them to confirm or narrow it down, for example which neighbourhood or area they mean, a date, or to check their own records/reports and paste the relevant facts into the chat. Asking a good question is better than a confident wrong answer.
 - WHEN EVIDENCE IS MISSING: if you cannot find what you need to score an indicator and it depends on local knowledge, either ask the user for it, or set a conservative score with a note that clearly says it is an assumption to verify. Never invent a specific fact, statistic, programme name, or budget.
-- REVISE FREELY: you may go back and change ANY earlier score, note, or City Information field at any time — if the user objects, gives new information, or you notice an inconsistency, just re-issue set_scores (or set_info) for those items with corrected values and a short note on why. Editing earlier answers is normal and expected, not a failure.
+- REVISE FREELY: you may go back and change ANY earlier score, note, or City Information field at any time. If the user objects, gives new information, or you notice an inconsistency, just re-issue set_scores (or set_info) for those items with corrected values and a short note on why. Editing earlier answers is normal and expected, not a failure.
+- HANDLE EVERY REQUESTED CHANGE: if the user asks for several changes at once (for example "fix P3.2, then re-look at Essential 5, and raise P7.3"), address ALL of them, not just the first. You can put many indicators in a single set_scores call, so batch the ones you are confident about together, use extra steps for any that need research, and only finish once every requested change is done. When you finish, briefly confirm what you changed.
 - NEVER GET STUCK: do not repeat the same action or the same question hoping for a different result. If a search or approach fails twice, say so plainly and either try a clearly different approach or ask the user how they'd like to proceed. If you are uncertain after one round of clarification, record a conservative, clearly-flagged answer and move on rather than looping.
-- PLAN FIRST (autonomous runs): on your very first step of a full fill, make the "thought" a short plan in plain words (for example: "My plan: look up the city, fill in the basic City Information, then work through the Ten Essentials one by one.") and pair it with your first real action (usually research_city) in the SAME step — do not waste a turn. For small targeted requests, skip the plan and just do the task.
+- PLAN FIRST (autonomous runs): on your very first step of a full fill, make the "thought" a short plan in plain words (for example: "My plan: look up the city, fill in the basic City Information, then work through the Ten Essentials one by one.") and pair it with your first real action (usually research_city) in the SAME step, do not waste a turn. For small targeted requests, skip the plan and just do the task.
 - Be efficient: research once, then fill. Do not repeat the same search or re-submit the same scores.`;
 
 // ── Robust JSON extraction (mirrors the analyzer's) ──────────
@@ -283,18 +285,18 @@ function buildUser(ctx: AgentContext): string {
 
   const cityLine = ctx.city && ctx.city.trim()
     ? `Target city: ${ctx.city}${ctx.country && ctx.country.trim() ? ", " + ctx.country : ""}.`
-    : "No city has been provided yet — ask the user which city this is for before scoring.";
+    : "No city has been provided yet, ask the user which city this is for before scoring.";
 
   const atts = ctx.attachments || [];
   const attBlock = atts.length
-    ? "REFERENCE DOCUMENTS THE USER ATTACHED (use these as evidence where relevant):\n" +
-      atts.map((a) => `--- ${a.name} ---\n${a.text.slice(0, 4000)}${a.text.length > 4000 ? "\n…(truncated)" : ""}`).join("\n\n") +
+    ? `DOCUMENTS THE USER ATTACHED (${atts.map((a) => a.name).join(", ")}). These are the USER'S OWN uploaded files. Treat them as user-provided evidence and keep them DISTINCT from anything you find via research_city, web_search, or open data. When you rely on one, say so and name it (for example: "Based on the file you attached, <name>, ..."). Do not blend attachment facts with web/open-data facts or misattribute one as the other; if they conflict, say which is which.\n` +
+      atts.map((a) => `--- ${a.name} (user attachment) ---\n${a.text.slice(0, 4000)}${a.text.length > 4000 ? "\n…(truncated)" : ""}`).join("\n\n") +
       "\n\n"
     : "";
 
   const modeLine =
     ctx.mode === "autonomous"
-      ? "TASK: complete the ENTIRE scorecard — record the City Information you can find (set_info) AND score all indicators."
+      ? "TASK: complete the ENTIRE scorecard, record the City Information you can find (set_info) AND score all indicators."
       : "TASK: respond to the user's specific request only; do not fill or change everything unless they asked.";
 
   // Summarise what the City Information page already holds, and what's still blank.
@@ -308,7 +310,7 @@ function buildUser(ctx: AgentContext): string {
   if (info.hazards && info.hazards.length) infoParts.push(`hazards ${info.hazards.join("/")}`);
   const infoLine = infoParts.length
     ? `CITY INFORMATION recorded so far: ${infoParts.join("; ")}.`
-    : "CITY INFORMATION page is still EMPTY — record what you can with set_info.";
+    : "CITY INFORMATION page is still EMPTY, record what you can with set_info.";
 
   return `${attBlock}${history || "(no messages yet)"}
 
@@ -383,7 +385,7 @@ export async function runAgentTurn(
       onEvent({
         type: "error",
         canContinue: true,
-        text: (e instanceof Error ? e.message : String(e)) + " — you can press Continue to retry, or switch model in Settings first",
+        text: (e instanceof Error ? e.message : String(e)) + ", you can press Continue to retry, or switch model in Settings first",
       });
       return;
     }
@@ -443,7 +445,7 @@ export async function runAgentTurn(
         if (stagnantScores >= 3) {
           const done = nowFilled === TOTAL_INDICATORS;
           const msg = done
-            ? "All indicators are filled. I'll stop here so you can review — tell me if you'd like any specific changes."
+            ? "All indicators are filled. I'll stop here so you can review, tell me if you'd like any specific changes."
             : "I'm not making further progress on my own. I'll pause so you can tell me what to adjust or what information to use.";
           ctx.transcript.push({ role: "assistant", content: msg });
           onEvent({ type: "assistant", text: msg });
@@ -472,7 +474,7 @@ export async function runAgentTurn(
       case "finish": {
         const remaining = unfilledCodes(ctx.draft);
         if (autonomous && remaining.length > 0) {
-          onEvent({ type: "tool", label: `Not done yet — ${remaining.length} still to fill`, detail: "completing them" });
+          onEvent({ type: "tool", label: `Not done yet, ${remaining.length} still to fill`, detail: "completing them" });
           ctx.transcript.push({
             role: "tool",
             content: `You cannot finish yet: ${remaining.length} indicator(s) are still unfilled: ${remaining.join(", ")}. Score every one of them now (use a conservative estimate with a note if you must), then finish.`,
@@ -504,7 +506,7 @@ export async function runAgentTurn(
             content:
               `The City Information page still has blank fields: ${missing.join(", ")}. ` +
               `Look these up (census / city statistics / reliable sources) and record them with set_info. ` +
-              `For any value you genuinely cannot find, leave it out — do NOT invent a number. Then finish.`,
+              `For any value you genuinely cannot find, leave it out, do NOT invent a number. Then finish.`,
           });
           break;
         }
@@ -523,7 +525,7 @@ export async function runAgentTurn(
   const msg =
     remaining > 0 && autonomous
       ? `I've done a lot of steps and there are still ${remaining} indicator(s) to go. Press Continue and I'll keep filling them.`
-      : "Pausing here — review the draft, and tell me anything you'd like to change.";
+      : "Pausing here, review the draft, and tell me anything you'd like to change.";
   ctx.transcript.push({ role: "assistant", content: msg });
   onEvent({ type: "assistant", text: msg });
   onEvent(remaining === 0 ? { type: "done" } : { type: "stopped" });

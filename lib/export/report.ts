@@ -1,10 +1,10 @@
 /**
- * Export — turn a finished analysis into downloadable artifacts, entirely in
+ * Export, turn a finished analysis into downloadable artifacts, entirely in
  * the browser:
  *   • a self-contained, printable HTML report (open it and Ctrl/Cmd-P → PDF)
  *   • the raw structured data as JSON
  *
- * No server, no dependencies — just a Blob + an <a download>.
+ * No server, no dependencies, just a Blob + an <a download>.
  */
 
 import type { NormalizedScorecard } from "@/lib/scorecard/schema";
@@ -130,7 +130,7 @@ export function buildReportHtml(p: ExportPayload): string {
   return `<!doctype html>
 <html lang="en"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>UNDRR ARISE Report — ${esc(sc.city.name)}</title>
+<title>UNDRR ARISE Report, ${esc(sc.city.name)}</title>
 <style>
   :root { --ink:#0f172a; --muted:#64748b; --line:#e2e8f0; --ac:#0f766e; --acbg:#ecfdf5; --warn:#b45309; --warnbg:#fffbeb; --danger:#b91c1c; }
   * { box-sizing: border-box; }
@@ -173,7 +173,7 @@ export function buildReportHtml(p: ExportPayload): string {
 <body><div class="wrap">
   <header>
     <div>
-      <h1>Disaster Resilience Report — ${esc(sc.city.name)}</h1>
+      <h1>Disaster Resilience Report, ${esc(sc.city.name)}</h1>
       <div class="sub">${esc(sc.city.country)}${sc.assessedDate ? " · assessed " + esc(sc.assessedDate) : ""}${
     sc.profile.population ? " · pop. " + sc.profile.population.toLocaleString() : ""
   }</div>
@@ -185,7 +185,7 @@ export function buildReportHtml(p: ExportPayload): string {
     meta.provider
   )} · ${esc(
     meta.model
-  )}</strong>. Results depend on the AI model used — a different model can produce different findings, priorities and cost estimates. Treat this as decision support, not a substitute for review by qualified disaster-resilience professionals.</div>
+  )}</strong>. Results depend on the AI model used, a different model can produce different findings, priorities and cost estimates. Treat this as decision support, not a substitute for review by qualified disaster-resilience professionals.</div>
 
   ${hazards}${severe}
 
@@ -248,6 +248,6 @@ export function buildReportHtml(p: ExportPayload): string {
     when
   )} · Runs entirely in the browser. The official scorecard methodology defines the Ten Essentials; scoring here is read directly from the uploaded workbook.</div>
 
-  <footer>Generated ${esc(when)} — UNDRR ARISE Scorecard Analyzer.</footer>
+  <footer>Generated ${esc(when)}, UNDRR ARISE Scorecard Analyzer.</footer>
 </div></body></html>`;
 }

@@ -536,9 +536,14 @@ export function AssistantTab({
   const onDocsPicked = useCallback(async (files: FileList) => {
     const added: Attachment[] = [];
     for (const file of Array.from(files)) {
+      // Skip duplicates (same name already attached).
+      if (attachRef.current.some((a) => a.name === file.name)) {
+        setChat((c) => [...c, { kind: "tool", label: "Already attached", detail: file.name }]);
+        continue;
+      }
       const isPdf = /\.pdf$/i.test(file.name) || file.type === "application/pdf";
       if (isPdf) {
-        setChat((c) => [...c, { kind: "tool", label: `Reading ${file.name}`, detail: "extracting the text" }]);
+        setChat((c) => [...c, { kind: "tool", label: "Reading PDF", detail: file.name }]);
         try {
           const text = await extractPdfText(file);
           if (text && text.length > 20) {
@@ -568,7 +573,10 @@ export function AssistantTab({
         attachRef.current = next;
         return next;
       });
-      setChat((c) => [...c, { kind: "tool", label: `Attached ${added.length} document${added.length === 1 ? "" : "s"}`, detail: added.map((a) => a.name).join(", ") }]);
+      for (const a of added) {
+        const words = a.text.split(/\s+/).filter(Boolean).length;
+        setChat((c) => [...c, { kind: "tool", label: "Ready to use", detail: `${a.name} (read about ${words.toLocaleString()} words)` }]);
+      }
     }
   }, []);
 
@@ -578,6 +586,7 @@ export function AssistantTab({
       attachRef.current = next;
       return next;
     });
+    setChat((c) => [...c, { kind: "tool", label: "Removed attachment", detail: name }]);
   }, []);
 
   // ── Session management ──────────────────────────────
@@ -788,10 +797,10 @@ export function AssistantTab({
           )}
           {chat.map((m, i) =>
             m.kind === "tool" ? (
-              <div key={i} className="flex items-center gap-2 text-xs text-text-secondary">
+              <div key={i} className="flex items-center gap-2 text-xs text-text-secondary min-w-0">
                 <Wrench size={13} className="text-primary-300 shrink-0" />
-                <span className="font-medium text-text-primary">{m.label}</span>
-                {m.detail && <span className="truncate">· {m.detail}</span>}
+                <span className="font-medium text-text-primary shrink-0 truncate max-w-[55%]">{m.label}</span>
+                {m.detail && <span className="truncate min-w-0 text-text-secondary">· {m.detail}</span>}
               </div>
             ) : m.kind === "thought" ? (
               <div key={i} className="flex items-start gap-2 text-xs text-text-secondary italic">
@@ -872,9 +881,10 @@ export function AssistantTab({
         {attachments.length > 0 && (
           <div className="shrink-0 flex flex-wrap gap-1.5 mt-2">
             {attachments.map((a) => (
-              <span key={a.name} className="flex items-center gap-1 text-[11px] bg-surface-overlay border border-border rounded-full pl-2 pr-1 py-0.5 text-text-secondary">
-                <Paperclip size={11} /> {a.name}
-                <button onClick={() => removeAttachment(a.name)} className="hover:text-danger-400"><X size={12} /></button>
+              <span key={a.name} title={a.name} className="flex items-center gap-1 max-w-full text-[11px] bg-surface-overlay border border-border rounded-full pl-2 pr-1 py-0.5 text-text-secondary">
+                <Paperclip size={11} className="shrink-0" />
+                <span className="truncate max-w-[220px]">{a.name}</span>
+                <button onClick={() => removeAttachment(a.name)} title="Remove" className="shrink-0 hover:text-danger-400"><X size={12} /></button>
               </span>
             ))}
           </div>

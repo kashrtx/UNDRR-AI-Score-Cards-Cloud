@@ -1,5 +1,5 @@
 /**
- * Prompt Builder — constructs grounded system + user prompts
+ * Prompt Builder, constructs grounded system + user prompts
  * for the UNDRR Disaster Resilience Scorecard analysis.
  *
  * Rules encoded here (from the spec):
@@ -7,7 +7,7 @@
  * - Use banded costs only (never precise figures)
  * - Sequence actions (Now/Next/Later) by impact, cost, dependencies
  * - Score-movement projection
- * - Mark data gaps explicitly — never invent data
+ * - Mark data gaps explicitly, never invent data
  * - Reference ARISE Action Guides where applicable
  * - Plain language for non-technical city officials
  */
@@ -19,12 +19,12 @@ import { ESSENTIAL_NAMES } from "@/lib/scorecard/schema";
 // ── System prompt (persona + rules) ─────────────────────────
 
 export function buildSystemPrompt(): string {
-  return `You are a disaster resilience advisor for the UNDRR ARISE network. Your audience is non-technical city officials (mayor's office staff, city planners). You speak in clear, plain language — no jargon without explanation.
+  return `You are a disaster resilience advisor for the UNDRR ARISE network. Your audience is non-technical city officials (mayor's office staff, city planners). You speak in clear, plain language, no jargon without explanation.
 
 ## YOUR TASK
 Analyze a city's Disaster Resilience Scorecard and produce a structured action plan.
 
-## STRICT RULES — VIOLATIONS ARE UNACCEPTABLE
+## STRICT RULES, VIOLATIONS ARE UNACCEPTABLE
 
 1. **GROUNDING**: Every claim MUST reference the specific indicator code (e.g., "P9.1") or dataset key that supports it. Use "sourceRefs" arrays. Do NOT make ungrounded assertions.
 
@@ -51,9 +51,9 @@ Analyze a city's Disaster Resilience Scorecard and produce a structured action p
    - Chapter 3: How to engage with the community
    - Chapter 4: How to finance projects
 
-9. **SANITY-CHECK THE DATA**: The enrichment figures come from automated open sources and can contain artifacts or coarse approximations. Before repeating a number as fact, ask whether it is plausible. If a value is clearly an artifact or implausible, describe it qualitatively or caveat it rather than stating it as precise fact. Concrete example: a grid-derived ground elevation of 0 m for an inhabited island almost always means the coarse grid cell fell on water/coastline — say "low-lying / near sea level" rather than "0 metres elevation". You MAY point out a likely data artifact when you are confident from general knowledge, but ONLY when confident, and you must NEVER invent a precise replacement figure — if unsure, state the uncertainty and lean on the scorecard. Correct obvious errors; do not manufacture new ones.
+9. **SANITY-CHECK THE DATA**: The enrichment figures come from automated open sources and can contain artifacts or coarse approximations. Before repeating a number as fact, ask whether it is plausible. If a value is clearly an artifact or implausible, describe it qualitatively or caveat it rather than stating it as precise fact. Concrete example: a grid-derived ground elevation of 0 m for an inhabited island almost always means the coarse grid cell fell on water/coastline, say "low-lying / near sea level" rather than "0 metres elevation". You MAY point out a likely data artifact when you are confident from general knowledge, but ONLY when confident, and you must NEVER invent a precise replacement figure, if unsure, state the uncertainty and lean on the scorecard. Correct obvious errors; do not manufacture new ones.
 
-10. **USE THE RESEARCH CONTEXT**: When a "RESEARCH CONTEXT" section (retrieved from the web/encyclopedia) is provided, treat it as cited evidence to cross-check the coarse open-data estimates and your own prior memory. Prefer well-corroborated retrieved facts, cite the source, and note conflicts. Do NOT treat any single database field as authoritative — corroborate it against the retrieved excerpts. If you have a web-search tool available, you may also use it to verify uncertain or city-specific facts. Either way, your FINAL output must be ONLY the JSON object below.
+10. **USE THE RESEARCH CONTEXT**: When a "RESEARCH CONTEXT" section (retrieved from the web/encyclopedia) is provided, treat it as cited evidence to cross-check the coarse open-data estimates and your own prior memory. Prefer well-corroborated retrieved facts, cite the source, and note conflicts. Do NOT treat any single database field as authoritative, corroborate it against the retrieved excerpts. If you have a web-search tool available, you may also use it to verify uncertain or city-specific facts. Either way, your FINAL output must be ONLY the JSON object below.
 
 11. **CONFIDENCE ON EVERY STRENGTH AND WEAKNESS**: Give each strength and weakness a "confidence" of "high", "medium", or "low":
    - "high" = directly documented (a well-known historical event, a clear scorecard score, a corroborated retrieved fact).
@@ -64,20 +64,20 @@ Analyze a city's Disaster Resilience Scorecard and produce a structured action p
 12. **NEVER STATE AN INFERENCE AS A FACT**:
    - Do NOT invent precise statistics. Never write things like "early warning reaches 70% of residents" or "insurance penetration is under 1%" unless that exact figure appears in the provided evidence. Describe the situation qualitatively instead ("early-warning coverage is uneven / limited").
    - ABSENCE OF DATA IS NOT PROOF OF ABSENCE. Zero mapped shelters in OpenStreetMap means "no publicly mapped shelters were found", NOT "there are no shelters". Say "no confirmed or mapped X could be located" rather than "there is no X".
-   - Avoid absolute claims like "all infrastructure will fail" — soften to "infrastructure has limited redundancy and is vulnerable to widespread disruption" unless an actual engineering assessment is cited.
+   - Avoid absolute claims like "all infrastructure will fail", soften to "infrastructure has limited redundancy and is vulnerable to widespread disruption" unless an actual engineering assessment is cited.
    - When in doubt, hedge and lower the confidence rather than overstate.
    - It is BETTER to say you are not confident about a specific point (or to leave it out) than to state something you cannot support. Do not fill gaps with invented specifics to make the analysis look more complete.
 
 13. **RISK LENS (hazard / exposure / vulnerability)**: Provide a "riskProfile" with three short plain-language paragraphs that a non-expert can follow, grounded in the scorecard and any city data:
    - "hazard": which natural/human events realistically threaten this city (use the city's known hazards; don't invent new ones).
-   - "exposure": what and who is in harm's way if such an event occurs (people, homes, critical infrastructure, economic activity) — describe qualitatively, no invented figures.
+   - "exposure": what and who is in harm's way if such an event occurs (people, homes, critical infrastructure, economic activity), describe qualitatively, no invented figures.
    - "vulnerability": given the city's CURRENT preparedness as reflected in the scorecard scores, what level of damage or disruption is plausible, and why (tie it to weak Essentials). Keep the same honesty and hedging rules as above.
 
 ## THE TEN ESSENTIALS
 ${Object.entries(ESSENTIAL_NAMES).map(([n, name]) => `${n}. ${name}`).join("\n")}
 
 ## OUTPUT FORMAT
-Respond with ONLY a JSON object matching this exact schema — no markdown, no explanation outside the JSON:
+Respond with ONLY a JSON object matching this exact schema, no markdown, no explanation outside the JSON:
 
 {
   "summary": "Plain-language paragraph summarizing the city's resilience position. End by noting the scores are heuristic estimates from available evidence, useful for comparison rather than precise measurements.",
@@ -142,7 +142,7 @@ export function buildUserPrompt(
   // ── All 46 indicators ──
   parts.push(`\n## ALL INDICATORS (46 total, each scored 0–3)`);
   for (const ind of scorecard.indicators) {
-    const line = `  ${ind.code}: Score ${ind.score}/3 — ${ind.text}`;
+    const line = `  ${ind.code}: Score ${ind.score}/3, ${ind.text}`;
     parts.push(ind.notes ? `${line} [Notes: ${ind.notes}]` : line);
   }
 
@@ -176,23 +176,23 @@ export function buildUserPrompt(
   if (enrichmentData.length > 0) {
     parts.push(
       `\n### How to read the enrichment data\n` +
-        `- Climate figures (precipitation and temperature extremes) are specific to the city's coordinates — use them to corroborate or challenge the self-reported hazard scores.\n` +
-        `- The ground-elevation figure is a COARSE global-grid estimate. On small islands and coastlines it frequently reads 0 m even though the real ground is a few metres higher — read a near-zero value as "low-lying / near sea level", and NEVER state a literal, precise "0 m elevation" as fact. A low elevation still signals coastal-flood and sea-level-rise exposure.\n` +
-        `- OpenStreetMap infrastructure counts reflect how completely the area is mapped in OSM and may UNDERCOUNT facilities in less-mapped cities — treat them as a floor, not a census, and don't infer a critical gap from a low OSM count alone.\n` +
-        `- World Bank figures are NATIONAL, not city-level — use them as context, not as the city's own numbers.`
+        `- Climate figures (precipitation and temperature extremes) are specific to the city's coordinates, use them to corroborate or challenge the self-reported hazard scores.\n` +
+        `- The ground-elevation figure is a COARSE global-grid estimate. On small islands and coastlines it frequently reads 0 m even though the real ground is a few metres higher, read a near-zero value as "low-lying / near sea level", and NEVER state a literal, precise "0 m elevation" as fact. A low elevation still signals coastal-flood and sea-level-rise exposure.\n` +
+        `- OpenStreetMap infrastructure counts reflect how completely the area is mapped in OSM and may UNDERCOUNT facilities in less-mapped cities, treat them as a floor, not a census, and don't infer a critical gap from a low OSM count alone.\n` +
+        `- World Bank figures are NATIONAL, not city-level, use them as context, not as the city's own numbers.`
     );
   }
 
-  // ── Research context (retrieved evidence — RAG) ──
+  // ── Research context (retrieved evidence, RAG) ──
   if (reference && (reference.answer || reference.summary || reference.passages.length || reference.facts.length)) {
-    parts.push(`\n## RESEARCH CONTEXT (retrieved from the web & encyclopedia — evidence to cross-check, NOT gospel)`);
+    parts.push(`\n## RESEARCH CONTEXT (retrieved from the web & encyclopedia, evidence to cross-check, NOT gospel)`);
     parts.push(
       `Ground your analysis in this retrieved evidence and cite the source by name (for example "Wikipedia", or the site or title). The evidence spans the city's geography and climate, its hazards and past disasters, recent resilience initiatives and successes, and current challenges. Use recent initiatives and projects to inform strengths, and ongoing or historical problems to inform weaknesses and the action plan. Cross-check figures across the sources below. For physical facts such as elevation, rely on what these sources actually say and give a qualified value or range; treat any single database field as one source that may be wrong; never state a precise number as fact unless the retrieved evidence supports it. If sources conflict, say so briefly.`
     );
     if (reference.answer) parts.push(`\nSynthesized answer: ${reference.answer}`);
     if (reference.summary) parts.push(`\nOverview (${reference.title}): ${reference.summary}`);
     if (reference.facts.length) {
-      parts.push(`\nReference data (single-source — verify against the excerpts):`);
+      parts.push(`\nReference data (single-source, verify against the excerpts):`);
       for (const f of reference.facts) parts.push(`  - ${f.label}: ${f.value} [${f.source}]`);
     }
     if (reference.passages.length) {
@@ -208,7 +208,7 @@ export function buildUserPrompt(
   parts.push(`Analyze this city's scorecard and produce a comprehensive resilience action plan.`);
   parts.push(`Focus on:`);
   parts.push(`1. The weakest Essentials (especially those below 30%)`);
-  parts.push(`2. Any indicators scored 0 — these are critical gaps`);
+  parts.push(`2. Any indicators scored 0, these are critical gaps`);
   parts.push(`3. The relationship between the city's top hazard (${scorecard.profile.mostSevere || "unknown"}) and its weakest scores`);
   parts.push(`4. Quick wins (low cost, high impact) vs major programs`);
   parts.push(`5. Dependencies between actions (what must happen first)`);
