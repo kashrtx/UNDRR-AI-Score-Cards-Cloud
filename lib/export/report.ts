@@ -88,7 +88,12 @@ export function buildReportHtml(p: ExportPayload): string {
       return [cx + r * Math.cos(ang), cy + r * Math.sin(ang)];
     };
     const poly = (vals: number[]) => vals.map((v, i) => pt(v, i).map((n) => n.toFixed(1)).join(",")).join(" ");
-    const rings = [0.25, 0.5, 0.75, 1].map((f) => `<circle cx="${cx}" cy="${cy}" r="${(R * f).toFixed(1)}" fill="none" stroke="#eef2f7"/>`).join("");
+    const rings = [10, 20, 30]
+      .map((val) => {
+        const rr = (val / scale) * R;
+        return `<circle cx="${cx}" cy="${cy}" r="${rr.toFixed(1)}" fill="none" stroke="#eef2f7"/><text x="${cx + 3}" y="${(cy - rr).toFixed(1)}" font-size="9" fill="#94a3b8" dominant-baseline="middle">${val}</text>`;
+      })
+      .join("");
     const axes = ess
       .map((e, i) => {
         const [x, y] = pt(scale, i);

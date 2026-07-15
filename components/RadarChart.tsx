@@ -67,19 +67,13 @@ export function RadarChart({ essentials }: RadarChartProps) {
             dataKey="name"
             tick={{ fill: c.angleTick, fontSize: 15, fontWeight: 700 }}
           />
-          <PolarRadiusAxis
-            angle={90}
-            domain={[0, AXIS_MAX]}
-            tickCount={7}
-            tick={{ fill: c.radiusTick, fontSize: 12, fontWeight: 600 }}
-          />
           <Radar
             name="Maximum possible"
             dataKey="max"
             isAnimationActive={false}
             stroke={c.maxStroke}
             fill={c.maxFill}
-            fillOpacity={0.5}
+            fillOpacity={0.35}
           />
           <Radar
             name="City score"
@@ -87,8 +81,18 @@ export function RadarChart({ essentials }: RadarChartProps) {
             isAnimationActive={false}
             stroke={c.cityStroke}
             fill={c.cityFill}
-            fillOpacity={0.45}
+            fillOpacity={0.4}
             strokeWidth={2.5}
+          />
+          {/* Radius (scale) axis LAST so its 0…30 numbers paint on top of the
+              polygons and stay readable. */}
+          <PolarRadiusAxis
+            angle={90}
+            domain={[0, AXIS_MAX]}
+            tickCount={7}
+            axisLine={false}
+            tickFormatter={(v: number) => `${v}`}
+            tick={{ fill: c.angleTick, fontSize: 12, fontWeight: 700 }}
           />
           <Tooltip
             content={({ payload }) => {
