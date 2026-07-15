@@ -94,17 +94,36 @@ export function unfilledCodes(draft: Draft): string[] {
 
 const clamp03 = (n: number): Score => Math.max(0, Math.min(3, Math.round(n))) as Score;
 
+/**
+ * Parse a score that a model may emit in several shapes: a number (3), a string
+ * ("3"), a fraction ("3/3"), or a labelled value ("3 · Comprehensive"). Returns
+ * null only when there's no usable number, so a genuine score change is never
+ * silently dropped into a note-only update.
+ */
+function parseScore(v: unknown): number | null {
+  if (typeof v === "number" && Number.isFinite(v)) return v;
+  if (typeof v === "string") {
+    const m = v.match(/-?\d+/);
+    if (m) {
+      const n = parseInt(m[0], 10);
+      if (Number.isFinite(n)) return n;
+    }
+  }
+  return null;
+}
+
 /** Apply a batch of {code, score, note} updates. Returns how many were applied. */
 export function applyScores(
   draft: Draft,
-  updates: Array<{ code?: string; score?: number; note?: string }>
+  updates: Array<{ code?: string; score?: unknown; note?: string }>
 ): number {
   let n = 0;
   for (const u of updates || []) {
     const code = (u.code || "").toUpperCase().replace(/\s+/g, "");
     if (!code || !(code in draft)) continue;
-    if (typeof u.score === "number" && Number.isFinite(u.score)) {
-      draft[code] = { score: clamp03(u.score), note: (u.note ?? draft[code].note ?? "").toString().slice(0, 400) };
+    const parsed = parseScore(u.score);
+    if (parsed != null) {
+      draft[code] = { score: clamp03(parsed), note: (u.note ?? draft[code].note ?? "").toString().slice(0, 400) };
       n++;
     } else if (u.note != null) {
       draft[code] = { ...draft[code], note: u.note.toString().slice(0, 400) };

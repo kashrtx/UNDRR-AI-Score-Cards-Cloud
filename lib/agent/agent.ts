@@ -171,6 +171,7 @@ RULES:
 - WHEN EVIDENCE IS MISSING: if you cannot find what you need to score an indicator and it depends on local knowledge, either ask the user for it, or set a conservative score with a note that clearly says it is an assumption to verify. Never invent a specific fact, statistic, programme name, or budget.
 - REVISE FREELY: you may go back and change ANY earlier score, note, or City Information field at any time. If the user objects, gives new information, or you notice an inconsistency, just re-issue set_scores (or set_info) for those items with corrected values and a short note on why. Editing earlier answers is normal and expected, not a failure.
 - HANDLE EVERY REQUESTED CHANGE: if the user asks for several changes at once (for example "fix P3.2, then re-look at Essential 5, and raise P7.3"), address ALL of them, not just the first. You can put many indicators in a single set_scores call, so batch the ones you are confident about together, use extra steps for any that need research, and only finish once every requested change is done. When you finish, briefly confirm what you changed.
+- TO CHANGE A SCORE YOU MUST SET THE NUMBER: when you raise or lower a score, put the new value as a plain integer 0-3 in the "score" field (for example "score": 3). Do NOT describe the change only in the note ("raised to 3/3") and leave the score out, that updates the wording but not the actual score. After each set_scores you are told the ACTUAL score changes that took effect; when you summarise for the user, describe only those actual changes, never a change you intended but that did not register.
 - NEVER GET STUCK: do not repeat the same action or the same question hoping for a different result. If a search or approach fails twice, say so plainly and either try a clearly different approach or ask the user how they'd like to proceed. If you are uncertain after one round of clarification, record a conservative, clearly-flagged answer and move on rather than looping.
 - PLAN FIRST (autonomous runs): on your very first step of a full fill, make the "thought" a short plan in plain words (for example: "My plan: look up the city, fill in the basic City Information, then work through the Ten Essentials one by one.") and pair it with your first real action (usually research_city) in the SAME step, do not waste a turn. For small targeted requests, skip the plan and just do the task.
 - Be efficient: research once, then fill. Do not repeat the same search or re-submit the same scores.`;
@@ -424,15 +425,38 @@ export async function runAgentTurn(
         break;
       }
       case "set_scores": {
-        const n = applyScores(ctx.draft, action.scores || []);
+        const reqs = (action.scores || []) as Array<{ code?: string; score?: unknown; note?: string }>;
+        const norm = (c?: string) => (c || "").toUpperCase().replace(/\s+/g, "");
+        const before = new Map<string, number | null>();
+        for (const r of reqs) {
+          const c = norm(r.code);
+          if (c in ctx.draft) before.set(c, ctx.draft[c].score);
+        }
+        const n = applyScores(ctx.draft, reqs);
+        // Build an ACCURATE list of what actually changed, so the model's own
+        // summary reflects reality instead of what it intended.
+        const scoreChanges: string[] = [];
+        for (const r of reqs) {
+          const c = norm(r.code);
+          if (!(c in ctx.draft)) continue;
+          const oldv = before.has(c) ? before.get(c)! : null;
+          const newv = ctx.draft[c].score;
+          if (oldv !== newv) scoreChanges.push(`${c} ${oldv ?? "blank"}→${newv}`);
+        }
         onEvent({ type: "draft" });
         const nowFilled = filledCount(ctx.draft);
         const added = Math.max(0, nowFilled - prevFilled); // newly-filled indicators
-        ctx.transcript.push({ role: "tool", content: `Applied ${n} score(s). ${nowFilled}/${TOTAL_INDICATORS} filled.` });
+        ctx.transcript.push({
+          role: "tool",
+          content:
+            `Applied ${n} score(s). ${nowFilled}/${TOTAL_INDICATORS} filled. ` +
+            `Actual score changes: ${scoreChanges.length ? scoreChanges.join(", ") : "none (notes only or values unchanged)"}. ` +
+            "When you summarise, describe ONLY these actual changes.",
+        });
         onEvent({
           type: "tool",
           label: `${nowFilled}/${TOTAL_INDICATORS} indicators filled`,
-          detail: added > 0 ? `+${added} just now` : n > 0 ? `revised ${n}` : "no change",
+          detail: added > 0 ? `+${added} just now` : scoreChanges.length ? `revised ${scoreChanges.length}` : "no score change",
         });
 
         if (nowFilled <= prevFilled) stagnantScores++;
