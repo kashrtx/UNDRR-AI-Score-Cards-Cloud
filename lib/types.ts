@@ -57,6 +57,8 @@ export interface NormalizedDatum {
   unit?: string;
   essentialHint?: number;
   provenance: Provenance;
+  /** Which registered source produced this datum (for the transparency view). */
+  sourceId?: string;
 }
 
 export type CostTier = "$0–100k" | "$100k–500k" | "$500k–1M" | "$1M–10M" | ">$10M";

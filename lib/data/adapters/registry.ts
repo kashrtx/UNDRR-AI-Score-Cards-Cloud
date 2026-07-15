@@ -111,6 +111,7 @@ export async function buildDataPack(
     allSources().map(async (source) => {
       try {
         const items = await withTimeout(source.fetch(loc), 24000, source.name);
+        for (const it of items) (it as { sourceId?: string }).sourceId = source.id;
         allData.push(...items);
         sourceReport.push({ id: source.id, name: source.name, points: items.length });
         if (!items.length) warnings.push(`${source.name}: no data for this location.`);

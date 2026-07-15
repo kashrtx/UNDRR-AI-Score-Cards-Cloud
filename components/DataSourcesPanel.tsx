@@ -80,7 +80,7 @@ export function DataSourcesPanel({ report, live }: { report: DataReport | null; 
           {report.sources.map((s) => {
             const ok = s.points > 0;
             const rows = (report.data || []).filter(
-              (d) => d.provenance.source === s.id || d.provenance.source === s.name || d.provenance.dataset === s.id || d.provenance.dataset === s.name
+              (d) => d.sourceId === s.id || d.provenance.source === s.id || d.provenance.source === s.name
             );
             const canOpen = rows.length > 0;
             const isOpen = openId === s.id;
