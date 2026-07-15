@@ -128,6 +128,8 @@ export interface DataReport {
   sources: Array<{ id: string; name: string; points: number; error?: string }>;
   warnings: string[];
   reference?: ReferenceFacts | null;
+  /** The actual open-data values used, for the transparency drill-down. */
+  data?: NormalizedDatum[];
 }
 
 // ── Data pack returned by /api/data/fetch ────────────────────

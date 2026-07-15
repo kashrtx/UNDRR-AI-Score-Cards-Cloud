@@ -33,6 +33,7 @@ function toReport(pack: DataPack, serviceUp: boolean): DataReport {
     dataPoints: pack.dataPoints,
     sources: pack.sources,
     warnings: pack.warnings,
+    data: pack.data,
   };
 }
 
@@ -57,6 +58,111 @@ function extractJson(text: string): string {
   const last = cleaned.lastIndexOf("}");
   if (first !== -1 && last !== -1 && last > first) return cleaned.slice(first, last + 1);
   return cleaned;
+}
+
+/** Best-effort JSON parse: strict first, then a light repair pass. */
+function looseParse(raw: string): unknown | null {
+  const text = extractJson(raw);
+  try {
+    return JSON.parse(text);
+  } catch {
+    // Common model slips: trailing commas, smart quotes.
+    const repaired = text
+      .replace(/,\s*([}\]])/g, "$1")
+      .replace(/[\u201c\u201d]/g, '"')
+      .replace(/[\u2018\u2019]/g, "'");
+    try {
+      return JSON.parse(repaired);
+    } catch {
+      return null;
+    }
+  }
+}
+
+const COST_TIERS = ["$0–100k", "$100k–500k", "$500k–1M", "$1M–10M", ">$10M"];
+const PHASES = ["Now", "Next", "Later"];
+const clampInt = (v: unknown, lo: number, hi: number, dflt: number): number => {
+  const n = typeof v === "number" ? v : parseInt(String(v), 10);
+  if (!Number.isFinite(n)) return dflt;
+  return Math.max(lo, Math.min(hi, Math.round(n)));
+};
+
+/**
+ * Build a valid AnalysisResult from a possibly-partial or partly-broken object.
+ * Whatever the model got right is kept; any missing or malformed section falls
+ * back to the deterministic computed defaults, so one bad field never sinks the
+ * whole report. Returns null only if there's nothing usable at all.
+ */
+function coerceResult(parsed: unknown, scorecard: NormalizedScorecard): AnalysisResult | null {
+  if (!parsed || typeof parsed !== "object") return null;
+  const p = parsed as Record<string, unknown>;
+  const base = buildFallbackResult(scorecard);
+
+  const coerceStatements = (v: unknown): AnalysisResult["strengths"] | null => {
+    if (!Array.isArray(v)) return null;
+    const out = v
+      .map((it) => {
+        if (!it || typeof it !== "object") return null;
+        const o = it as Record<string, unknown>;
+        const text = typeof o.text === "string" ? o.text.trim() : "";
+        if (!text) return null;
+        const refs = Array.isArray(o.sourceRefs) ? o.sourceRefs.map((r) => String(r)) : [];
+        const conf = o.confidence === "high" || o.confidence === "medium" || o.confidence === "low" ? o.confidence : undefined;
+        return { text, sourceRefs: refs, confidence: conf };
+      })
+      .filter(Boolean) as AnalysisResult["strengths"];
+    return out.length ? out : null;
+  };
+
+  const summary = typeof p.summary === "string" && p.summary.trim() ? p.summary.trim() : base.summary;
+
+  let riskProfile = base.riskProfile;
+  if (p.riskProfile && typeof p.riskProfile === "object") {
+    const r = p.riskProfile as Record<string, unknown>;
+    if (typeof r.hazard === "string" && typeof r.exposure === "string" && typeof r.vulnerability === "string") {
+      riskProfile = { hazard: r.hazard, exposure: r.exposure, vulnerability: r.vulnerability };
+    }
+  }
+
+  const strengths = coerceStatements(p.strengths) ?? base.strengths;
+  const weaknesses = coerceStatements(p.weaknesses) ?? base.weaknesses;
+
+  let actions = base.actions;
+  if (Array.isArray(p.actions)) {
+    const coerced = p.actions
+      .map((it, idx): AnalysisResult["actions"][number] | null => {
+        if (!it || typeof it !== "object") return null;
+        const o = it as Record<string, unknown>;
+        const title = typeof o.title === "string" ? o.title.trim() : "";
+        if (!title) return null;
+        const costTier = COST_TIERS.includes(String(o.costTier)) ? (o.costTier as AnalysisResult["actions"][number]["costTier"]) : "$100k–500k";
+        const phase = PHASES.includes(String(o.phase)) ? (o.phase as AnalysisResult["actions"][number]["phase"]) : "Next";
+        return {
+          n: clampInt(o.n, 1, 999, idx + 1),
+          title,
+          essential: clampInt(o.essential, 1, 10, 1),
+          gap: typeof o.gap === "string" ? o.gap : "",
+          impact: clampInt(o.impact, 1, 5, 3) as AnalysisResult["actions"][number]["impact"],
+          difficulty: clampInt(o.difficulty, 1, 5, 3) as AnalysisResult["actions"][number]["difficulty"],
+          costTier,
+          phase,
+          scoreDelta: clampInt(o.scoreDelta, 0, 100, 1),
+          sourceRefs: Array.isArray(o.sourceRefs) ? o.sourceRefs.map((r) => String(r)) : [],
+        };
+      })
+      .filter(Boolean) as AnalysisResult["actions"];
+    if (coerced.length) actions = coerced;
+  }
+
+  let projection = base.projection;
+  if (p.projection && typeof p.projection === "object") {
+    const pr = p.projection as Record<string, unknown>;
+    const cur = typeof pr.current === "number" ? pr.current : scorecard.total;
+    const pot = typeof pr.potential === "number" ? pr.potential : base.projection.potential;
+    projection = { current: cur, potential: Math.max(cur, Math.min(scorecard.totalMax, pot)) };
+  }
+
+  return { summary, riskProfile, strengths, weaknesses, actions, projection };
 }
 
 export async function runAnalysis(
@@ -156,7 +262,7 @@ export async function runAnalysis(
     ) {
       onProgress?.({
         step: "llm",
-        label: "Retrying without web search…",
+        label: "Taking a second pass for reliability…",
         pct: 45,
         indeterminate: true,
       });
@@ -176,10 +282,6 @@ export async function runAnalysis(
     onProgress?.({ step: "done", label: "Done.", pct: 100 });
     return { result, dataReport };
   } catch (firstErr) {
-    // Was the response cut off mid-stream (slow reasoning model hitting the
-    // hosting time limit)? If so, a repair call would just be slow and fail the
-    // same way, so skip it and go straight to a clear fallback instead of
-    // freezing on a second long request.
     const rawTrim = raw.trim();
     const looksComplete = rawTrim.endsWith("}") && rawTrim.includes('"projection"');
 
@@ -187,7 +289,7 @@ export async function runAnalysis(
       // ── 5. One repair attempt for a complete-but-malformed response ──
       onProgress?.({
         step: "validate",
-        label: "Result needed fixing — asking the AI to correct it…",
+        label: "Tidying up the AI's result…",
         pct: 90,
         indeterminate: true,
       });
@@ -204,8 +306,26 @@ export async function runAnalysis(
         onProgress?.({ step: "done", label: "Done.", pct: 100 });
         return { result, dataReport };
       } catch {
-        /* fall through to fallback */
+        /* fall through to salvage */
       }
+    }
+
+    // ── 5b. SALVAGE: keep whatever parsed correctly, fill only the broken
+    // parts with computed defaults. One bad field never sinks the whole report.
+    const salvaged = coerceResult(looseParse(raw), scorecard);
+    if (salvaged) {
+      // Only flag a problem if a major section actually had to be defaulted.
+      const baseCmp = buildFallbackResult(scorecard);
+      const degraded =
+        salvaged.summary === baseCmp.summary ||
+        (salvaged.strengths === baseCmp.strengths && salvaged.weaknesses === baseCmp.weaknesses);
+      if (degraded && salvaged.summary !== baseCmp.summary) {
+        salvaged.summary =
+          "Note: part of the AI's response could not be read, so a few sections below fall back to a basic computed version. The rest is the AI's own analysis. " +
+          salvaged.summary;
+      }
+      onProgress?.({ step: "done", label: "Done (recovered a partial response).", pct: 100 });
+      return { result: salvaged, dataReport };
     }
 
     // ── 6. Deterministic fallback (always returns a usable analysis) ──
@@ -214,7 +334,7 @@ export async function runAnalysis(
     if (!looksComplete) {
       fallback.summary =
         `The AI's response was cut off before it finished, so a basic analysis is shown instead. ` +
-        `This usually means the model was too slow to complete within the hosting time limit — common with heavy "reasoning" models on a free plan. ` +
+        `This usually means the model was too slow to finish within the hosting time limit, common with heavy "reasoning" models on a free plan. ` +
         `Try re-running, or pick a faster model (for example a non-reasoning model, or Gemini/OpenRouter which run without the proxy) in Settings. ` +
         fallback.summary;
     }

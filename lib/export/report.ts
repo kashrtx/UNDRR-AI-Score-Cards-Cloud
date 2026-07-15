@@ -77,6 +77,34 @@ export function buildReportHtml(p: ExportPayload): string {
     })
     .join("");
 
+  // Ten-Essentials radar (grey = max possible, green = this city), 0-30 scale.
+  const radarSvg = (() => {
+    const ess = [...sc.essentials].sort((a, b) => a.num - b.num);
+    if (ess.length < 3) return "";
+    const R = 150, cx = 200, cy = 180, scale = 30;
+    const pt = (val: number, i: number): [number, number] => {
+      const ang = ((-90 + i * (360 / ess.length)) * Math.PI) / 180;
+      const r = Math.max(0, Math.min(1, val / scale)) * R;
+      return [cx + r * Math.cos(ang), cy + r * Math.sin(ang)];
+    };
+    const poly = (vals: number[]) => vals.map((v, i) => pt(v, i).map((n) => n.toFixed(1)).join(",")).join(" ");
+    const rings = [0.25, 0.5, 0.75, 1].map((f) => `<circle cx="${cx}" cy="${cy}" r="${(R * f).toFixed(1)}" fill="none" stroke="#eef2f7"/>`).join("");
+    const axes = ess
+      .map((e, i) => {
+        const [x, y] = pt(scale, i);
+        const [lx, ly] = pt(scale * 1.13, i);
+        return `<line x1="${cx}" y1="${cy}" x2="${x.toFixed(1)}" y2="${y.toFixed(1)}" stroke="#e2e8f0"/><text x="${lx.toFixed(1)}" y="${ly.toFixed(1)}" font-size="11" fill="#64748b" text-anchor="middle" dominant-baseline="middle">E${e.num}</text>`;
+      })
+      .join("");
+    return `<h2>Ten Essentials radar</h2>
+  <p class="sub">Each spoke is one Essential on a 0 to ${scale} scale. Grey is the maximum possible; green is this city.</p>
+  <svg viewBox="0 0 400 370" width="100%" style="max-width:430px;display:block;margin:8px auto" xmlns="http://www.w3.org/2000/svg">
+    ${rings}${axes}
+    <polygon points="${poly(ess.map((e) => e.max))}" fill="#cbd5e1" fill-opacity="0.35" stroke="#94a3b8" stroke-width="1"/>
+    <polygon points="${poly(ess.map((e) => e.score))}" fill="#16a34a" fill-opacity="0.45" stroke="#16a34a" stroke-width="1.5"/>
+  </svg>`;
+  })();
+
   const confLabel = (c?: string) =>
     c ? ` <span class="conf conf-${esc(c)}">${esc(c)} confidence</span>` : "";
   const list = (items: { text: string; sourceRefs: string[]; confidence?: string }[]) =>
@@ -189,6 +217,7 @@ export function buildReportHtml(p: ExportPayload): string {
 
   ${hazards}${severe}
 
+  ${radarSvg}
   <h2>Ten Essentials</h2>
   <table><thead><tr><th>#</th><th>Essential</th><th class="num">Score</th><th></th><th class="num">%</th></tr></thead>
   <tbody>${essentialRows}</tbody></table>
