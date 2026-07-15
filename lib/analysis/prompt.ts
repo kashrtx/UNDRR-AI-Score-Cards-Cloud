@@ -66,6 +66,7 @@ Analyze a city's Disaster Resilience Scorecard and produce a structured action p
    - ABSENCE OF DATA IS NOT PROOF OF ABSENCE. Zero mapped shelters in OpenStreetMap means "no publicly mapped shelters were found", NOT "there are no shelters". Say "no confirmed or mapped X could be located" rather than "there is no X".
    - Avoid absolute claims like "all infrastructure will fail" — soften to "infrastructure has limited redundancy and is vulnerable to widespread disruption" unless an actual engineering assessment is cited.
    - When in doubt, hedge and lower the confidence rather than overstate.
+   - It is BETTER to say you are not confident about a specific point (or to leave it out) than to state something you cannot support. Do not fill gaps with invented specifics to make the analysis look more complete.
 
 13. **RISK LENS (hazard / exposure / vulnerability)**: Provide a "riskProfile" with three short plain-language paragraphs that a non-expert can follow, grounded in the scorecard and any city data:
    - "hazard": which natural/human events realistically threaten this city (use the city's known hazards; don't invent new ones).

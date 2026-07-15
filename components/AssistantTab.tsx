@@ -44,6 +44,55 @@ const SCORE_LABELS: Record<string, string> = {
 const TEXT_EXT = /\.(txt|md|markdown|csv|tsv|json|log|rtf|html?|xml|yaml|yml)$/i;
 const MAX_ATTACH_CHARS = 12000;
 
+// Lazy-load pdf.js from a CDN only when a PDF is actually attached, so we don't
+// add a build dependency. Returns extracted text, or throws so the caller can
+// fall back to asking the user to paste the text.
+let pdfjsPromise: Promise<unknown> | null = null;
+function loadPdfJs(): Promise<{ getDocument: (opts: unknown) => { promise: Promise<unknown> } } & Record<string, unknown>> {
+  if (!pdfjsPromise) {
+    pdfjsPromise = new Promise((resolve, reject) => {
+      const w = window as unknown as Record<string, unknown>;
+      if (w.pdfjsLib) return resolve(w.pdfjsLib);
+      const s = document.createElement("script");
+      s.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.min.mjs";
+      s.type = "module";
+      // The .mjs build attaches to window as pdfjsLib once evaluated.
+      const fallback = document.createElement("script");
+      fallback.src = "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.min.js";
+      fallback.onload = () => {
+        const lib = (window as unknown as Record<string, unknown>).pdfjsLib as Record<string, unknown> | undefined;
+        if (lib) {
+          (lib as { GlobalWorkerOptions?: { workerSrc?: string } }).GlobalWorkerOptions &&
+            ((lib as { GlobalWorkerOptions: { workerSrc: string } }).GlobalWorkerOptions.workerSrc =
+              "https://cdnjs.cloudflare.com/ajax/libs/pdf.js/3.11.174/pdf.worker.min.js");
+          resolve(lib);
+        } else reject(new Error("pdf.js failed to load"));
+      };
+      fallback.onerror = () => reject(new Error("pdf.js failed to load"));
+      document.head.appendChild(fallback);
+    });
+  }
+  return pdfjsPromise as Promise<{ getDocument: (opts: unknown) => { promise: Promise<unknown> } } & Record<string, unknown>>;
+}
+
+async function extractPdfText(file: File): Promise<string> {
+  const pdfjs = await loadPdfJs();
+  const buf = await file.arrayBuffer();
+  const doc = (await (pdfjs.getDocument({ data: buf }) as { promise: Promise<unknown> }).promise) as {
+    numPages: number;
+    getPage: (n: number) => Promise<{ getTextContent: () => Promise<{ items: Array<{ str?: string }> }> }>;
+  };
+  const parts: string[] = [];
+  const maxPages = Math.min(doc.numPages, 40);
+  for (let i = 1; i <= maxPages; i++) {
+    const page = await doc.getPage(i);
+    const content = await page.getTextContent();
+    parts.push(content.items.map((it) => it.str || "").join(" "));
+    if (parts.join(" ").length > MAX_ATTACH_CHARS) break;
+  }
+  return parts.join("\n").trim();
+}
+
 // Pull the model's own reasoning (the words it wrote before/around the JSON it
 // returns) out of a raw step so we can keep it for the reader. Models that only
 // return JSON leave nothing here, and that's fine, the summary line covers them.
@@ -483,8 +532,23 @@ export function AssistantTab({
   const onDocsPicked = useCallback(async (files: FileList) => {
     const added: Attachment[] = [];
     for (const file of Array.from(files)) {
+      const isPdf = /\.pdf$/i.test(file.name) || file.type === "application/pdf";
+      if (isPdf) {
+        setChat((c) => [...c, { kind: "tool", label: `Reading ${file.name}`, detail: "extracting the text" }]);
+        try {
+          const text = await extractPdfText(file);
+          if (text && text.length > 20) {
+            added.push({ name: file.name, text: text.slice(0, MAX_ATTACH_CHARS) });
+          } else {
+            setChat((c) => [...c, { kind: "assistant", text: `I opened "${file.name}" but couldn't pull much text out of it — it may be a scanned image rather than a text PDF. If you paste the key details into the chat, I'll use them.` }]);
+          }
+        } catch {
+          setChat((c) => [...c, { kind: "assistant", text: `I couldn't read "${file.name}" as a PDF here. If you copy the important text into the chat, I'll work from that.` }]);
+        }
+        continue;
+      }
       if (!TEXT_EXT.test(file.name) && !file.type.startsWith("text/")) {
-        setChat((c) => [...c, { kind: "assistant", text: `I can read text documents (txt, md, csv, json, html). "${file.name}" is a ${file.name.split(".").pop()?.toUpperCase() || "binary"} file, so I can't read it directly. If you paste the important text into the chat, I'll use it.` }]);
+        setChat((c) => [...c, { kind: "assistant", text: `I can read PDFs and text documents (txt, md, csv, json, html). "${file.name}" is a ${file.name.split(".").pop()?.toUpperCase() || "binary"} file, so I can't read it directly. If you paste the important text into the chat, I'll use it.` }]);
         continue;
       }
       try {
@@ -744,18 +808,35 @@ export function AssistantTab({
             </div>
           )}
           {(showContinue || (!running && canUndo)) && (
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-col gap-2">
               {showContinue && (
-                <button onClick={handleContinue} className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold btn-accent">
+                <button onClick={handleContinue} className="self-start flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold btn-accent">
                   <Play size={15} /> Continue
                 </button>
               )}
-              {!running && canUndo && (
-                <button onClick={undoLastRun}
-                  title="Restore the scores to how they were before the last run"
-                  className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium bg-surface-overlay border border-border text-text-primary">
-                  <RotateCcw size={15} /> Undo last run
-                </button>
+              {!running && canUndo && !showContinue && (
+                <div className="rounded-xl border border-border bg-surface-overlay/30 p-3">
+                  <p className="text-xs text-text-secondary mb-2">
+                    Not quite right? Tell me what to change and I&apos;ll refine it — I can revisit any answer, not just the last one.
+                  </p>
+                  <div className="flex flex-wrap gap-1.5">
+                    {[
+                      "A few of these scores look too high — can you reconsider them?",
+                      "Explain why you scored the weakest Essential the way you did.",
+                      "I have local details to add — let me tell you about a few indicators.",
+                    ].map((q) => (
+                      <button key={q} onClick={() => { setInput(q); }}
+                        className="text-[11px] px-2.5 py-1 rounded-full bg-surface-overlay border border-border text-text-secondary hover:text-text-primary">
+                        {q}
+                      </button>
+                    ))}
+                    <button onClick={undoLastRun}
+                      title="Revert the scores to exactly how they were before this run"
+                      className="text-[11px] px-2.5 py-1 rounded-full text-text-secondary hover:text-danger-400 inline-flex items-center gap-1">
+                      <RotateCcw size={11} /> Revert this run
+                    </button>
+                  </div>
+                </div>
               )}
             </div>
           )}
@@ -789,7 +870,7 @@ export function AssistantTab({
             className="p-2.5 rounded-xl bg-surface-overlay border border-border text-text-secondary hover:text-text-primary shrink-0">
             <Paperclip size={16} />
           </button>
-          <input ref={docRef} type="file" multiple className="hidden"
+          <input ref={docRef} type="file" multiple accept=".pdf,.txt,.md,.markdown,.csv,.tsv,.json,.log,.rtf,.html,.htm,.xml,.yaml,.yml,text/*,application/pdf" className="hidden"
             onChange={(e) => { if (e.target.files?.length) void onDocsPicked(e.target.files); e.currentTarget.value = ""; }} />
           <textarea value={input} onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}

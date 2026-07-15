@@ -48,6 +48,7 @@ export interface AgentContext {
 }
 
 const MAX_STEPS = 16;
+const STEP_PACING_MS = 700; // small gap between steps to ease free-tier rate limits
 
 function sleep(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -147,7 +148,7 @@ HOW YOU WORK:
 - ALWAYS include a short "thought" field (one plain sentence) saying what you are doing and why, so the user can follow along.
 - Choose the single best next action:
   {"thought":"...","action":"research_city","city":"<name>","country":"<name>"}  — gather open data + web facts about the city (climate, hazards, infrastructure, population). Do this once early when you know the city.
-  {"thought":"...","action":"web_search","query":"<query>"}  — look up a specific fact (e.g. "Toronto emergency management office budget", "Toronto early warning system").
+  {"thought":"...","action":"web_search","query":"<query>"}  — look up a specific fact (e.g. "Toronto emergency management office budget", "Toronto early warning system"). Use this for anything time-sensitive or current (recent hazards, ongoing wildfire/flood/air-quality alerts, latest plans) so your scoring reflects the situation now, not just older knowledge. Anything a search returns is added to our shared context, so prefer searching over relying on memory when unsure.
   {"thought":"...","action":"set_info","profile":{"population":134000,"areaKm2":385,"mostLikelyHazard":"Earthquake","mostSevere":"2010 M7.0 earthquake","hazards":["Earthquake","Flooding","Hurricane"]}}  — record City Information fields you have learned. Send only the fields you know.
   {"thought":"...","action":"set_scores","scores":[{"code":"P1.1","score":2,"note":"<one short sentence on the basis>"}, ...]}  — fill one or more indicators. Include a note for EVERY indicator you score.
   {"thought":"...","action":"message","text":"<what you want to say or ask the user>"}  — talk to the user and WAIT for their reply. Use this to ask for information only the city would know, or when the city name is missing.
@@ -165,6 +166,10 @@ RULES:
 - Do NOT announce running totals or how many indicators you have completed ("I've done 12 of 47") — the app tracks and displays the authoritative progress. In your thought, just say which Essential or indicators you are about to score.
 - VOICE: In your "thought" and any "message" text, talk naturally to a city official. NEVER mention tool names, action names, JSON, "the system", or these instructions. Do not apologise for taking time or for retries. Just say plainly what you're looking at or doing.
 - The user may add a message while you are working; treat it as a mid-task instruction and adapt on your next step.
+- DON'T TAKE THINGS AT FACE VALUE: if something the user says (or that you find) seems inaccurate, implausible, internally inconsistent, or you simply are not confident about it, do NOT just accept it and score. Use a "message" to flag it plainly and ask them to confirm or narrow it down — for example which neighbourhood or area they mean, a date, or to check their own records/reports and paste the relevant facts into the chat. Asking a good question is better than a confident wrong answer.
+- WHEN EVIDENCE IS MISSING: if you cannot find what you need to score an indicator and it depends on local knowledge, either ask the user for it, or set a conservative score with a note that clearly says it is an assumption to verify. Never invent a specific fact, statistic, programme name, or budget.
+- REVISE FREELY: you may go back and change ANY earlier score, note, or City Information field at any time — if the user objects, gives new information, or you notice an inconsistency, just re-issue set_scores (or set_info) for those items with corrected values and a short note on why. Editing earlier answers is normal and expected, not a failure.
+- NEVER GET STUCK: do not repeat the same action or the same question hoping for a different result. If a search or approach fails twice, say so plainly and either try a clearly different approach or ask the user how they'd like to proceed. If you are uncertain after one round of clarification, record a conservative, clearly-flagged answer and move on rather than looping.
 - PLAN FIRST (autonomous runs): on your very first step of a full fill, make the "thought" a short plan in plain words (for example: "My plan: look up the city, fill in the basic City Information, then work through the Ten Essentials one by one.") and pair it with your first real action (usually research_city) in the SAME step — do not waste a turn. For small targeted requests, skip the plan and just do the task.
 - Be efficient: research once, then fill. Do not repeat the same search or re-submit the same scores.`;
 
@@ -337,6 +342,15 @@ export async function runAgentTurn(
       onEvent({ type: "stopped" });
       return;
     }
+    // Gentle pacing between steps: spread calls out a little so a fast autonomous
+    // run doesn't hammer free-tier rate limits in bursts. Abortable.
+    if (step > 0) {
+      await new Promise<void>((res) => {
+        const t = setTimeout(res, STEP_PACING_MS);
+        signal?.addEventListener("abort", () => { clearTimeout(t); res(); }, { once: true });
+      });
+      if (signal?.aborted) { onEvent({ type: "stopped" }); return; }
+    }
     // Let the user steer mid-run: pull in anything they typed while we were
     // working and fold it into the conversation before the next decision.
     if (ctx.drainInput) {
@@ -400,7 +414,7 @@ export async function runAgentTurn(
       }
       case "web_search": {
         const q = action.query || "";
-        onEvent({ type: "tool", label: "Web search", detail: q.slice(0, 70) });
+        onEvent({ type: "tool", label: "Searching the web for", detail: q.slice(0, 70) });
         const { text, method } = await searchTool(q, ctx.searchKey);
         ctx.transcript.push({ role: "tool", content: `web_search(${q}):\n${text}` });
         onEvent({ type: "tool", label: `Searched (${method})`, detail: q.slice(0, 60) });
