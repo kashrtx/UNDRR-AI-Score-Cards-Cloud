@@ -56,6 +56,10 @@ export async function createProvider(
       const key = (await getApiKey("meta")) ?? "";
       return new OpenAICompatibleProvider("meta", settings.metaModel, key);
     }
+    case "perplexity": {
+      const key = (await getApiKey("perplexity")) ?? "";
+      return new OpenAICompatibleProvider("perplexity", settings.perplexityModel, key);
+    }
     case "azure": {
       const key = (await getApiKey("azure")) ?? "";
       return new AzureOpenAIProvider(

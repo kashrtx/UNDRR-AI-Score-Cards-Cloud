@@ -13,7 +13,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Play, Loader2, AlertTriangle, MapPin, Users, Calendar, Zap,
   CheckCircle2, XCircle, Info, Settings as SettingsIcon, LayoutDashboard, RotateCcw,
-  Download, FileJson, Eraser, Bot,
+  Download, FileJson, Eraser, Bot, HelpCircle,
 } from "lucide-react";
 
 import { Logo } from "@/components/Logo";
@@ -26,6 +26,7 @@ import { ScorecardUpload } from "@/components/ScorecardUpload";
 import { ProvenanceBadge } from "@/components/Provenance";
 import { StatusBar } from "@/components/StatusBar";
 import { GettingStarted } from "@/components/GettingStarted";
+import { ModelSuggestion } from "@/components/ModelSuggestion";
 import { AnalysisProgress } from "@/components/AnalysisProgress";
 import { DataSourcesPanel } from "@/components/DataSourcesPanel";
 import { SettingsTab } from "@/components/SettingsTab";
@@ -56,7 +57,7 @@ const TIPS_KEY = "undrr.tips.dismissed";
 
 const PROVIDER_LABEL: Record<ProviderId, string> = {
   claude: "Claude", gemini: "Gemini", openrouter: "OpenRouter",
-  openai: "OpenAI", xai: "xAI Grok", zai: "z.AI GLM", nvidia: "NVIDIA NIM", meta: "Meta Llama", azure: "Microsoft Azure",
+  openai: "OpenAI", xai: "xAI Grok", zai: "z.AI GLM", nvidia: "NVIDIA NIM", meta: "Meta Llama", azure: "Microsoft Azure", perplexity: "Perplexity",
   ollama: "Ollama (local)", lmstudio: "LM Studio (local)",
 };
 
@@ -176,6 +177,19 @@ export default function Page() {
     setSettings(s);
     setProviderReady(computeReady(s));
     setTavilyActive(!!s.useTavily && hasSearchKey());
+  }, []);
+
+  // One-tap provider switch used by the suggestion bars. If there's no key for
+  // the target provider yet, send them to Settings to add one.
+  const useProvider = useCallback((p: AppSettings["provider"]) => {
+    setSettings((cur) => {
+      if (!cur) return cur;
+      const next = { ...cur, provider: p };
+      persistSettings(next);
+      setProviderReady(computeReady(next));
+      return next;
+    });
+    if (isCloudProvider(p) && !hasApiKey(p)) setTab("settings");
   }, []);
 
   // Commit a scorecard (replaces any current one + clears results).
@@ -443,6 +457,7 @@ export default function Page() {
             settings={settings}
             providerReady={providerReady}
             onLoadIntoAnalyzer={handleLoadFromAssistant}
+            onUseProvider={useProvider}
           />
         </div>
 
@@ -491,7 +506,7 @@ export default function Page() {
             {state === "empty" && (
               <div className="space-y-6">
                 {!tipsDismissed && (
-                  <GettingStarted onOpenSettings={() => setTab("settings")} onTakeTour={replayTour} onDismiss={dismissTips} />
+                  <GettingStarted onOpenSettings={() => setTab("settings")} onTakeTour={replayTour} onDismiss={dismissTips} ready={providerReady} />
                 )}
                 <div className="max-w-2xl mx-auto">
                   <ScorecardUpload onUploaded={handleUpload} />
@@ -502,8 +517,17 @@ export default function Page() {
             {(state === "ready" || state === "results" || state === "analyzing") && scorecard && (
               <div className="space-y-6">
                 {state === "ready" && !analysis && !tipsDismissed && (
-                  <GettingStarted onOpenSettings={() => setTab("settings")} onTakeTour={replayTour} onDismiss={dismissTips} />
+                  <GettingStarted onOpenSettings={() => setTab("settings")} onTakeTour={replayTour} onDismiss={dismissTips} ready={providerReady} />
                 )}
+
+                <ModelSuggestion
+                  show={settings.provider !== "gemini"}
+                  title="Tip: Gemini is the fastest pick for analysis"
+                  body="For the Dashboard, Google Gemini runs straight from your browser (no timeouts) and is quick and capable. Great for reading a scorecard."
+                  cta="Use Gemini"
+                  onUse={() => useProvider("gemini")}
+                  storageKey="undrr-suggest-gemini-dashboard"
+                />
 
                 {/* City overview + upload */}
                 <div className="grid grid-cols-1 lg:grid-cols-4 gap-4">
@@ -818,6 +842,19 @@ export default function Page() {
 
       {/* ── First-visit / replayable tour ──────── */}
       <Onboarding open={showTour} onClose={closeTour} />
+
+      {/* ── Always-available help: gentle, breathing, opens the tour ─ */}
+      {!showTour && (
+        <button
+          onClick={replayTour}
+          title="New here? Take the quick tour"
+          aria-label="Take the quick tour"
+          className="fixed bottom-5 right-5 z-40 flex items-center gap-2 rounded-full bg-accent-500 text-white pl-3.5 pr-4 py-3 shadow-lg shadow-accent-500/30 animate-breathe hover:scale-105 active:scale-95 transition-transform"
+        >
+          <HelpCircle size={20} />
+          <span className="text-sm font-semibold hidden sm:inline">Need help?</span>
+        </button>
+      )}
 
       {/* ── Slim footer (unobtrusive safety note) ─ */}
       <footer className="mt-auto border-t border-border px-4 sm:px-6 py-3">

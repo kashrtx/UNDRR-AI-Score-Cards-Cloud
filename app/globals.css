@@ -157,3 +157,27 @@ a, button, input, textarea, select, [role="button"] {
 }
 .msg-md ul, .msg-md ol { margin: 0; }
 .msg-md li { margin: 0; }
+
+/* ── Life & motion ────────────────────────────────────────── */
+@keyframes fadeInUp {
+  from { opacity: 0; transform: translateY(6px); }
+  to   { opacity: 1; transform: none; }
+}
+.animate-fadeInUp { animation: fadeInUp 0.35s ease both; }
+
+/* Soft "breathing" glow for the floating help button, feels alive and inviting
+   without being distracting. Respects reduced-motion preferences. */
+@keyframes breathe {
+  0%, 100% { box-shadow: 0 0 0 0 rgba(16, 185, 129, 0.45); }
+  50%      { box-shadow: 0 0 0 10px rgba(16, 185, 129, 0); }
+}
+.animate-breathe { animation: breathe 3s ease-in-out infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .animate-breathe, .animate-fadeInUp, .animate-bounce { animation: none !important; }
+}
+
+/* Gentle reactive lift on interactive cards, makes the UI feel responsive. */
+.lift { transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease; }
+.lift:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.10); }
+@media (prefers-reduced-motion: reduce) { .lift:hover { transform: none; } }

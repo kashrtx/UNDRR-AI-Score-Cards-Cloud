@@ -13,7 +13,7 @@
  * never stored or logged. The upstream base URL is whitelisted (the client
  * sends a provider id, not a URL) to avoid SSRF.
  *
- * Note: on Vercel Hobby, a function may run up to 60s. A very slow reasoning
+ * Note: on Vercel Hobby, a function may run up to 120s. A very slow reasoning
  * model could exceed that and get cut off; use a faster model or Vercel Pro
  * (maxDuration up to 300s) for heavy reasoning workloads.
  */
@@ -22,7 +22,7 @@ import { NextRequest } from "next/server";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
-export const maxDuration = 60;
+export const maxDuration = 120;
 
 const BASE: Record<string, string> = {
   openai: "https://api.openai.com/v1",
@@ -30,6 +30,7 @@ const BASE: Record<string, string> = {
   zai: "https://api.z.ai/api/paas/v4",
   nvidia: "https://integrate.api.nvidia.com/v1",
   meta: "https://api.llama.com/compat/v1",
+  perplexity: "https://api.perplexity.ai",
 };
 
 export async function POST(req: NextRequest) {

@@ -21,6 +21,7 @@ const LABEL: Record<ProviderId, string> = {
   nvidia: "NVIDIA NIM",
   meta: "Meta Llama",
   azure: "Microsoft Azure",
+  perplexity: "Perplexity",
   ollama: "Local (Ollama)",
   lmstudio: "Local (LM Studio)",
 };

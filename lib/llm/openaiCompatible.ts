@@ -14,7 +14,7 @@
 
 import { LLMProvider, LLMStreamHandlers, readSSE } from "./types";
 
-export type ProxyProviderId = "openai" | "xai" | "zai" | "nvidia" | "meta";
+export type ProxyProviderId = "openai" | "xai" | "zai" | "nvidia" | "meta" | "perplexity";
 
 interface Cfg {
   label: string;
@@ -35,6 +35,7 @@ const CFG: Record<ProxyProviderId, Cfg> = {
   zai: { label: "z.AI (GLM)", maxTokensParam: "max_tokens", temperature: true, keyHint: "...", extraBody: { thinking: { type: "disabled" } } },
   nvidia: { label: "NVIDIA NIM", maxTokensParam: "max_tokens", temperature: true, keyHint: "nvapi-..." },
   meta: { label: "Meta (Llama)", maxTokensParam: "max_completion_tokens", temperature: true, keyHint: "LLM|..." },
+  perplexity: { label: "Perplexity (Sonar)", maxTokensParam: "max_tokens", temperature: true, keyHint: "pplx-..." },
 };
 
 export function proxyKeyHint(id: ProxyProviderId): string {

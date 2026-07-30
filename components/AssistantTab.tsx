@@ -30,6 +30,7 @@ import {
 import { runAgentTurn, type AgentContext, type TranscriptItem, type AgentEvent } from "@/lib/agent/agent";
 import { exportScorecardXlsx } from "@/lib/export/scorecardXlsx";
 import { renderMarkdown, deEmDash } from "@/lib/ui/markdown";
+import { ModelSuggestion } from "@/components/ModelSuggestion";
 import { computeTemplateEdits, fillOfficialTemplate } from "@/lib/export/fillTemplate";
 import {
   createSession, listSessions, loadSession, saveSession, deleteSession, getActiveId, setActiveId,
@@ -148,10 +149,12 @@ export function AssistantTab({
   settings,
   providerReady,
   onLoadIntoAnalyzer,
+  onUseProvider,
 }: {
   settings: AppSettings;
   providerReady: boolean;
   onLoadIntoAnalyzer: (sc: NormalizedScorecard) => void;
+  onUseProvider?: (p: AppSettings["provider"]) => void;
 }) {
   // Mirrored active-session state
   const [sessions, setSessions] = useState<SessionMeta[]>([]);
@@ -737,6 +740,17 @@ export function AssistantTab({
             <Plus size={15} />
           </button>
         </div>
+
+        {onUseProvider && (
+          <ModelSuggestion
+            show={settings.provider !== "openrouter"}
+            title="Tip: OpenRouter is the smoothest pick here"
+            body="For filling out scorecards, OpenRouter's free Nemotron Ultra is capable and, unlike Gemini's free tier, isn't tightly rate-limited across many quick steps."
+            cta="Use OpenRouter"
+            onUse={() => onUseProvider("openrouter")}
+            storageKey="undrr-suggest-openrouter-assistant"
+          />
+        )}
 
         {/* Setup (collapsible, so the chat has room to breathe) */}
         <div className="shrink-0 rounded-xl border border-border bg-surface-overlay/30 mb-3">

@@ -10,7 +10,7 @@
 import { useEffect, useState, useRef, type ReactNode } from "react";
 import {
   Cloud, Cpu, Sparkles, Boxes, MonitorSmartphone, Save, Loader2,
-  CheckCircle2, XCircle, KeyRound, Trash2, Plug, Globe, Search, Compass, ArrowDown,
+  CheckCircle2, XCircle, KeyRound, Trash2, Plug, Globe, Search, Compass, ArrowDown, BookCheck,
 } from "lucide-react";
 import {
   type AppSettings, type ProviderId, type CloudProviderId,
@@ -20,7 +20,7 @@ import {
 import { createProvider } from "@/lib/llm";
 
 const MODELS: Record<ProviderId, string[]> = {
-  gemini: ["gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.1-pro-preview", "gemini-2.5-pro", "gemini-2.5-flash-lite"],
+  gemini: ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.1-pro-preview", "gemini-2.5-pro"],
   openrouter: [
     "nvidia/nemotron-3-ultra-550b-a55b:free",
     "meta-llama/llama-3.3-70b-instruct:free",
@@ -35,14 +35,33 @@ const MODELS: Record<ProviderId, string[]> = {
   nvidia: ["z-ai/glm-5.2", "moonshotai/kimi-k2-instruct", "deepseek-ai/deepseek-r1", "qwen/qwen3-coder-480b-a35b-instruct", "meta/llama-3.3-70b-instruct", "meta/llama-3.1-405b-instruct"],
   meta: ["Llama-4-Maverick-17B-128E-Instruct-FP8", "Llama-4-Scout-17B-16E-Instruct-FP8"],
   azure: [],
+  perplexity: ["sonar", "sonar-pro", "sonar-reasoning-pro", "sonar-deep-research"],
   lmstudio: ["local-model", "qwen2.5-7b-instruct", "llama-3.2-3b-instruct"],
   ollama: ["llama3.1:8b", "llama3.2", "qwen2.5", "mistral"],
 };
 
 // The single model we recommend per provider (shown as "recommended").
 const RECOMMENDED_MODEL: Partial<Record<ProviderId, string>> = {
+  gemini: "gemini-3.6-flash",
   nvidia: "z-ai/glm-5.2",
   openrouter: "nvidia/nemotron-3-ultra-550b-a55b:free",
+  perplexity: "sonar",
+};
+
+// How each provider actually reaches its API. "direct" = straight from the
+// browser (fast, no server time limit). "proxy" = through our /api/llm route,
+// which on Vercel's free plan is cut off at 120s, so slow/"reasoning" models can
+// time out. "local" = runs on the visitor's own machine.
+const TRANSPORT: Record<ProviderId, "direct" | "proxy" | "local"> = {
+  gemini: "direct", openrouter: "direct", claude: "direct",
+  openai: "proxy", xai: "proxy", zai: "proxy", nvidia: "proxy", meta: "proxy", azure: "proxy", perplexity: "proxy",
+  lmstudio: "local", ollama: "local",
+};
+
+// Short "what's this good for" tags shown on the provider tiles.
+const BEST_FOR: Partial<Record<ProviderId, string>> = {
+  gemini: "Best for the Dashboard analysis",
+  openrouter: "Best for the Assistant",
 };
 
 const PROVIDER_META: Record<ProviderId, { title: string; subtitle: string; icon: ReactNode }> = {
@@ -78,7 +97,7 @@ const PROVIDER_META: Record<ProviderId, { title: string; subtitle: string; icon:
   },
   nvidia: {
     title: "NVIDIA NIM (free)",
-    subtitle: "100+ open models, free. Lots of choices, if unsure, use the recommended GLM 5.2. Works well for the Assistant.",
+    subtitle: "100+ open models, free, including the very smart GLM 5.2. Great models, but they run through the proxy, so slow ones can time out on free hosting.",
     icon: <Cpu size={18} className="text-accent-400" />,
   },
   meta: {
@@ -90,6 +109,11 @@ const PROVIDER_META: Record<ProviderId, { title: string; subtitle: string; icon:
     title: "Microsoft (Azure OpenAI)",
     subtitle: "Microsoft's own API, the engine behind Copilot. Needs an Azure endpoint, deployment name, and key.",
     icon: <Cloud size={18} className="text-accent-400" />,
+  },
+  perplexity: {
+    title: "Perplexity (Sonar)",
+    subtitle: "Search-grounded models with built-in web results and citations. Good for the Assistant's research. Needs a Perplexity key.",
+    icon: <Search size={18} className="text-accent-400" />,
   },
   lmstudio: {
     title: "Local (LM Studio)",
@@ -104,7 +128,7 @@ const PROVIDER_META: Record<ProviderId, { title: string; subtitle: string; icon:
 };
 
 // Display order, cloud first (the friction-free path), then local.
-const ORDER: ProviderId[] = ["gemini", "openrouter", "nvidia", "zai", "claude", "openai", "xai", "meta", "azure", "lmstudio", "ollama"];
+const ORDER: ProviderId[] = ["gemini", "openrouter", "nvidia", "perplexity", "zai", "claude", "openai", "xai", "meta", "azure", "lmstudio", "ollama"];
 
 const inputCls =
   "mt-1 w-full px-3 py-2 rounded-lg bg-surface border border-border text-sm text-text-primary focus:border-accent-500/60 outline-none";
@@ -155,6 +179,8 @@ export function SettingsTab({
       zai: hasApiKey("zai"),
       nvidia: hasApiKey("nvidia"),
       meta: hasApiKey("meta"),
+      azure: hasApiKey("azure"),
+      perplexity: hasApiKey("perplexity"),
     });
   };
   useEffect(() => { refreshKeyPresence(); setSearchKeyPresent(hasSearchKey()); }, []);
@@ -174,6 +200,7 @@ export function SettingsTab({
     : provider === "nvidia" ? "nvidiaModel"
     : provider === "meta" ? "metaModel"
     : provider === "azure" ? "azureDeployment"
+    : provider === "perplexity" ? "perplexityModel"
     : provider === "lmstudio" ? "lmstudioModel"
     : "ollamaModel";
   const currentModel = draft[modelField] as string;
@@ -288,7 +315,7 @@ export function SettingsTab({
             <button
               key={id}
               onClick={() => setDraft({ ...draft, provider: id })}
-              className={`text-left p-4 rounded-xl border transition-all ${
+              className={`text-left p-4 rounded-xl border transition-all lift ${
                 active
                   ? "border-accent-500/60 bg-accent-500/10"
                   : "border-border bg-surface-overlay/30 hover:border-primary-500/40"
@@ -298,6 +325,20 @@ export function SettingsTab({
                 {meta.icon}
                 <span className="font-semibold text-text-primary">{meta.title}</span>
                 {active && <CheckCircle2 size={15} className="text-accent-400 ml-auto" />}
+              </div>
+              <div className="flex flex-wrap gap-1 mb-1.5">
+                {BEST_FOR[id] && (
+                  <span className="text-[10px] font-semibold px-1.5 py-0.5 rounded-full bg-accent-500/20 text-accent-300">{BEST_FOR[id]}</span>
+                )}
+                {TRANSPORT[id] === "direct" && (
+                  <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-primary-500/15 text-primary-300" title="Talks straight to the provider from your browser, no server time limit.">⚡ Fast &amp; reliable</span>
+                )}
+                {TRANSPORT[id] === "proxy" && (
+                  <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-warn-500/15 text-warn-400" title="Routed through the app's proxy. On free hosting this is cut off at 120 seconds, so slow models can time out.">⏳ May time out on free hosting</span>
+                )}
+                {TRANSPORT[id] === "local" && (
+                  <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-primary-500/15 text-primary-300" title="Runs on your own computer, effectively unlimited.">🖥️ Runs on your PC</span>
+                )}
               </div>
               <p className="text-xs text-text-secondary">{meta.subtitle}</p>
               {cloud && (
@@ -315,6 +356,16 @@ export function SettingsTab({
         <h2 className="text-lg font-semibold text-text-primary">
           <span className="text-accent-400">Step 2.</span> Set up {PROVIDER_META[provider].title}
         </h2>
+        {TRANSPORT[provider] === "proxy" && (
+          <div className="text-xs bg-warn-500/10 border border-warn-500/30 text-warn-400 rounded-lg p-2.5">
+            Heads up: this provider is reached through the app&apos;s proxy, which on the free hosting plan is cut off after 120 seconds. Fast models are fine, but slow or heavy &quot;reasoning&quot; models (and long Assistant runs) can time out. If you hit timeouts, Gemini and OpenRouter run straight from your browser with no such limit.
+          </div>
+        )}
+        {TRANSPORT[provider] === "direct" && (
+          <div className="text-xs bg-accent-500/10 border border-accent-500/25 text-accent-300 rounded-lg p-2.5">
+            Nice choice, this provider talks straight to its API from your browser, so there&apos;s no server time limit and it stays fast and reliable.
+          </div>
+        )}
         {/* Model picker */}
         <label className="block">
           <span className="text-sm text-text-primary">{provider === "azure" ? "Deployment name" : "Model"}</span>
@@ -432,8 +483,27 @@ export function SettingsTab({
               {provider === "azure" && (
                 <a className="text-primary-300 underline" href="https://portal.azure.com" target="_blank" rel="noreferrer">portal.azure.com</a>
               )}
+              {provider === "perplexity" && (
+                <a className="text-primary-300 underline" href="https://www.perplexity.ai/account/api/keys" target="_blank" rel="noreferrer">perplexity.ai/account/api/keys</a>
+              )}
               .
             </span>
+            {provider === "nvidia" && (
+              <span className="text-xs text-text-secondary block mt-1.5 bg-surface-overlay/40 border border-border rounded-lg p-2.5">
+                Getting an NVIDIA key takes a few steps, here&apos;s the short version:
+                1) go to build.nvidia.com and sign in (or make a free NVIDIA account);
+                2) open any model, for example GLM 5.2;
+                3) click &quot;Get API Key&quot; / &quot;Build with this NIM&quot; on the right;
+                4) copy the key (it starts with <code className="font-mono">nvapi-</code>) and paste it below.
+                The free tier includes generous credits. Just remember GLM 5.2 is very smart but,
+                because NVIDIA runs through the proxy, it can time out on the free hosting plan for long tasks.
+              </span>
+            )}
+            {provider === "perplexity" && (
+              <span className="text-xs text-text-secondary block mt-1.5 bg-surface-overlay/40 border border-border rounded-lg p-2.5">
+                Perplexity&apos;s Sonar models search the web as they answer and return citations, which makes them a strong fit for the Assistant&apos;s research. Sign in at perplexity.ai, open Settings, go to the API tab, add a little credit, and generate a key (starts with <code className="font-mono">pplx-</code>). &quot;sonar&quot; is a good default; &quot;sonar-pro&quot; is deeper.
+              </span>
+            )}
             {provider === "azure" && (
               <span className="text-xs text-text-secondary block mt-1.5 bg-surface-overlay/40 border border-border rounded-lg p-2.5">
                 This is Microsoft Azure OpenAI, the same technology behind Microsoft Copilot and the way Microsoft hands out an actual API key. In the Azure portal, open your Azure OpenAI resource, copy the Endpoint and one of the Keys from &quot;Keys and Endpoint,&quot; and enter the name of the model deployment you created above. Note: consumer Copilot and Microsoft 365 Copilot do not provide a plain API key, so they cannot be used here.
@@ -443,7 +513,7 @@ export function SettingsTab({
               <span className="text-xs text-text-secondary block mt-1.5 bg-surface-overlay/40 border border-border rounded-lg p-2.5">
                 These providers block direct browser calls, so requests go through
                 your own app&apos;s server (your key is used once and never stored there).
-                Very slow reasoning models may hit Vercel&apos;s 60s limit on the free
+                Very slow reasoning models may hit Vercel&apos;s 120s limit on the free
                 plan, if so, pick a faster model or use Vercel Pro.
                 {provider === "nvidia" && " NVIDIA NIM is free (1,000 credits) and includes Llama, DeepSeek, Kimi and GLM."}
                 {provider === "meta" && " Meta's direct API is experimental here; Llama also runs free on NVIDIA NIM."}
@@ -549,9 +619,9 @@ export function SettingsTab({
       {/* Web search (optional Tavily, keyless by default) */}
       <div className="glass-card p-5 space-y-4">
         <div>
-          <h3 className="text-base font-bold text-text-primary flex items-center gap-2">
-            <Search size={17} className="text-accent-400" /> Web search
-          </h3>
+          <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
+            <span className="text-accent-400">Step 3.</span> <Search size={17} className="text-accent-400" /> Web search <span className="text-xs font-normal text-text-secondary">(optional)</span>
+          </h2>
           <p className="text-sm text-text-secondary mt-1">
             The tool always checks your city against Wikipedia for free, so the AI works from real
             facts. You can also switch on Tavily for richer live web results.
@@ -679,6 +749,24 @@ export function SettingsTab({
             {dirty ? "Save changes" : "Saved"}
           </button>
         </div>
+      </div>
+
+      {/* Further data (reference links, not live-integrated) */}
+      <div className="glass-card p-5">
+        <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
+          <BookCheck size={17} className="text-accent-400" /> More disaster-risk data <span className="text-xs font-normal text-text-secondary">(reference)</span>
+        </h2>
+        <p className="text-sm text-text-secondary mt-1 mb-2.5">
+          The analysis already pulls live open data (climate, elevation, earthquakes, infrastructure, World Bank, ReliefWeb).
+          These deeper libraries need a free account or manual lookup, so they aren&apos;t wired in automatically, but they&apos;re
+          excellent to consult and paste findings into the Assistant:
+        </p>
+        <ul className="text-sm space-y-1.5">
+          <li><a className="text-primary-300 underline" href="https://www.emdat.be/" target="_blank" rel="noreferrer">EM-DAT</a> <span className="text-text-secondary">, international disaster losses (free account needed).</span></li>
+          <li><a className="text-primary-300 underline" href="https://riskdatalibrary.org/data/" target="_blank" rel="noreferrer">Risk Data Library</a> <span className="text-text-secondary">, standardized hazard & exposure datasets.</span></li>
+          <li><a className="text-primary-300 underline" href="https://www.preventionweb.net/understanding-disaster-risk/disaster-losses-and-statistics/global-risk-data-sets" target="_blank" rel="noreferrer">PreventionWeb global risk data sets</a> <span className="text-text-secondary">, UNDRR&apos;s curated catalogue.</span></li>
+          <li><a className="text-primary-300 underline" href="https://libguides.worldbank.org/disasterriskmanagement/data" target="_blank" rel="noreferrer">World Bank DRM data guide</a> <span className="text-text-secondary">, links to many risk datasets.</span></li>
+        </ul>
       </div>
 
       {/* Sentinel: when this is off-screen we show the "more below" pointer. */}

@@ -7,12 +7,12 @@ import { getSecret, hasSecret, setSecret, clearSecret } from "./crypto";
 
 export type ProviderId =
   | "claude" | "gemini" | "openrouter"
-  | "openai" | "xai" | "zai" | "nvidia" | "meta" | "azure"
+  | "openai" | "xai" | "zai" | "nvidia" | "meta" | "azure" | "perplexity"
   | "ollama" | "lmstudio";
 /** Providers that require an API key (all cloud ones). */
 export type CloudProviderId =
   | "claude" | "gemini" | "openrouter"
-  | "openai" | "xai" | "zai" | "nvidia" | "meta" | "azure";
+  | "openai" | "xai" | "zai" | "nvidia" | "meta" | "azure" | "perplexity";
 /** Local providers run on the visitor's machine — no key. */
 export type LocalProviderId = "ollama" | "lmstudio";
 
@@ -26,6 +26,7 @@ export interface AppSettings {
   zaiModel: string;
   nvidiaModel: string;
   metaModel: string;
+  perplexityModel: string;
   azureEndpoint: string;
   azureDeployment: string;
   azureApiVersion: string;
@@ -42,13 +43,14 @@ export interface AppSettings {
 export const DEFAULT_SETTINGS: AppSettings = {
   provider: "gemini",
   claudeModel: "claude-sonnet-4-6",
-  geminiModel: "gemini-3.5-flash",
+  geminiModel: "gemini-3.6-flash",
   openrouterModel: "nvidia/nemotron-3-ultra-550b-a55b:free",
   openaiModel: "gpt-5.5",
   xaiModel: "grok-4.3",
   zaiModel: "glm-4.7",
   nvidiaModel: "z-ai/glm-5.2",
   metaModel: "Llama-4-Maverick-17B-128E-Instruct-FP8",
+  perplexityModel: "sonar",
   azureEndpoint: "",
   azureDeployment: "",
   azureApiVersion: "2024-10-21",
@@ -73,9 +75,10 @@ export const SECRET_NAMES: Record<CloudProviderId, string> = {
   nvidia: "nvidia_api_key",
   meta: "meta_api_key",
   azure: "azure_api_key",
+  perplexity: "perplexity_api_key",
 };
 
-export const CLOUD_PROVIDERS: CloudProviderId[] = ["gemini", "openrouter", "claude", "openai", "xai", "zai", "nvidia", "meta", "azure"];
+export const CLOUD_PROVIDERS: CloudProviderId[] = ["gemini", "openrouter", "claude", "openai", "xai", "zai", "nvidia", "meta", "azure", "perplexity"];
 
 /** Optional web-search (Tavily) key for the research/RAG step. */
 export const SEARCH_SECRET_NAME = "tavily_api_key";
@@ -101,6 +104,7 @@ export function modelForSettings(s: AppSettings): string {
     case "nvidia": return s.nvidiaModel;
     case "meta": return s.metaModel;
     case "azure": return s.azureDeployment;
+    case "perplexity": return s.perplexityModel;
     case "lmstudio": return s.lmstudioModel;
     case "ollama": return s.ollamaModel;
     default: return "";
@@ -108,7 +112,7 @@ export function modelForSettings(s: AppSettings): string {
 }
 
 /** Providers whose model can search the web natively (built-in tool). */
-export const WEBSEARCH_PROVIDERS: ProviderId[] = ["claude", "gemini", "openrouter"];
+export const WEBSEARCH_PROVIDERS: ProviderId[] = ["claude", "gemini", "openrouter", "perplexity"];
 export function providerSupportsWebSearch(p: ProviderId): boolean {
   return WEBSEARCH_PROVIDERS.includes(p);
 }
