@@ -220,6 +220,7 @@ export default function Page() {
 
   // Commit a scorecard (replaces any current one + clears results).
   const commitUpload = useCallback((sc: NormalizedScorecard, name: string) => {
+    abortRef.current?.abort(); // stop any analysis in progress before swapping
     setScorecard(sc);
     setScFileName(name);
     setAnalysis(null);
@@ -241,22 +242,30 @@ export default function Page() {
   // Called by the upload widget. If results would be lost, ask first.
   const handleUpload = useCallback(
     (sc: NormalizedScorecard, name: string) => {
-      if (analysis) {
+      // Warn before wiping anything already here: a completed analysis, a loaded
+      // scorecard, or a run in progress.
+      if (scorecard || analysis || state === "analyzing") {
         setPendingUpload({ sc, name });
       } else {
         commitUpload(sc, name);
       }
     },
-    [analysis, commitUpload]
+    [scorecard, analysis, state, commitUpload]
   );
 
   // Called by the Assistant tab: load its draft as the active scorecard.
   const handleLoadFromAssistant = useCallback(
     (sc: NormalizedScorecard) => {
-      commitUpload(sc, `${sc.city.name} (assistant draft)`);
-      setTab("dashboard");
+      const name = `${sc.city.name} (assistant draft)`;
+      if (scorecard || analysis || state === "analyzing") {
+        setPendingUpload({ sc, name });
+        setTab("dashboard"); // surface the confirmation on the dashboard
+      } else {
+        commitUpload(sc, name);
+        setTab("dashboard");
+      }
     },
-    [commitUpload]
+    [scorecard, analysis, state, commitUpload]
   );
 
   const closeTour = useCallback(() => {
@@ -866,25 +875,25 @@ export default function Page() {
         </div>
       </footer>
 
-      {/* ── New-file warning modal ─────────────── */}
+      {/* ── Replace-scorecard warning modal (upload or assistant load) ─ */}
       <ConfirmModal
         open={!!pendingUpload}
-        title="Replace the current scorecard?"
+        title="Replace what's loaded?"
         onClose={() => setPendingUpload(null)}
         actions={[
-          {
-            label: "Download results, then replace",
-            variant: "primary",
+          ...(analysis ? [{
+            label: "Download report, then replace",
+            variant: "primary" as const,
             onClick: () => {
               const p = buildPayload();
               if (p) downloadReport(p);
               if (pendingUpload) commitUpload(pendingUpload.sc, pendingUpload.name);
               setPendingUpload(null);
             },
-          },
+          }] : []),
           {
-            label: "Replace & discard",
-            variant: "danger",
+            label: analysis ? "Replace & discard" : "Replace",
+            variant: analysis ? "danger" as const : "primary" as const,
             onClick: () => {
               if (pendingUpload) commitUpload(pendingUpload.sc, pendingUpload.name);
               setPendingUpload(null);
@@ -893,10 +902,10 @@ export default function Page() {
           { label: "Cancel", variant: "ghost", onClick: () => setPendingUpload(null) },
         ]}
       >
-        Loading <strong className="text-text-primary">{pendingUpload?.name}</strong> will clear the
-        current analysis results for{" "}
-        <strong className="text-text-primary">{scorecard?.city.name}</strong>. You can download the
-        current results first, otherwise they&apos;ll be discarded.
+        Loading <strong className="text-text-primary">{pendingUpload?.name}</strong> will replace the
+        {state === "analyzing" ? " analysis that's currently running" : analysis ? " current analysis results" : " scorecard currently loaded"} for{" "}
+        <strong className="text-text-primary">{scorecard?.city.name}</strong>.
+        {analysis ? " You can download the current report first, otherwise it's discarded." : " This can't be undone."}
       </ConfirmModal>
 
       {/* ── Remove-scorecard warning modal ─────── */}
