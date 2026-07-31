@@ -17,6 +17,19 @@ export function deEmDash(s: string): string {
     .replace(/\s+,\s/g, ", ");    // tidy any doubled spaces before comma
 }
 
+/** Tidy a messy paste so it reads cleanly: normalise tabs, strip trailing
+ * spaces, and collapse big runs of blank lines. Keeps real structure intact. */
+export function tidyPaste(raw: string): string {
+  return raw
+    .replace(/\r\n/g, "\n")
+    .replace(/\t/g, "  ")
+    .split("\n")
+    .map((line) => line.replace(/\s+$/, ""))
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
+    .trim();
+}
+
 function escapeHtml(s: string): string {
   return s
     .replace(/&/g, "&amp;")

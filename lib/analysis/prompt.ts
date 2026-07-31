@@ -105,9 +105,31 @@ Respond with ONLY a JSON object matching this exact schema, no markdown, no expl
 export function buildUserPrompt(
   scorecard: NormalizedScorecard,
   enrichmentData: NormalizedDatum[],
-  reference?: ReferenceFacts | null
+  reference?: ReferenceFacts | null,
+  extraContext?: string,
+  priorSummary?: string
 ): string {
   const parts: string[] = [];
+
+  // User-supplied local facts take priority: surface them at the very top so
+  // the model treats them as authoritative and factors them into the analysis.
+  if (extraContext && extraContext.trim()) {
+    parts.push(
+      "## LOCAL FACTS & DATA THE USER PROVIDED (authoritative, factor these in)\n" +
+      "The user has shared the following real, local knowledge and data. Treat it as more reliable than general web data, weave it into the summary, risk lens, strengths, weaknesses and actions where relevant, and let it adjust your read of the scores:\n" +
+      extraContext.trim().slice(0, 6000)
+    );
+  }
+
+  // Continuity for a re-run: show the model the analysis it produced before so
+  // it refines rather than starts blind. Only present on a refine re-run.
+  if (priorSummary && priorSummary.trim()) {
+    parts.push(
+      "## YOUR PREVIOUS ANALYSIS (refine this, do not repeat it verbatim)\n" +
+      "You produced the summary below on the last run. The user has now added the facts above. Keep what still holds, correct anything the new facts change, and fold the new information in so the result is clearly better:\n" +
+      priorSummary.trim().slice(0, 2500)
+    );
+  }
 
   // ── City profile ──
   parts.push(`## CITY: ${scorecard.city.name}, ${scorecard.city.country}`);

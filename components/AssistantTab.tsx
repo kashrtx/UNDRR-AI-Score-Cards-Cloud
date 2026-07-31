@@ -31,6 +31,7 @@ import { runAgentTurn, type AgentContext, type TranscriptItem, type AgentEvent }
 import { exportScorecardXlsx } from "@/lib/export/scorecardXlsx";
 import { renderMarkdown, deEmDash } from "@/lib/ui/markdown";
 import { ModelSuggestion } from "@/components/ModelSuggestion";
+import { UserMessageBubble } from "@/components/UserMessageBubble";
 import { computeTemplateEdits, fillOfficialTemplate } from "@/lib/export/fillTemplate";
 import {
   createSession, listSessions, loadSession, saveSession, deleteSession, getActiveId, setActiveId,
@@ -201,6 +202,16 @@ export function AssistantTab({
   const [building, setBuilding] = useState(false);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
+  const composerRef = useRef<HTMLTextAreaElement | null>(null);
+
+  // Auto-grow the composer so a long paste is fully visible and easy to edit
+  // before sending (capped, then it scrolls).
+  useEffect(() => {
+    const el = composerRef.current;
+    if (!el) return;
+    el.style.height = "auto";
+    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
+  }, [input]);
   const stuckToBottomRef = useRef(true);
   const [showJump, setShowJump] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -852,9 +863,7 @@ export function AssistantTab({
                     dangerouslySetInnerHTML={{ __html: renderMarkdown(m.text) }}
                   />
                 ) : (
-                  <div className="max-w-[85%] px-3.5 py-2.5 rounded-2xl rounded-br-sm text-sm leading-relaxed whitespace-pre-wrap bg-primary-500/15 border border-primary-500/25 text-text-primary">
-                    {deEmDash(m.text)}
-                  </div>
+                  <UserMessageBubble text={m.text} />
                 )}
               </div>
             )
@@ -933,10 +942,10 @@ export function AssistantTab({
           </button>
           <input ref={docRef} type="file" multiple accept=".pdf,.txt,.md,.markdown,.csv,.tsv,.json,.log,.rtf,.html,.htm,.xml,.yaml,.yml,text/*,application/pdf" className="hidden"
             onChange={(e) => { if (e.target.files?.length) void onDocsPicked(e.target.files); e.currentTarget.value = ""; }} />
-          <textarea value={input} onChange={(e) => setInput(e.target.value)}
+          <textarea ref={composerRef} value={input} onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-            rows={1} placeholder={running ? "Add a note to steer it, picked up on the next step…" : "Reply, or ask it to adjust something…"}
-            className="flex-1 px-3 py-2.5 rounded-xl bg-surface-overlay border border-border text-text-primary text-sm resize-none max-h-32" />
+            rows={2} placeholder={running ? "Add a note to steer it, picked up on the next step…" : "Reply, paste details, or ask it to adjust something… (Shift+Enter for a new line)"}
+            className="flex-1 px-3 py-2.5 rounded-xl bg-surface-overlay border border-border text-text-primary text-sm resize-none leading-relaxed" />
           {running ? (
             <>
               <button onClick={handleSend} disabled={!input.trim()}

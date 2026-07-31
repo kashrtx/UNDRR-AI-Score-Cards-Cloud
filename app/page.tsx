@@ -110,6 +110,8 @@ export default function Page() {
   const [showTour, setShowTour] = useState(false);
   const [refineOpen, setRefineOpen] = useState(false);
   const [assistantRunning, setAssistantRunning] = useState(false);
+  // Local facts the copilot has gathered from the user, folded into re-runs.
+  const [refineContext, setRefineContext] = useState<string>("");
   const [tipsDismissed, setTipsDismissed] = useState(true); // assume seen until mount says otherwise
 
   const abortRef = useRef<AbortController | null>(null);
@@ -204,6 +206,7 @@ export default function Page() {
     setDataReport(null);
     setNarration("");
     setError(null);
+    setRefineContext(""); // fresh scorecard, drop any prior copilot facts
     setState("ready");
     try {
       localStorage.setItem(SCORECARD_KEY, JSON.stringify(sc));
@@ -277,6 +280,7 @@ export default function Page() {
     setAnalysisMeta(null);
     setDataReport(null);
     setNarration("");
+    setRefineContext("");
     setState(scorecard ? "ready" : "empty");
     try {
       localStorage.removeItem(ANALYSIS_KEY);
@@ -311,7 +315,7 @@ export default function Page() {
     else handleRemove();
   }, [analysis, handleRemove]);
 
-  const handleAnalyze = useCallback(async () => {
+  const handleAnalyze = useCallback(async (contextOverride?: string) => {
     if (!scorecard || !settings) return;
     if (state === "analyzing") return; // don't stack a second run on a live one
     if (assistantRunning) return; // the Assistant is mid-task; don't run both at once
@@ -319,6 +323,10 @@ export default function Page() {
       setTab("settings");
       return;
     }
+    const extraContext = (contextOverride ?? refineContext).trim() || undefined;
+    // On a refine re-run (we have facts AND an existing analysis), let the model
+    // read what it wrote before so it improves rather than starts blind.
+    const priorSummary = extraContext && analysis ? analysis.summary : undefined;
     setState("analyzing");
     setError(null);
     setProgress(null);
@@ -334,6 +342,8 @@ export default function Page() {
         onDataReport: setDataReport,
         onNarration: setNarration,
         signal: controller.signal,
+        extraContext,
+        priorSummary,
       });
       const meta: ExportMeta = {
         provider: PROVIDER_LABEL[settings.provider],
@@ -357,7 +367,14 @@ export default function Page() {
       setError(err instanceof Error ? err.message : String(err));
       setState("error");
     }
-  }, [scorecard, settings, state, assistantRunning]);
+  }, [scorecard, settings, state, assistantRunning, refineContext, analysis]);
+
+  // Re-run the analysis folding in the facts the copilot gathered from the user.
+  const rerunWithContext = useCallback((ctx: string) => {
+    setRefineContext(ctx);
+    setRefineOpen(false);
+    void handleAnalyze(ctx);
+  }, [handleAnalyze]);
 
   const cancelAnalyze = useCallback(() => {
     abortRef.current?.abort();
@@ -438,13 +455,16 @@ export default function Page() {
             <div className="flex justify-end items-center min-w-[112px] sm:min-w-[132px] shrink-0">
             {tab === "dashboard" && (state === "ready" || state === "results") && scorecard && (
               <button
-                onClick={handleAnalyze}
+                onClick={() => handleAnalyze()}
                 disabled={assistantRunning}
-                title={assistantRunning ? "The Assistant is still working. Let it finish, then run the analysis." : undefined}
-                className="flex items-center gap-2 px-3.5 sm:px-5 py-2 rounded-xl text-sm font-semibold btn-accent transition-all shadow-lg shadow-accent-500/25 active:scale-95 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
+                title={assistantRunning ? "The Assistant is still working. Let it finish, then run the analysis." : refineContext ? "Re-run, folding in the facts you shared with the copilot" : undefined}
+                className="relative flex items-center gap-2 px-3.5 sm:px-5 py-2 rounded-xl text-sm font-semibold btn-accent transition-all shadow-lg shadow-accent-500/25 active:scale-95 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {state === "results" ? <RotateCcw size={16} /> : <Play size={16} />}
-                {state === "results" ? "Re-run" : "Run Analysis"}
+                {state === "results" ? (refineContext ? "Re-run with your data" : "Re-run") : "Run Analysis"}
+                {refineContext && (
+                  <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-white border-2 border-accent-500" />
+                )}
               </button>
             )}
             {tab === "dashboard" && state === "analyzing" && (
@@ -889,6 +909,8 @@ export default function Page() {
           analysis={analysis}
           dataReport={dataReport}
           settings={settings}
+          currentContext={refineContext}
+          onRerunWithContext={rerunWithContext}
         />
       )}
 

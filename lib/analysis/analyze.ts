@@ -24,6 +24,10 @@ export interface AnalyzeHandlers {
   onDataReport?: (d: DataReport) => void;
   onNarration?: (fullTextSoFar: string) => void;
   signal?: AbortSignal;
+  /** Extra local facts/data the user supplied (e.g. via the copilot) to fold in. */
+  extraContext?: string;
+  /** The previous analysis summary, for continuity on a refine re-run. */
+  priorSummary?: string;
 }
 
 function toReport(pack: DataPack, serviceUp: boolean): DataReport {
@@ -232,7 +236,7 @@ export async function runAnalysis(
 
   // ── 2. Build prompts ──────────────────────────────────────
   const system = buildSystemPrompt();
-  const user = buildUserPrompt(scorecard, enrichment, reference);
+  const user = buildUserPrompt(scorecard, enrichment, reference, handlers.extraContext, handlers.priorSummary);
 
   // ── 3. Stream from the provider ───────────────────────────
   const provider = await createProvider(settings);

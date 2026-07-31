@@ -12,69 +12,23 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { X, Send, Loader2, Lightbulb, ClipboardCheck, FileText, Sparkles, Globe2 } from "lucide-react";
+import { X, Send, Loader2, ClipboardCheck, Sparkles, Globe2, RefreshCw } from "lucide-react";
 import { createProvider } from "@/lib/llm";
 import type { AppSettings } from "@/lib/settings/store";
 import type { NormalizedScorecard } from "@/lib/scorecard/schema";
 import type { AnalysisResult } from "@/lib/analysis/schema";
 import type { DataReport } from "@/lib/types";
-import { renderMarkdown, deEmDash } from "@/lib/ui/markdown";
+import { renderMarkdown } from "@/lib/ui/markdown";
+import { UserMessageBubble } from "@/components/UserMessageBubble";
 
 type Msg = { role: "user" | "assistant"; text: string };
-
-/** Tidy a messy paste so it reads cleanly: normalise tabs, strip trailing
- * spaces, and collapse big runs of blank lines. Keeps real structure intact. */
-function tidyPaste(raw: string): string {
-  return raw
-    .replace(/\r\n/g, "\n")
-    .replace(/\t/g, "  ")
-    .split("\n")
-    .map((line) => line.replace(/\s+$/, ""))
-    .join("\n")
-    .replace(/\n{3,}/g, "\n\n")
-    .trim();
-}
-
-/** A user message. Long or multi-line pastes are tidied and shown in a neat,
- * scrollable, collapsible block so they never make the chat messy. */
-function UserBubble({ text }: { text: string }) {
-  const tidy = tidyPaste(deEmDash(text));
-  const lines = tidy.split("\n").length;
-  const isLong = tidy.length > 480 || lines > 8;
-  const [open, setOpen] = useState(false);
-
-  if (!isLong) {
-    return (
-      <div className="max-w-[90%] px-3.5 py-2.5 rounded-2xl rounded-br-sm text-sm leading-relaxed whitespace-pre-wrap bg-primary-500/15 border border-primary-500/25 text-text-primary">
-        {tidy}
-      </div>
-    );
-  }
-  return (
-    <div className="max-w-[92%] rounded-2xl rounded-br-sm bg-primary-500/10 border border-primary-500/25 overflow-hidden">
-      <div className="px-3 pt-2 pb-1 text-[11px] font-medium text-primary-300 flex items-center gap-1.5">
-        <FileText size={12} /> Pasted data · {lines} lines
-      </div>
-      <pre
-        className={`px-3.5 pb-2 text-[12px] leading-relaxed text-text-primary whitespace-pre-wrap font-mono overflow-y-auto transition-all ${open ? "max-h-[420px]" : "max-h-32"}`}
-      >
-        {tidy}
-      </pre>
-      <button
-        onClick={() => setOpen((v) => !v)}
-        className="w-full text-[11px] text-primary-300 hover:text-text-primary py-1.5 border-t border-primary-500/20 bg-primary-500/5"
-      >
-        {open ? "Show less" : "Show all"}
-      </button>
-    </div>
-  );
-}
 
 const SYSTEM = `You are a friendly, encouraging copilot sitting beside a city official who just ran a disaster-resilience analysis of their city. Think of yourself as a knowledgeable, supportive teammate whose whole goal is to help them end up with a scorecard they feel confident about. You are given the scorecard scores and the analysis that was produced.
 
 The user may: point out something the analysis missed, question a score or claim, or paste in real data they found (reports, statistics, local knowledge). Your job:
 - Point out likely gaps or inaccuracies in the analysis, and what would be worth verifying locally.
-- When the user pastes data, FIRST briefly restate the key facts from it in a clean, organized way (a short tidy list or a sentence or two, not a wall of text), so they can see you understood it. THEN say plainly how it changes the picture and which scores or points it would affect.
+- When the user pastes data, FIRST briefly restate the key facts from it in a clean, organized way (a short tidy list or a sentence or two, not a wall of text), so they can see you understood it. THEN say plainly how it changes the picture and which scores or points it would affect. If it is the kind of fact that should update the scorecard, remind them they can tap "Use in re-run" under their pasted message and then "Re-run" so you can rebuild the analysis with it.
+- Encourage them, warmly and briefly, to paste any relevant local data they have, while keeping it on-topic for this city's resilience (gently steer away from unrelated material).
 - Suggest concrete, specific refinements that would make the scorecard or analysis more accurate.
 - Warmly encourage them to bring in their own local data whenever they have it, since that is what makes the result trustworthy.
 
@@ -128,6 +82,8 @@ export function RefineAnalysisChat({
   analysis,
   dataReport,
   settings,
+  currentContext,
+  onRerunWithContext,
 }: {
   open: boolean;
   onClose: () => void;
@@ -135,13 +91,27 @@ export function RefineAnalysisChat({
   analysis: AnalysisResult;
   dataReport: DataReport | null;
   settings: AppSettings;
+  currentContext?: string;
+  onRerunWithContext?: (ctx: string) => void;
 }) {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [stream, setStream] = useState("");
+  const [gathered, setGathered] = useState<string[]>([]);
   const abortRef = useRef<AbortController | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
+
+  const addFact = (text: string) => {
+    setGathered((g) => (g.includes(text) ? g : [...g, text]));
+  };
+
+  const rerun = () => {
+    if (!onRerunWithContext || gathered.length === 0) return;
+    const combined = [currentContext, ...gathered].filter((s) => s && s.trim()).join("\n\n---\n\n");
+    setGathered([]); // applied now; they live in the analysis context from here
+    onRerunWithContext(combined);
+  };
 
   useEffect(() => {
     endRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -213,9 +183,10 @@ Reply to the latest User message only.`;
                 </span>
                 <div className="msg-md px-3.5 py-2.5 rounded-2xl rounded-bl-sm bg-surface-overlay border border-border text-text-primary">
                   <p className="text-sm">
-                    Hi! I&apos;m your copilot for this analysis. I can spot gaps, sanity-check a score, and fold in any data
-                    you have. If you&apos;ve got a report, a statistic, or local knowledge, just paste it in, even a messy
-                    copy-paste is fine, I&apos;ll tidy it up and factor it in. What should we look at first?
+                    Hi! I&apos;m your copilot for this analysis. I can spot gaps, sanity-check a score, and fold in real data
+                    you bring. Paste in as much relevant data as you like, reports, statistics, local knowledge, even a messy
+                    copy-paste is fine, I&apos;ll tidy it up. When it helps, tap <strong>Use in re-run</strong> under your paste and
+                    then <strong>Re-run</strong>, and I&apos;ll rebuild the scorecard with those facts. What should we look at first?
                   </p>
                 </div>
               </div>
@@ -246,7 +217,7 @@ Reply to the latest User message only.`;
                 <div className="msg-md max-w-[90%] px-3.5 py-2.5 rounded-2xl rounded-bl-sm text-sm leading-relaxed bg-surface-overlay border border-border text-text-primary space-y-2"
                   dangerouslySetInnerHTML={{ __html: renderMarkdown(m.text) }} />
               ) : (
-                <UserBubble text={m.text} />
+                <UserMessageBubble text={m.text} onAdd={onRerunWithContext ? () => addFact(m.text) : undefined} added={gathered.includes(m.text)} />
               )}
             </div>
           ))}
@@ -266,6 +237,19 @@ Reply to the latest User message only.`;
 
         {/* Composer */}
         <div className="p-3 border-t border-border shrink-0">
+          {onRerunWithContext && gathered.length > 0 && (
+            <div className="mb-2.5 flex items-center gap-2 rounded-xl border border-accent-500/40 bg-accent-500/10 px-3 py-2 animate-fadeInUp">
+              <span className="text-xs text-text-primary flex-1">
+                <strong>{gathered.length}</strong> piece{gathered.length === 1 ? "" : "s"} of your data ready. Re-run to fold {gathered.length === 1 ? "it" : "them"} into a better scorecard.
+              </span>
+              <button
+                onClick={rerun}
+                className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold btn-accent active:scale-95"
+              >
+                <RefreshCw size={13} /> Re-run now
+              </button>
+            </div>
+          )}
           <div className="flex items-end gap-2">
             <textarea
               value={input}
@@ -285,7 +269,7 @@ Reply to the latest User message only.`;
             </button>
           </div>
           <p className="text-[10px] text-text-secondary mt-1.5 flex items-center gap-1">
-            <ClipboardCheck size={11} /> Advice only, it won&apos;t change the analysis on screen. Re-run after editing your scorecard to apply changes.
+            <ClipboardCheck size={11} /> Paste real data, then tap &quot;Use in re-run&quot; under it and Re-run to fold it into a better scorecard.
           </p>
         </div>
       </div>
