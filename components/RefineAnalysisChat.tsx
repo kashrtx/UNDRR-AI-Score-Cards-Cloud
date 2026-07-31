@@ -12,7 +12,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { X, Send, Loader2, ClipboardCheck, Sparkles, Globe2, RefreshCw, Plus } from "lucide-react";
+import { X, Send, Loader2, ClipboardCheck, Sparkles, Globe2, RefreshCw, Plus, Trash2 } from "lucide-react";
 import { createProvider } from "@/lib/llm";
 import type { AppSettings } from "@/lib/settings/store";
 import type { NormalizedScorecard } from "@/lib/scorecard/schema";
@@ -39,7 +39,7 @@ Rules:
 - Use short markdown lists when they make things clearer.
 - Do not use em dashes.`;
 
-function buildContext(sc: NormalizedScorecard, a: AnalysisResult, dr: DataReport | null): string {
+function buildContext(sc: NormalizedScorecard, a: AnalysisResult, dr: DataReport | null, facts: string[]): string {
   const ess = [...sc.essentials]
     .sort((x, y) => x.num - y.num)
     .map((e) => `E${e.num} ${e.name}: ${e.score}/${e.max}`)
@@ -53,6 +53,12 @@ function buildContext(sc: NormalizedScorecard, a: AnalysisResult, dr: DataReport
     ? `\nOpen data points used (${dr.data.length}): ` +
       dr.data.slice(0, 20).map((d) => `${d.label}=${String(d.value)}${d.unit ? d.unit : ""}`).join("; ")
     : "";
+  // Facts the user has already added for the next re-run, so the copilot can
+  // "see" and discuss them (this was the missing link before).
+  const added = facts.length
+    ? `\n\nLOCAL DATA THE USER HAS ALREADY ADDED (${facts.length} item(s); these are queued to be folded into the next re-run, treat them as things you CAN see):\n` +
+      facts.map((f, i) => `[${i + 1}] ${f.slice(0, 1200)}`).join("\n\n")
+    : "\n\n(The user has not added any local data yet.)";
   return `CITY: ${sc.city.name}, ${sc.city.country}
 OVERALL SCORE: ${sc.total} out of ${sc.totalMax}
 
@@ -66,7 +72,7 @@ STRENGTHS THE ANALYSIS FOUND:
 ${strengths || "(none listed)"}
 
 WEAKNESSES THE ANALYSIS FOUND:
-${weaknesses || "(none listed)"}${data}`;
+${weaknesses || "(none listed)"}${data}${added}`;
 }
 
 const STARTERS = [
@@ -82,8 +88,10 @@ export function RefineAnalysisChat({
   analysis,
   dataReport,
   settings,
-  currentContext,
-  onRerunWithContext,
+  contextFacts = [],
+  onAddContext,
+  onRerun,
+  onClearContext,
   onBusyChange,
   externalBusy = false,
 }: {
@@ -93,8 +101,10 @@ export function RefineAnalysisChat({
   analysis: AnalysisResult;
   dataReport: DataReport | null;
   settings: AppSettings;
-  currentContext?: string;
-  onRerunWithContext?: (ctx: string) => void;
+  contextFacts?: string[];
+  onAddContext?: (text: string) => void;
+  onRerun?: () => void;
+  onClearContext?: () => void;
   onBusyChange?: (busy: boolean) => void;
   externalBusy?: boolean;
 }) {
@@ -102,20 +112,13 @@ export function RefineAnalysisChat({
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [stream, setStream] = useState("");
-  const [gathered, setGathered] = useState<string[]>([]);
   const [pendingPaste, setPendingPaste] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
 
-  const addFact = (text: string) => {
-    setGathered((g) => (g.includes(text) ? g : [...g, text]));
-  };
-
   const rerun = () => {
-    if (!onRerunWithContext || gathered.length === 0) return;
-    const combined = [currentContext, ...gathered].filter((s) => s && s.trim()).join("\n\n---\n\n");
-    setGathered([]); // applied now; they live in the analysis context from here
-    onRerunWithContext(combined);
+    if (!onRerun || contextFacts.length === 0) return;
+    onRerun();
   };
 
   useEffect(() => {
@@ -134,7 +137,7 @@ export function RefineAnalysisChat({
     try {
       const provider = await createProvider(settings);
       const convo = history.map((m) => `${m.role === "user" ? "User" : "You"}: ${m.text}`).join("\n\n");
-      const user = `${buildContext(scorecard, analysis, dataReport)}
+      const user = `${buildContext(scorecard, analysis, dataReport, contextFacts)}
 
 CONVERSATION SO FAR:
 ${convo}
@@ -153,7 +156,7 @@ Reply to the latest User message only.`;
       onBusyChange?.(false);
       setStream("");
     }
-  }, [input, busy, externalBusy, messages, settings, scorecard, analysis, dataReport, onBusyChange]);
+  }, [input, busy, externalBusy, messages, settings, scorecard, analysis, dataReport, contextFacts, onBusyChange]);
 
   // If the panel closes mid-generation, abort and clear the busy signal so the
   // rest of the app unlocks.
@@ -170,7 +173,7 @@ Reply to the latest User message only.`;
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 bg-black/40 animate-fadeInUp" onClick={onClose} aria-hidden="true" />
-      <div className="relative w-full sm:max-w-md h-full bg-surface-raised border-l border-border shadow-2xl flex flex-col animate-fadeInUp">
+      <div className="relative w-full sm:max-w-lg h-full bg-surface-raised border-l border-border shadow-2xl flex flex-col animate-fadeInUp">
         {/* Header */}
         <div className="flex items-center gap-2 p-4 border-b border-border shrink-0">
           <span className="grid place-items-center w-8 h-8 rounded-lg bg-accent-500/20 text-accent-300 animate-breathe">
@@ -180,7 +183,16 @@ Reply to the latest User message only.`;
             <h2 className="text-sm font-semibold text-text-primary">Your scorecard copilot</h2>
             <p className="text-[11px] text-text-secondary truncate">Here to help you get {scorecard.city.name} right</p>
           </div>
-          <button onClick={onClose} aria-label="Close" className="ml-auto p-1.5 rounded-lg text-text-secondary hover:text-text-primary hover:bg-surface-overlay">
+          {contextFacts.length > 0 && onClearContext && (
+            <button
+              onClick={onClearContext}
+              title="Remove all the data you've added"
+              className="ml-auto flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg text-text-secondary hover:text-danger-400 hover:bg-danger-500/10"
+            >
+              <Trash2 size={12} /> Clear data
+            </button>
+          )}
+          <button onClick={onClose} aria-label="Close" className={`p-1.5 rounded-lg text-text-secondary hover:text-text-primary hover:bg-surface-overlay ${contextFacts.length > 0 && onClearContext ? "" : "ml-auto"}`}>
             <X size={18} />
           </button>
         </div>
@@ -226,18 +238,20 @@ Reply to the latest User message only.`;
           {messages.map((m, i) => (
             <div key={i} className={`flex ${m.role === "user" ? "justify-end" : "justify-start"}`}>
               {m.role === "assistant" ? (
-                <div className="msg-md max-w-[90%] px-3.5 py-2.5 rounded-2xl rounded-bl-sm text-sm leading-relaxed bg-surface-overlay border border-border text-text-primary space-y-2"
+                <div className="msg-md max-w-[90%] px-3.5 py-2.5 rounded-2xl rounded-bl-sm text-sm leading-relaxed bg-surface-overlay border border-border text-text-primary space-y-2 break-words [overflow-wrap:anywhere]"
                   dangerouslySetInnerHTML={{ __html: renderMarkdown(m.text) }} />
               ) : (
-                <UserMessageBubble text={m.text} onAdd={onRerunWithContext ? () => addFact(m.text) : undefined} added={gathered.includes(m.text)} />
+                <UserMessageBubble text={m.text} onAdd={onAddContext ? () => onAddContext(m.text) : undefined} added={contextFacts.includes(m.text.trim())} />
               )}
             </div>
           ))}
           {busy && (
             <div className="flex justify-start">
-              <div className="msg-md max-w-[90%] px-3.5 py-2.5 rounded-2xl rounded-bl-sm text-sm leading-relaxed bg-surface-overlay border border-border text-text-primary">
+              <div className="max-w-[90%] px-3.5 py-2.5 rounded-2xl rounded-bl-sm text-sm leading-relaxed bg-surface-overlay border border-border text-text-primary break-words [overflow-wrap:anywhere]">
                 {stream ? (
-                  <span dangerouslySetInnerHTML={{ __html: renderMarkdown(stream) }} />
+                  // Plain text while streaming (fast); markdown is rendered once the
+                  // message is complete, in the finalized bubble above.
+                  <span className="whitespace-pre-wrap">{stream}</span>
                 ) : (
                   <span className="inline-flex items-center gap-2 text-text-secondary"><Loader2 size={14} className="animate-spin" /> Thinking…</span>
                 )}
@@ -257,14 +271,14 @@ Reply to the latest User message only.`;
           )}
 
           {/* Quick capture: when you paste a chunk, offer to add it as data in one tap */}
-          {pendingPaste && onRerunWithContext && (
+          {pendingPaste && onAddContext && (
             <div className="mb-2.5 flex items-center gap-2 rounded-xl border border-accent-500/40 bg-accent-500/10 px-3 py-2 animate-fadeInUp">
               <ClipboardCheck size={14} className="text-accent-300 shrink-0" />
               <span className="text-xs text-text-primary flex-1">
-                You pasted {pendingPaste.split(/\s+/).filter(Boolean).length} words. Use it as data for the scorecard?
+                You pasted {pendingPaste.split(/\s+/).filter(Boolean).length} words. Add it as data for the scorecard?
               </span>
               <button
-                onClick={() => { addFact(pendingPaste); setPendingPaste(null); }}
+                onClick={() => { onAddContext(pendingPaste); setPendingPaste(null); }}
                 className="shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold btn-accent active:scale-95"
               >
                 <Plus size={12} /> Use as data
@@ -275,10 +289,10 @@ Reply to the latest User message only.`;
             </div>
           )}
 
-          {onRerunWithContext && gathered.length > 0 && (
+          {onRerun && contextFacts.length > 0 && (
             <div className="mb-2.5 flex items-center gap-2 rounded-xl border border-accent-500/40 bg-accent-500/10 px-3 py-2 animate-fadeInUp">
               <span className="text-xs text-text-primary flex-1">
-                <strong>{gathered.length}</strong> piece{gathered.length === 1 ? "" : "s"} of your data ready. Re-run to fold {gathered.length === 1 ? "it" : "them"} into a better scorecard.
+                <strong>{contextFacts.length}</strong> piece{contextFacts.length === 1 ? "" : "s"} of your data ready. Re-run to fold {contextFacts.length === 1 ? "it" : "them"} into a better scorecard.
               </span>
               <button
                 onClick={rerun}
@@ -296,7 +310,7 @@ Reply to the latest User message only.`;
               onPaste={(e) => {
                 const t = e.clipboardData.getData("text");
                 // Offer one-tap "use as data" for a substantial paste.
-                if (onRerunWithContext && t && (t.length > 220 || t.split("\n").length > 4)) {
+                if (onAddContext && t && (t.length > 220 || t.split("\n").length > 4)) {
                   setPendingPaste(tidyPaste(t));
                 }
               }}

@@ -96,7 +96,7 @@ export function AnalysisProgress({
             <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-accent-400 opacity-75" />
             <span className="relative inline-flex rounded-full h-2.5 w-2.5 bg-accent-500" />
           </span>
-          Analysing scorecard…
+          {hasContext ? "Re-analysing with your data…" : "Analysing scorecard…"}
         </h2>
         <span className="text-sm font-mono text-text-secondary" aria-label="elapsed time">
           {mm}:{ss}

@@ -53,6 +53,7 @@ type Tab = "dashboard" | "assistant" | "settings";
 const SCORECARD_KEY = "undrr.scorecard";
 const SCORECARD_NAME_KEY = "undrr.scorecard.name";
 const ANALYSIS_KEY = "undrr.analysis";
+const REFINE_KEY = "undrr.refinefacts";
 const ONBOARDED_KEY = "undrr.onboarded.v1";
 const TIPS_KEY = "undrr.tips.dismissed";
 
@@ -107,12 +108,23 @@ export default function Page() {
   // Pending upload awaiting confirmation (because it would clear results)
   const [pendingUpload, setPendingUpload] = useState<{ sc: NormalizedScorecard; name: string } | null>(null);
   const [confirmRemove, setConfirmRemove] = useState(false);
+  const [confirmClear, setConfirmClear] = useState(false);
   const [showTour, setShowTour] = useState(false);
   const [refineOpen, setRefineOpen] = useState(false);
   const [assistantRunning, setAssistantRunning] = useState(false);
   const [copilotBusy, setCopilotBusy] = useState(false);
-  // Local facts the copilot has gathered from the user, folded into re-runs.
-  const [refineContext, setRefineContext] = useState<string>("");
+  // Local facts the user gave the copilot (pasted data / notes), folded into
+  // re-runs. Kept as a list so we can count them, show them, and persist them.
+  const [refineFacts, setRefineFacts] = useState<string[]>([]);
+  const refineFactsRef = useRef<string[]>([]);
+  useEffect(() => {
+    refineFactsRef.current = refineFacts;
+    try {
+      if (refineFacts.length) localStorage.setItem(REFINE_KEY, JSON.stringify(refineFacts));
+      else localStorage.removeItem(REFINE_KEY);
+    } catch { /* ignore */ }
+  }, [refineFacts]);
+  const refineContext = refineFacts.join("\n\n---\n\n");
   const [tipsDismissed, setTipsDismissed] = useState(true); // assume seen until mount says otherwise
 
   const abortRef = useRef<AbortController | null>(null);
@@ -153,6 +165,14 @@ export default function Page() {
         } else {
           setState("ready");
         }
+        // Restore any local facts the user added for this city.
+        try {
+          const rawF = localStorage.getItem(REFINE_KEY);
+          if (rawF) {
+            const facts = JSON.parse(rawF);
+            if (Array.isArray(facts)) { setRefineFacts(facts); refineFactsRef.current = facts; }
+          }
+        } catch { /* ignore */ }
       }
     } catch {
       /* ignore corrupt cache */
@@ -207,7 +227,7 @@ export default function Page() {
     setDataReport(null);
     setNarration("");
     setError(null);
-    setRefineContext(""); // fresh scorecard, drop any prior copilot facts
+    setRefineFacts([]); // fresh scorecard, drop any prior copilot facts
     setState("ready");
     try {
       localStorage.setItem(SCORECARD_KEY, JSON.stringify(sc));
@@ -281,7 +301,7 @@ export default function Page() {
     setAnalysisMeta(null);
     setDataReport(null);
     setNarration("");
-    setRefineContext("");
+    setRefineFacts([]);
     setState(scorecard ? "ready" : "empty");
     try {
       localStorage.removeItem(ANALYSIS_KEY);
@@ -316,7 +336,7 @@ export default function Page() {
     else handleRemove();
   }, [analysis, handleRemove]);
 
-  const handleAnalyze = useCallback(async (contextOverride?: string) => {
+  const handleAnalyze = useCallback(async () => {
     if (!scorecard || !settings) return;
     if (state === "analyzing") return; // don't stack a second run on a live one
     if (assistantRunning) return; // the Assistant is mid-task; don't run both at once
@@ -325,7 +345,7 @@ export default function Page() {
       setTab("settings");
       return;
     }
-    const extraContext = (contextOverride ?? refineContext).trim() || undefined;
+    const extraContext = refineFactsRef.current.join("\n\n---\n\n").trim() || undefined;
     // On a refine re-run (we have facts AND an existing analysis), let the model
     // read what it wrote before so it improves rather than starts blind.
     const priorSummary = extraContext && analysis ? analysis.summary : undefined;
@@ -369,14 +389,26 @@ export default function Page() {
       setError(err instanceof Error ? err.message : String(err));
       setState("error");
     }
-  }, [scorecard, settings, state, assistantRunning, refineContext, analysis, copilotBusy]);
+  }, [scorecard, settings, state, assistantRunning, analysis, copilotBusy]);
 
-  // Re-run the analysis folding in the facts the copilot gathered from the user.
-  const rerunWithContext = useCallback((ctx: string) => {
-    setRefineContext(ctx);
+  // Add a piece of local data the copilot gathered (deduped). The dashboard,
+  // the copilot banner, and the next re-run all read from this one list.
+  const addRefineFact = useCallback((text: string) => {
+    const t = text.trim();
+    if (!t) return;
+    setRefineFacts((prev) => (prev.includes(t) ? prev : [...prev, t]));
+  }, []);
+
+  // Re-run the analysis folding in everything the user has added so far.
+  const rerunWithFacts = useCallback(() => {
     setRefineOpen(false);
-    void handleAnalyze(ctx);
+    void handleAnalyze();
   }, [handleAnalyze]);
+
+  const clearRefineFacts = useCallback(() => {
+    setRefineFacts([]);
+    try { localStorage.removeItem(REFINE_KEY); } catch { /* ignore */ }
+  }, []);
 
   const cancelAnalyze = useCallback(() => {
     abortRef.current?.abort();
@@ -459,13 +491,13 @@ export default function Page() {
               <button
                 onClick={() => handleAnalyze()}
                 disabled={assistantRunning || copilotBusy}
-                title={assistantRunning ? "The Assistant is still working. Let it finish, then run the analysis." : copilotBusy ? "The copilot is still writing. One moment, then you can re-run." : refineContext ? "Re-run, folding in the facts you shared with the copilot" : undefined}
+                title={assistantRunning ? "The Assistant is still working. Let it finish, then run the analysis." : copilotBusy ? "The copilot is still writing. One moment, then you can re-run." : refineFacts.length ? `Re-run, folding in the ${refineFacts.length} piece(s) of data you added` : undefined}
                 className="relative flex items-center gap-2 px-3.5 sm:px-5 py-2 rounded-xl text-sm font-semibold btn-accent transition-all shadow-lg shadow-accent-500/25 active:scale-95 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {state === "results" ? <RotateCcw size={16} /> : <Play size={16} />}
-                {state === "results" ? (refineContext ? "Re-run with your data" : "Re-run") : "Run Analysis"}
-                {refineContext && (
-                  <span className="absolute -top-1 -right-1 w-2.5 h-2.5 rounded-full bg-white border-2 border-accent-500" />
+                {state === "results" ? (refineFacts.length ? "Re-run with your data" : "Re-run") : "Run Analysis"}
+                {refineFacts.length > 0 && (
+                  <span className="absolute -top-2 -right-2 min-w-[18px] h-[18px] px-1 grid place-items-center rounded-full bg-white text-accent-600 text-[10px] font-bold border border-accent-500">{refineFacts.length}</span>
                 )}
               </button>
             )}
@@ -725,7 +757,7 @@ export default function Page() {
                         <Lightbulb size={15} /> Am I missing something?
                       </button>
                       <button
-                        onClick={handleClearResults}
+                        onClick={() => setConfirmClear(true)}
                         title="Clear this analysis"
                         className="flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-medium text-text-secondary hover:text-danger-400 hover:bg-danger-500/10 transition-all sm:ml-auto"
                       >
@@ -899,6 +931,35 @@ export default function Page() {
         keep a copy.
       </ConfirmModal>
 
+      {/* ── Clear-results warning modal ─────────── */}
+      <ConfirmModal
+        open={confirmClear}
+        title="Clear this analysis?"
+        onClose={() => setConfirmClear(false)}
+        actions={[
+          {
+            label: "Download report, then clear",
+            variant: "primary",
+            onClick: () => {
+              const p = buildPayload();
+              if (p) downloadReport(p);
+              setConfirmClear(false);
+              handleClearResults();
+            },
+          },
+          {
+            label: "Clear",
+            variant: "danger",
+            onClick: () => { setConfirmClear(false); handleClearResults(); },
+          },
+          { label: "Cancel", variant: "ghost", onClick: () => setConfirmClear(false) },
+        ]}
+      >
+        This clears the analysis for <strong className="text-text-primary">{scorecard?.city.name}</strong>
+        {refineFacts.length > 0 ? ", along with the " + refineFacts.length + " piece(s) of data you added" : ""}. The
+        scorecard itself stays. This can&apos;t be undone, so download the report first if you want to keep it.
+      </ConfirmModal>
+
       {/* ── First-visit / replayable tour ──────── */}
       <Onboarding open={showTour} onClose={closeTour} />
 
@@ -911,8 +972,10 @@ export default function Page() {
           analysis={analysis}
           dataReport={dataReport}
           settings={settings}
-          currentContext={refineContext}
-          onRerunWithContext={rerunWithContext}
+          contextFacts={refineFacts}
+          onAddContext={addRefineFact}
+          onRerun={rerunWithFacts}
+          onClearContext={clearRefineFacts}
           onBusyChange={setCopilotBusy}
           externalBusy={state === "analyzing" || assistantRunning}
         />
