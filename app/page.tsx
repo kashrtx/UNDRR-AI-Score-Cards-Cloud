@@ -13,7 +13,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Play, Loader2, AlertTriangle, MapPin, Users, Calendar, Zap,
   CheckCircle2, XCircle, Info, Settings as SettingsIcon, LayoutDashboard, RotateCcw,
-  Download, FileJson, Eraser, Bot, HelpCircle, Lightbulb, Compass, ExternalLink,
+  Download, FileJson, Eraser, Bot, HelpCircle, Lightbulb, Compass, ExternalLink, Sparkles,
 } from "lucide-react";
 
 import { Logo } from "@/components/Logo";
@@ -672,31 +672,42 @@ export default function Page() {
                 {/* Results */}
                 {state === "results" && analysis && (
                   <div className="space-y-6">
-                    {/* Results toolbar: export + clear */}
-                    <div className="flex flex-wrap items-center gap-2">
+                    {/* Results toolbar: a friendly "save & share" bar */}
+                    <div className="glass-card p-3 sm:p-4 flex flex-wrap items-center gap-2.5">
+                      <div className="flex items-center gap-2 mr-1 shrink-0">
+                        <span className="grid place-items-center w-8 h-8 rounded-lg bg-accent-500/15 text-accent-300">
+                          <Download size={16} />
+                        </span>
+                        <span className="text-sm font-semibold text-text-primary hidden sm:inline">Save &amp; share</span>
+                      </div>
+                      <button
+                        onClick={handleExportReport}
+                        title="Download a clean, printable report of this analysis (HTML). Great for sharing."
+                        className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold btn-accent lift active:scale-95"
+                      >
+                        <Download size={16} /> Download report
+                      </button>
+                      <button
+                        onClick={handleExportJson}
+                        title="Download the raw analysis as a JSON data file."
+                        className="flex items-center gap-2 px-4 py-2.5 rounded-xl text-sm font-semibold bg-accent-500/12 text-accent-300 border border-accent-500/30 hover:border-accent-500/60 hover:text-accent-200 lift active:scale-95 transition-all"
+                      >
+                        <FileJson size={16} /> Download data
+                      </button>
+                      <div className="w-px h-7 bg-border mx-0.5 hidden sm:block" />
                       <button
                         onClick={() => setRefineOpen(true)}
-                        className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold bg-accent-500 text-white shadow-lg shadow-accent-500/25 animate-breathe hover:scale-[1.03] active:scale-95 transition-transform"
+                        title="Ask your copilot to sanity-check this or fold in data you found"
+                        className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-sm font-medium text-text-secondary hover:text-accent-300 border border-transparent hover:border-accent-500/30 transition-all"
                       >
                         <Lightbulb size={15} /> Am I missing something?
                       </button>
                       <button
-                        onClick={handleExportReport}
-                        className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold btn-accent transition-all active:scale-95"
-                      >
-                        <Download size={15} /> Export report
-                      </button>
-                      <button
-                        onClick={handleExportJson}
-                        className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-medium border border-border text-text-primary hover:border-accent-500/50 transition-all"
-                      >
-                        <FileJson size={15} /> Data (JSON)
-                      </button>
-                      <button
                         onClick={handleClearResults}
-                        className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-medium border border-border text-text-secondary hover:text-danger-400 hover:border-danger-500/40 transition-all sm:ml-auto"
+                        title="Clear this analysis"
+                        className="flex items-center gap-2 px-3 py-2.5 rounded-xl text-sm font-medium text-text-secondary hover:text-danger-400 hover:bg-danger-500/10 transition-all sm:ml-auto"
                       >
-                        <Eraser size={15} /> Clear results
+                        <Eraser size={15} /> <span className="hidden sm:inline">Clear</span>
                       </button>
                     </div>
 
@@ -881,18 +892,31 @@ export default function Page() {
         />
       )}
 
-      {/* ── Always-available help: gentle, breathing, opens the tour ─ */}
-      {!showTour && (
-        <button
-          onClick={replayTour}
-          title="New here? Take the quick tour"
-          aria-label="Take the quick tour"
-          className="fixed bottom-5 right-5 z-40 flex items-center gap-2 rounded-full bg-accent-500 text-white pl-3.5 pr-4 py-3 shadow-lg shadow-accent-500/30 animate-breathe hover:scale-105 active:scale-95 transition-transform"
-        >
-          <HelpCircle size={20} />
-          <span className="text-sm font-semibold hidden sm:inline">Need help?</span>
-        </button>
-      )}
+      {/* ── Floating actions (bottom-right): the copilot sits prominently above Help ─ */}
+      <div className="fixed bottom-5 right-5 z-40 flex flex-col items-end gap-3">
+        {tab === "dashboard" && state === "results" && analysis && scorecard && !refineOpen && (
+          <button
+            onClick={() => setRefineOpen(true)}
+            title="Ask your copilot to help sharpen this scorecard"
+            aria-label="Open your scorecard copilot"
+            className="flex items-center gap-2 rounded-full bg-accent-500 text-white pl-4 pr-5 py-3.5 shadow-xl shadow-accent-500/40 animate-breathe hover:scale-105 active:scale-95 transition-transform"
+          >
+            <Sparkles size={20} />
+            <span className="text-sm font-semibold">Ask your copilot</span>
+          </button>
+        )}
+        {!showTour && (
+          <button
+            onClick={replayTour}
+            title="New here? Take the quick tour"
+            aria-label="Take the quick tour"
+            className="flex items-center gap-2 rounded-full bg-surface-raised text-text-primary border border-border pl-3 pr-4 py-2.5 shadow-lg hover:scale-105 active:scale-95 transition-transform"
+          >
+            <HelpCircle size={18} className="text-accent-400" />
+            <span className="text-sm font-medium hidden sm:inline">Need help?</span>
+          </button>
+        )}
+      </div>
 
       {/* ── Slim footer (unobtrusive safety note) ─ */}
       <footer className="mt-auto border-t border-border px-4 sm:px-6 py-3">

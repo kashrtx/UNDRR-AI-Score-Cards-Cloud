@@ -30,8 +30,8 @@ export function GettingStarted({
     },
     {
       icon: <Sparkles size={18} className="text-accent-400" />,
-      title: "3. Read what comes back",
-      body: "A plain-language summary, the city's strong and weak spots, a priority chart, and an action plan with rough costs. No jargon needed.",
+      title: "3. Read it, then refine it",
+      body: "You get a plain-language summary, strong and weak spots, a priority chart, and an action plan. Then tap Ask your copilot to sanity-check it or add your own data, and Download report or Download data to save and share.",
     },
   ];
 
