@@ -13,7 +13,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Play, Loader2, AlertTriangle, MapPin, Users, Calendar, Zap,
   CheckCircle2, XCircle, Info, Settings as SettingsIcon, LayoutDashboard, RotateCcw,
-  Download, FileJson, Eraser, Bot, HelpCircle,
+  Download, FileJson, Eraser, Bot, HelpCircle, Lightbulb, Compass, ExternalLink,
 } from "lucide-react";
 
 import { Logo } from "@/components/Logo";
@@ -27,6 +27,7 @@ import { ProvenanceBadge } from "@/components/Provenance";
 import { StatusBar } from "@/components/StatusBar";
 import { GettingStarted } from "@/components/GettingStarted";
 import { ModelSuggestion } from "@/components/ModelSuggestion";
+import { RefineAnalysisChat } from "@/components/RefineAnalysisChat";
 import { AnalysisProgress } from "@/components/AnalysisProgress";
 import { DataSourcesPanel } from "@/components/DataSourcesPanel";
 import { SettingsTab } from "@/components/SettingsTab";
@@ -107,6 +108,8 @@ export default function Page() {
   const [pendingUpload, setPendingUpload] = useState<{ sc: NormalizedScorecard; name: string } | null>(null);
   const [confirmRemove, setConfirmRemove] = useState(false);
   const [showTour, setShowTour] = useState(false);
+  const [refineOpen, setRefineOpen] = useState(false);
+  const [assistantRunning, setAssistantRunning] = useState(false);
   const [tipsDismissed, setTipsDismissed] = useState(true); // assume seen until mount says otherwise
 
   const abortRef = useRef<AbortController | null>(null);
@@ -310,6 +313,8 @@ export default function Page() {
 
   const handleAnalyze = useCallback(async () => {
     if (!scorecard || !settings) return;
+    if (state === "analyzing") return; // don't stack a second run on a live one
+    if (assistantRunning) return; // the Assistant is mid-task; don't run both at once
     if (!computeReady(settings)) {
       setTab("settings");
       return;
@@ -352,7 +357,7 @@ export default function Page() {
       setError(err instanceof Error ? err.message : String(err));
       setState("error");
     }
-  }, [scorecard, settings]);
+  }, [scorecard, settings, state, assistantRunning]);
 
   const cancelAnalyze = useCallback(() => {
     abortRef.current?.abort();
@@ -415,6 +420,17 @@ export default function Page() {
               </button>
             </nav>
 
+            <a
+              href="/data-sources"
+              target="_blank"
+              rel="noreferrer"
+              title="Open a directory of free, credible data sources you can fact-check and paste in"
+              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-sm font-medium text-accent-400 hover:text-accent-300 border border-accent-500/30 hover:border-accent-500/60 transition-all"
+            >
+              <Compass size={15} /> <span className="hidden sm:inline">Find data</span>
+              <ExternalLink size={12} className="hidden sm:inline opacity-70" />
+            </a>
+
             <ThemeToggle />
 
             {/* Fixed-width slot so switching tabs (button present on Dashboard,
@@ -423,7 +439,9 @@ export default function Page() {
             {tab === "dashboard" && (state === "ready" || state === "results") && scorecard && (
               <button
                 onClick={handleAnalyze}
-                className="flex items-center gap-2 px-3.5 sm:px-5 py-2 rounded-xl text-sm font-semibold btn-accent transition-all shadow-lg shadow-accent-500/25 active:scale-95 shrink-0"
+                disabled={assistantRunning}
+                title={assistantRunning ? "The Assistant is still working. Let it finish, then run the analysis." : undefined}
+                className="flex items-center gap-2 px-3.5 sm:px-5 py-2 rounded-xl text-sm font-semibold btn-accent transition-all shadow-lg shadow-accent-500/25 active:scale-95 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {state === "results" ? <RotateCcw size={16} /> : <Play size={16} />}
                 {state === "results" ? "Re-run" : "Run Analysis"}
@@ -458,6 +476,8 @@ export default function Page() {
             providerReady={providerReady}
             onLoadIntoAnalyzer={handleLoadFromAssistant}
             onUseProvider={useProvider}
+            onRunningChange={setAssistantRunning}
+            externalBusy={state === "analyzing"}
           />
         </div>
 
@@ -521,7 +541,7 @@ export default function Page() {
                 )}
 
                 <ModelSuggestion
-                  show={settings.provider !== "gemini"}
+                  show={settings.provider !== "gemini" && state !== "analyzing"}
                   title="Tip: Gemini is the fastest pick for analysis"
                   body="For the Dashboard, Google Gemini runs straight from your browser (no timeouts) and is quick and capable. Great for reading a scorecard."
                   cta="Use Gemini"
@@ -654,6 +674,12 @@ export default function Page() {
                   <div className="space-y-6">
                     {/* Results toolbar: export + clear */}
                     <div className="flex flex-wrap items-center gap-2">
+                      <button
+                        onClick={() => setRefineOpen(true)}
+                        className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold bg-accent-500 text-white shadow-lg shadow-accent-500/25 animate-breathe hover:scale-[1.03] active:scale-95 transition-transform"
+                      >
+                        <Lightbulb size={15} /> Am I missing something?
+                      </button>
                       <button
                         onClick={handleExportReport}
                         className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold btn-accent transition-all active:scale-95"
@@ -842,6 +868,18 @@ export default function Page() {
 
       {/* ── First-visit / replayable tour ──────── */}
       <Onboarding open={showTour} onClose={closeTour} />
+
+      {/* ── Refine-the-analysis chat (opens from the results toolbar) ─ */}
+      {scorecard && analysis && (
+        <RefineAnalysisChat
+          open={refineOpen}
+          onClose={() => setRefineOpen(false)}
+          scorecard={scorecard}
+          analysis={analysis}
+          dataReport={dataReport}
+          settings={settings}
+        />
+      )}
 
       {/* ── Always-available help: gentle, breathing, opens the tour ─ */}
       {!showTour && (

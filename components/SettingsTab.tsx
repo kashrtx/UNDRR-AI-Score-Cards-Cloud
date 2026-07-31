@@ -751,22 +751,18 @@ export function SettingsTab({
         </div>
       </div>
 
-      {/* Further data (reference links, not live-integrated) */}
-      <div className="glass-card p-5">
-        <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
-          <BookCheck size={17} className="text-accent-400" /> More disaster-risk data <span className="text-xs font-normal text-text-secondary">(reference)</span>
-        </h2>
-        <p className="text-sm text-text-secondary mt-1 mb-2.5">
-          The analysis already pulls live open data (climate, elevation, earthquakes, infrastructure, World Bank, ReliefWeb).
-          These deeper libraries need a free account or manual lookup, so they aren&apos;t wired in automatically, but they&apos;re
-          excellent to consult and paste findings into the Assistant:
-        </p>
-        <ul className="text-sm space-y-1.5">
-          <li><a className="text-primary-300 underline" href="https://www.emdat.be/" target="_blank" rel="noreferrer">EM-DAT</a> <span className="text-text-secondary">, international disaster losses (free account needed).</span></li>
-          <li><a className="text-primary-300 underline" href="https://riskdatalibrary.org/data/" target="_blank" rel="noreferrer">Risk Data Library</a> <span className="text-text-secondary">, standardized hazard & exposure datasets.</span></li>
-          <li><a className="text-primary-300 underline" href="https://www.preventionweb.net/understanding-disaster-risk/disaster-losses-and-statistics/global-risk-data-sets" target="_blank" rel="noreferrer">PreventionWeb global risk data sets</a> <span className="text-text-secondary">, UNDRR&apos;s curated catalogue.</span></li>
-          <li><a className="text-primary-300 underline" href="https://libguides.worldbank.org/disasterriskmanagement/data" target="_blank" rel="noreferrer">World Bank DRM data guide</a> <span className="text-text-secondary">, links to many risk datasets.</span></li>
-        </ul>
+      {/* Pointer to the full data-source directory (its own page) */}
+      <div className="glass-card p-5 flex items-center gap-3 flex-wrap">
+        <span className="grid place-items-center w-10 h-10 rounded-xl bg-accent-500/15 text-accent-300 shrink-0">
+          <BookCheck size={18} />
+        </span>
+        <div className="min-w-0 flex-1">
+          <h2 className="text-base font-semibold text-text-primary">Looking for real data to back up a scorecard?</h2>
+          <p className="text-sm text-text-secondary">Browse a directory of free, credible sources (UN, World Bank, NASA and more), then paste what you find into the copilot or Assistant.</p>
+        </div>
+        <a href="/data-sources" target="_blank" rel="noreferrer" className="shrink-0 flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold btn-accent lift">
+          <Globe size={15} /> Find data
+        </a>
       </div>
 
       {/* Sentinel: when this is off-screen we show the "more below" pointer. */}

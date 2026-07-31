@@ -150,11 +150,15 @@ export function AssistantTab({
   providerReady,
   onLoadIntoAnalyzer,
   onUseProvider,
+  onRunningChange,
+  externalBusy = false,
 }: {
   settings: AppSettings;
   providerReady: boolean;
   onLoadIntoAnalyzer: (sc: NormalizedScorecard) => void;
   onUseProvider?: (p: AppSettings["provider"]) => void;
+  onRunningChange?: (running: boolean) => void;
+  externalBusy?: boolean;
 }) {
   // Mirrored active-session state
   const [sessions, setSessions] = useState<SessionMeta[]>([]);
@@ -169,6 +173,7 @@ export function AssistantTab({
 
   const [input, setInput] = useState("");
   const [running, setRunning] = useState(false);
+  const runningRef = useRef(false);
   const [thinking, setThinking] = useState(false);
   const [elapsed, setElapsed] = useState(0);
   const [stream, setStream] = useState("");
@@ -374,6 +379,11 @@ export function AssistantTab({
 
   const runTurn = useCallback(
     async (userText: string | null, opts?: { mode?: "autonomous" | "assist" }) => {
+      if (runningRef.current) return; // never start a second run over a live one
+      if (externalBusy) {
+        setChat((c) => [...c, { kind: "assistant", text: "The Dashboard analysis is still running. I'll wait for that to finish so the two don't clash, then ask me again." }]);
+        return;
+      }
       if (!providerReady) {
         setChat((c) => [...c, { kind: "assistant", text: "First choose an AI model and add a key in Settings, then come back here." }]);
         return;
@@ -414,6 +424,8 @@ export function AssistantTab({
         onEvent(e);
       };
       setRunning(true);
+      runningRef.current = true;
+      onRunningChange?.(true);
       setContinuable(false);
       setSetupOpen(false); // give the chat room once it's working; user can reopen
       abortRef.current = new AbortController();
@@ -421,6 +433,8 @@ export function AssistantTab({
         await runAgentTurn(ctx, emit, abortRef.current.signal);
       } finally {
         const sameSession = mountedRef.current && activeMetaRef.current.id === runSession;
+        runningRef.current = false;
+        onRunningChange?.(false);
         if (mountedRef.current) {
           setRunning(false);
           setThinking(false);
@@ -741,11 +755,18 @@ export function AssistantTab({
           </button>
         </div>
 
+        {externalBusy && (
+          <div className="mb-3 flex items-center gap-2 rounded-xl border border-warn-500/30 bg-warn-500/10 px-3.5 py-2.5 text-sm text-warn-400">
+            <Loader2 size={15} className="animate-spin shrink-0" />
+            <span>The Dashboard analysis is running. I&apos;ll be ready as soon as it finishes, so the two don&apos;t clash.</span>
+          </div>
+        )}
+
         {onUseProvider && (
           <ModelSuggestion
-            show={settings.provider !== "openrouter"}
-            title="Tip: OpenRouter is the smoothest pick here"
-            body="For filling out scorecards, OpenRouter's free Nemotron Ultra is capable and, unlike Gemini's free tier, isn't tightly rate-limited across many quick steps."
+            show={settings.provider === "gemini" && !running}
+            title="Tip: OpenRouter is smoother for the Assistant"
+            body="Gemini's free tier is tightly rate-limited, so filling a whole scorecard can stall partway. OpenRouter's free Nemotron Ultra handles the many quick steps without those limits."
             cta="Use OpenRouter"
             onUse={() => onUseProvider("openrouter")}
             storageKey="undrr-suggest-openrouter-assistant"
