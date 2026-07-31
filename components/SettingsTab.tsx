@@ -150,20 +150,28 @@ export function SettingsTab({
   const [testing, setTesting] = useState(false);
   const [testMsg, setTestMsg] = useState<{ ok: boolean; message: string } | null>(null);
   const [searchKeyInput, setSearchKeyInput] = useState("");
-  const bottomRef = useRef<HTMLDivElement>(null);
   const [moreBelow, setMoreBelow] = useState(false);
 
-  // Show a friendly "more below" pointer whenever the end of the settings page
-  // is off-screen, so novice users always know there's more to scroll to.
+  // Show a friendly "more below" pointer while the page is taller than the
+  // screen AND you're not near the bottom yet, so novices know to keep
+  // scrolling. Hides once you reach the end (where there's nothing more).
   useEffect(() => {
-    const el = bottomRef.current;
-    if (!el || typeof IntersectionObserver === "undefined") return;
-    const obs = new IntersectionObserver(
-      (entries) => setMoreBelow(!entries[0].isIntersecting),
-      { rootMargin: "0px 0px -40px 0px" }
-    );
-    obs.observe(el);
-    return () => obs.disconnect();
+    const check = () => {
+      const doc = document.documentElement;
+      const scrollable = doc.scrollHeight > window.innerHeight + 40;
+      const nearBottom = window.innerHeight + window.scrollY >= doc.scrollHeight - 120;
+      setMoreBelow(scrollable && !nearBottom);
+    };
+    check();
+    const t1 = setTimeout(check, 200);
+    const t2 = setTimeout(check, 600); // after layout/fonts settle
+    window.addEventListener("scroll", check, { passive: true });
+    window.addEventListener("resize", check);
+    return () => {
+      clearTimeout(t1); clearTimeout(t2);
+      window.removeEventListener("scroll", check);
+      window.removeEventListener("resize", check);
+    };
   }, []);
   const [searchKeyPresent, setSearchKeyPresent] = useState(false);
 
@@ -765,8 +773,8 @@ export function SettingsTab({
         </a>
       </div>
 
-      {/* Sentinel: when this is off-screen we show the "more below" pointer. */}
-      <div ref={bottomRef} aria-hidden="true" className="h-1" />
+      {/* Sentinel kept for spacing at the very bottom. */}
+      <div aria-hidden="true" className="h-1" />
 
       {moreBelow && (
         <button

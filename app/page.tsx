@@ -28,6 +28,7 @@ import { StatusBar } from "@/components/StatusBar";
 import { GettingStarted } from "@/components/GettingStarted";
 import { ModelSuggestion } from "@/components/ModelSuggestion";
 import { RefineAnalysisChat } from "@/components/RefineAnalysisChat";
+import { renderInline } from "@/lib/ui/markdown";
 import { AnalysisProgress } from "@/components/AnalysisProgress";
 import { DataSourcesPanel } from "@/components/DataSourcesPanel";
 import { SettingsTab } from "@/components/SettingsTab";
@@ -784,7 +785,7 @@ export default function Page() {
                           </span>
                         )}
                       </div>
-                      <p className="text-sm text-text-secondary leading-relaxed">{analysis.summary}</p>
+                      <p className="text-sm text-text-secondary leading-relaxed [overflow-wrap:anywhere]" dangerouslySetInnerHTML={{ __html: renderInline(analysis.summary) }} />
                       <p className="mt-3 text-xs text-text-secondary flex items-start gap-1.5 bg-surface-overlay/40 border border-border rounded-lg px-3 py-2">
                         <Info size={13} className="shrink-0 mt-0.5 text-primary-300" />
                         This analysis reflects the judgement of the AI model above. A different model
@@ -804,7 +805,7 @@ export default function Page() {
                               <div key={label} className="rounded-xl border border-border bg-surface-overlay/30 p-3">
                                 <div className="text-xs font-semibold text-primary-300">{label}</div>
                                 <div className="text-[11px] text-text-secondary mb-1.5">{sub}</div>
-                                <p className="text-xs text-text-secondary leading-relaxed">{body}</p>
+                                <p className="text-xs text-text-secondary leading-relaxed [overflow-wrap:anywhere]" dangerouslySetInnerHTML={{ __html: renderInline(body) }} />
                               </div>
                             ))}
                           </div>
@@ -819,7 +820,7 @@ export default function Page() {
                           <ul className="space-y-2">
                             {analysis.strengths.map((s, i) => (
                               <li key={i} className="flex items-start gap-2 text-sm text-text-secondary p-2.5 rounded-lg bg-accent-500/5 border border-accent-500/15">
-                                <span className="flex-1">{s.text}</span>
+                                <span className="flex-1 [overflow-wrap:anywhere]" dangerouslySetInnerHTML={{ __html: renderInline(s.text) }} />
                                 <div className="flex flex-col items-end gap-1 shrink-0">
                                   <ConfidenceBadge level={s.confidence} />
                                   <ProvenanceBadge sourceRefs={s.sourceRefs} />
@@ -835,7 +836,7 @@ export default function Page() {
                           <ul className="space-y-2">
                             {analysis.weaknesses.map((w, i) => (
                               <li key={i} className="flex items-start gap-2 text-sm text-text-secondary p-2.5 rounded-lg bg-danger-500/5 border border-danger-500/15">
-                                <span className="flex-1">{w.text}</span>
+                                <span className="flex-1 [overflow-wrap:anywhere]" dangerouslySetInnerHTML={{ __html: renderInline(w.text) }} />
                                 <div className="flex flex-col items-end gap-1 shrink-0">
                                   <ConfidenceBadge level={w.confidence} />
                                   <ProvenanceBadge sourceRefs={w.sourceRefs} />

@@ -136,7 +136,10 @@ export function RefineAnalysisChat({
     setStream("");
     try {
       const provider = await createProvider(settings);
-      const convo = history.map((m) => `${m.role === "user" ? "User" : "You"}: ${m.text}`).join("\n\n");
+      // Keep the prompt bounded: send the most recent turns rather than the
+      // entire history, so a long chat stays fast and within context limits.
+      const recent = history.slice(-14);
+      const convo = recent.map((m) => `${m.role === "user" ? "User" : "You"}: ${m.text}`).join("\n\n");
       const user = `${buildContext(scorecard, analysis, dataReport, contextFacts)}
 
 CONVERSATION SO FAR:

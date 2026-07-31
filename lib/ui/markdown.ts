@@ -38,6 +38,13 @@ function escapeHtml(s: string): string {
     .replace(/"/g, "&quot;");
 }
 
+/** Render a single line/paragraph of inline markdown (bold, italic, code,
+ * links) to safe HTML, with no block wrapping. For short prose fields like the
+ * analysis summary, strengths and weaknesses where models often add **bold**. */
+export function renderInline(s: string): string {
+  return inline(s);
+}
+
 function inline(s: string): string {
   let t = escapeHtml(s);
   // inline code first so its contents aren't further formatted

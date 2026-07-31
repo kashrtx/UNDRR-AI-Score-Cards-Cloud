@@ -272,7 +272,21 @@ async function searchTool(query: string, searchKey?: string | null): Promise<{ t
 
 // ── Prompt assembly ──────────────────────────────────────────
 function buildUser(ctx: AgentContext): string {
-  const history = ctx.transcript
+  // Keep the prompt bounded on long autonomous runs: always keep the first user
+  // instruction (the task), plus the most recent exchanges. This avoids ballooning
+  // token cost and hitting the model's context limit mid-run.
+  const MAX_HISTORY = 24;
+  let items = ctx.transcript;
+  if (items.length > MAX_HISTORY) {
+    const firstUserIdx = items.findIndex((t) => t.role === "user");
+    const recent = items.slice(-MAX_HISTORY);
+    if (firstUserIdx !== -1 && firstUserIdx < items.length - MAX_HISTORY) {
+      items = [items[firstUserIdx], ...recent];
+    } else {
+      items = recent;
+    }
+  }
+  const history = items
     .map((t) =>
       t.role === "user" ? `USER: ${t.content}` : t.role === "assistant" ? `YOU: ${t.content}` : `TOOL RESULT: ${t.content}`
     )
@@ -337,6 +351,9 @@ export async function runAgentTurn(
   let parseFailures = 0;
   let prevFilled = filledCount(ctx.draft);
   let stagnantScores = 0; // consecutive set_scores that add nothing
+  let stagnantInfo = 0;   // consecutive set_info calls that change nothing
+  let lastSig = "";       // signature of the previous action
+  let sigRepeat = 0;      // how many times the exact same action has repeated
   let infoNudged = false;
   const autonomous = ctx.mode === "autonomous";
 
@@ -405,6 +422,19 @@ export async function runAgentTurn(
     parseFailures = 0;
     if (action.thought) onEvent({ type: "thought", text: action.thought });
 
+    // Loop guard: fingerprint the action (ignoring the free-text thought). If the
+    // model repeats the exact same action several times, we'll stop rather than
+    // spin, which some models (especially search-focused ones) are prone to.
+    const sig = JSON.stringify([
+      action.action,
+      action.scores ?? null,
+      action.profile ?? action.info ?? null,
+      action.query ?? null,
+      (action.city ?? "") + "|" + (action.country ?? ""),
+    ]);
+    if (sig === lastSig) sigRepeat++; else sigRepeat = 0;
+    lastSig = sig;
+
     switch (action.action) {
       case "research_city": {
         const cityName = action.city || ctx.city || "";
@@ -412,7 +442,7 @@ export async function runAgentTurn(
         const { text, method } = await researchTool(cityName, action.country || ctx.country, ctx.searchKey);
         ctx.transcript.push({ role: "tool", content: `research_city(${cityName}):\n${text}` });
         onEvent({ type: "tool", label: `Researched ${cityName || "the city"}`, detail: method });
-        stagnantScores = 0;
+        stagnantScores = 0; stagnantInfo = 0;
         break;
       }
       case "web_search": {
@@ -421,7 +451,7 @@ export async function runAgentTurn(
         const { text, method } = await searchTool(q, ctx.searchKey);
         ctx.transcript.push({ role: "tool", content: `web_search(${q}):\n${text}` });
         onEvent({ type: "tool", label: `Searched (${method})`, detail: q.slice(0, 60) });
-        stagnantScores = 0;
+        stagnantScores = 0; stagnantInfo = 0;
         break;
       }
       case "set_scores": {
@@ -487,6 +517,7 @@ export async function runAgentTurn(
         ctx.transcript.push({ role: "tool", content: `Recorded City Information: ${keys.join(", ") || "(nothing usable)"}.` });
         onEvent({ type: "tool", label: "City information updated", detail: keys.slice(0, 6).join(", ") });
         stagnantScores = 0;
+        if (changed) stagnantInfo = 0; else stagnantInfo++;
         break;
       }
       case "message": {
@@ -542,6 +573,17 @@ export async function runAgentTurn(
       }
       default:
         ctx.transcript.push({ role: "tool", content: `Unknown action "${action.action}". Use research_city, web_search, set_info, set_scores, message, or finish.` });
+    }
+
+    // Global loop guard: if the model keeps repeating the same action, or keeps
+    // re-recording City Information that changes nothing, stop rather than spin.
+    if (sigRepeat >= 2 || stagnantInfo >= 3) {
+      const msg =
+        "I seem to be repeating the same step without making progress, so I'll stop here rather than loop. Tell me what you'd like to change, or add any details you have. Tip: if this keeps happening, a search-focused model can struggle with this kind of step-by-step filling, OpenRouter or NVIDIA tend to handle the Assistant best.";
+      ctx.transcript.push({ role: "assistant", content: msg });
+      onEvent({ type: "assistant", text: msg });
+      onEvent({ type: "stopped" });
+      return;
     }
   }
 
