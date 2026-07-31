@@ -110,6 +110,7 @@ export default function Page() {
   const [showTour, setShowTour] = useState(false);
   const [refineOpen, setRefineOpen] = useState(false);
   const [assistantRunning, setAssistantRunning] = useState(false);
+  const [copilotBusy, setCopilotBusy] = useState(false);
   // Local facts the copilot has gathered from the user, folded into re-runs.
   const [refineContext, setRefineContext] = useState<string>("");
   const [tipsDismissed, setTipsDismissed] = useState(true); // assume seen until mount says otherwise
@@ -319,6 +320,7 @@ export default function Page() {
     if (!scorecard || !settings) return;
     if (state === "analyzing") return; // don't stack a second run on a live one
     if (assistantRunning) return; // the Assistant is mid-task; don't run both at once
+    if (copilotBusy) return; // the copilot is generating; don't hit the API twice at once
     if (!computeReady(settings)) {
       setTab("settings");
       return;
@@ -367,7 +369,7 @@ export default function Page() {
       setError(err instanceof Error ? err.message : String(err));
       setState("error");
     }
-  }, [scorecard, settings, state, assistantRunning, refineContext, analysis]);
+  }, [scorecard, settings, state, assistantRunning, refineContext, analysis, copilotBusy]);
 
   // Re-run the analysis folding in the facts the copilot gathered from the user.
   const rerunWithContext = useCallback((ctx: string) => {
@@ -456,8 +458,8 @@ export default function Page() {
             {tab === "dashboard" && (state === "ready" || state === "results") && scorecard && (
               <button
                 onClick={() => handleAnalyze()}
-                disabled={assistantRunning}
-                title={assistantRunning ? "The Assistant is still working. Let it finish, then run the analysis." : refineContext ? "Re-run, folding in the facts you shared with the copilot" : undefined}
+                disabled={assistantRunning || copilotBusy}
+                title={assistantRunning ? "The Assistant is still working. Let it finish, then run the analysis." : copilotBusy ? "The copilot is still writing. One moment, then you can re-run." : refineContext ? "Re-run, folding in the facts you shared with the copilot" : undefined}
                 className="relative flex items-center gap-2 px-3.5 sm:px-5 py-2 rounded-xl text-sm font-semibold btn-accent transition-all shadow-lg shadow-accent-500/25 active:scale-95 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {state === "results" ? <RotateCcw size={16} /> : <Play size={16} />}
@@ -497,7 +499,7 @@ export default function Page() {
             onLoadIntoAnalyzer={handleLoadFromAssistant}
             onUseProvider={useProvider}
             onRunningChange={setAssistantRunning}
-            externalBusy={state === "analyzing"}
+            externalBusy={state === "analyzing" || copilotBusy}
           />
         </div>
 
@@ -679,7 +681,7 @@ export default function Page() {
                 {/* Live progress */}
                 {state === "analyzing" && (
                   <>
-                    <AnalysisProgress progress={progress} dataReport={dataReport} tavilyOn={tavilyActive} />
+                    <AnalysisProgress progress={progress} dataReport={dataReport} tavilyOn={tavilyActive} hasContext={!!refineContext} />
                     <DataSourcesPanel report={dataReport} live />
                     {narration && (
                       <div className="glass-card p-5">
@@ -911,6 +913,8 @@ export default function Page() {
           settings={settings}
           currentContext={refineContext}
           onRerunWithContext={rerunWithContext}
+          onBusyChange={setCopilotBusy}
+          externalBusy={state === "analyzing" || assistantRunning}
         />
       )}
 

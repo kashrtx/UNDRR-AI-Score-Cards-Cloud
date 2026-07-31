@@ -35,10 +35,12 @@ export function AnalysisProgress({
   progress,
   dataReport,
   tavilyOn = false,
+  hasContext = false,
 }: {
   progress: ProgressEvent | null;
   dataReport?: DataReport | null;
   tavilyOn?: boolean;
+  hasContext?: boolean;
 }) {
   const [elapsed, setElapsed] = useState(0);
   useEffect(() => {
@@ -46,7 +48,11 @@ export function AnalysisProgress({
     return () => clearInterval(t);
   }, []);
 
-  const completed = progress ? DONE_AT[progress.step] ?? 0 : 0;
+  // On a refine re-run, show the user's added data as the first step so it's
+  // obvious their facts are being folded in.
+  const steps = hasContext ? [{ key: "context", label: "Folding in the data you added" }, ...STEPS] : STEPS;
+  const offset = hasContext ? 1 : 0;
+  const completed = (progress ? (DONE_AT[progress.step] ?? 0) + offset : 0);
   const pct = progress?.pct ?? 5;
   const mm = String(Math.floor(elapsed / 60)).padStart(2, "0");
   const ss = String(elapsed % 60).padStart(2, "0");
@@ -112,7 +118,7 @@ export function AnalysisProgress({
 
       {/* Step checklist with dynamic detail */}
       <ul className="space-y-3">
-        {STEPS.map((s, i) => {
+        {steps.map((s, i) => {
           const isDone = completed > i;
           const isActive = completed === i;
           const detail = detailFor(s.key, isDone, isActive);

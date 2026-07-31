@@ -12,13 +12,13 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { X, Send, Loader2, ClipboardCheck, Sparkles, Globe2, RefreshCw } from "lucide-react";
+import { X, Send, Loader2, ClipboardCheck, Sparkles, Globe2, RefreshCw, Plus } from "lucide-react";
 import { createProvider } from "@/lib/llm";
 import type { AppSettings } from "@/lib/settings/store";
 import type { NormalizedScorecard } from "@/lib/scorecard/schema";
 import type { AnalysisResult } from "@/lib/analysis/schema";
 import type { DataReport } from "@/lib/types";
-import { renderMarkdown } from "@/lib/ui/markdown";
+import { renderMarkdown, tidyPaste } from "@/lib/ui/markdown";
 import { UserMessageBubble } from "@/components/UserMessageBubble";
 
 type Msg = { role: "user" | "assistant"; text: string };
@@ -84,6 +84,8 @@ export function RefineAnalysisChat({
   settings,
   currentContext,
   onRerunWithContext,
+  onBusyChange,
+  externalBusy = false,
 }: {
   open: boolean;
   onClose: () => void;
@@ -93,12 +95,15 @@ export function RefineAnalysisChat({
   settings: AppSettings;
   currentContext?: string;
   onRerunWithContext?: (ctx: string) => void;
+  onBusyChange?: (busy: boolean) => void;
+  externalBusy?: boolean;
 }) {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [stream, setStream] = useState("");
   const [gathered, setGathered] = useState<string[]>([]);
+  const [pendingPaste, setPendingPaste] = useState<string | null>(null);
   const abortRef = useRef<AbortController | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
 
@@ -117,18 +122,14 @@ export function RefineAnalysisChat({
     endRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages, stream]);
 
-  // Abort any in-flight request if the panel is closed.
-  useEffect(() => {
-    if (!open) abortRef.current?.abort();
-  }, [open]);
-
   const send = useCallback(async () => {
     const text = input.trim();
-    if (!text || busy) return;
+    if (!text || busy || externalBusy) return;
     setInput("");
     const history: Msg[] = [...messages, { role: "user", text }];
     setMessages(history);
     setBusy(true);
+    onBusyChange?.(true);
     setStream("");
     try {
       const provider = await createProvider(settings);
@@ -149,9 +150,20 @@ Reply to the latest User message only.`;
       }
     } finally {
       setBusy(false);
+      onBusyChange?.(false);
       setStream("");
     }
-  }, [input, busy, messages, settings, scorecard, analysis, dataReport]);
+  }, [input, busy, externalBusy, messages, settings, scorecard, analysis, dataReport, onBusyChange]);
+
+  // If the panel closes mid-generation, abort and clear the busy signal so the
+  // rest of the app unlocks.
+  useEffect(() => {
+    if (!open) {
+      abortRef.current?.abort();
+      setBusy(false);
+      onBusyChange?.(false);
+    }
+  }, [open, onBusyChange]);
 
   if (!open) return null;
 
@@ -237,6 +249,32 @@ Reply to the latest User message only.`;
 
         {/* Composer */}
         <div className="p-3 border-t border-border shrink-0">
+          {externalBusy && (
+            <div className="mb-2.5 flex items-center gap-2 rounded-xl border border-warn-500/30 bg-warn-500/10 px-3 py-2 text-xs text-warn-400">
+              <Loader2 size={13} className="animate-spin shrink-0" />
+              <span>Something else is running (an analysis or the Assistant). I&apos;ll be ready the moment it finishes.</span>
+            </div>
+          )}
+
+          {/* Quick capture: when you paste a chunk, offer to add it as data in one tap */}
+          {pendingPaste && onRerunWithContext && (
+            <div className="mb-2.5 flex items-center gap-2 rounded-xl border border-accent-500/40 bg-accent-500/10 px-3 py-2 animate-fadeInUp">
+              <ClipboardCheck size={14} className="text-accent-300 shrink-0" />
+              <span className="text-xs text-text-primary flex-1">
+                You pasted {pendingPaste.split(/\s+/).filter(Boolean).length} words. Use it as data for the scorecard?
+              </span>
+              <button
+                onClick={() => { addFact(pendingPaste); setPendingPaste(null); }}
+                className="shrink-0 flex items-center gap-1 px-2.5 py-1 rounded-lg text-xs font-semibold btn-accent active:scale-95"
+              >
+                <Plus size={12} /> Use as data
+              </button>
+              <button onClick={() => setPendingPaste(null)} aria-label="Dismiss" className="shrink-0 p-1 rounded text-text-secondary hover:text-text-primary">
+                <X size={13} />
+              </button>
+            </div>
+          )}
+
           {onRerunWithContext && gathered.length > 0 && (
             <div className="mb-2.5 flex items-center gap-2 rounded-xl border border-accent-500/40 bg-accent-500/10 px-3 py-2 animate-fadeInUp">
               <span className="text-xs text-text-primary flex-1">
@@ -244,7 +282,8 @@ Reply to the latest User message only.`;
               </span>
               <button
                 onClick={rerun}
-                className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold btn-accent active:scale-95"
+                disabled={busy || externalBusy}
+                className="shrink-0 flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-xs font-semibold btn-accent active:scale-95 disabled:opacity-40"
               >
                 <RefreshCw size={13} /> Re-run now
               </button>
@@ -254,14 +293,21 @@ Reply to the latest User message only.`;
             <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
+              onPaste={(e) => {
+                const t = e.clipboardData.getData("text");
+                // Offer one-tap "use as data" for a substantial paste.
+                if (onRerunWithContext && t && (t.length > 220 || t.split("\n").length > 4)) {
+                  setPendingPaste(tidyPaste(t));
+                }
+              }}
               onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); void send(); } }}
               rows={2}
-              placeholder="Ask me anything, or paste data you found (I'll tidy it up)…"
+              placeholder={externalBusy ? "Waiting for the other task to finish…" : "Ask me anything, or paste data you found (I'll tidy it up)…"}
               className="flex-1 resize-none rounded-xl bg-surface-overlay border border-border px-3 py-2 text-sm text-text-primary placeholder:text-text-secondary/60 focus:outline-none focus:border-primary-500/50"
             />
             <button
               onClick={() => void send()}
-              disabled={busy || !input.trim()}
+              disabled={busy || externalBusy || !input.trim()}
               aria-label="Send"
               className="shrink-0 grid place-items-center w-10 h-10 rounded-xl btn-accent disabled:opacity-40 active:scale-95 transition-all"
             >

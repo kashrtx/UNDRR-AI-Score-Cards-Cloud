@@ -23,7 +23,12 @@ export function UserMessageBubble({
 }) {
   const tidy = tidyPaste(deEmDash(text));
   const lines = tidy.split("\n").length;
-  const isLong = tidy.length > 480 || lines > 8;
+  // Treat as a data paste if it's long, has many lines, or looks structured
+  // (tabs, CSV-ish commas, table pipes, or lots of numbers) so real data lands
+  // in the neat collapsible block instead of a giant plain bubble.
+  const looksTabular = /\t/.test(tidy) || /(,[^\n]*){2,}/.test(tidy) || /(\|[^\n]*){2,}/.test(tidy);
+  const manyNumbers = (tidy.match(/\d+(?:[.,]\d+)?/g) || []).length >= 6;
+  const isLong = tidy.length > 360 || lines > 6 || (lines >= 3 && (looksTabular || manyNumbers));
   const [open, setOpen] = useState(false);
 
   if (!isLong) {

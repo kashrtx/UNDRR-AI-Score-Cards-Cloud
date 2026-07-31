@@ -204,14 +204,26 @@ export function AssistantTab({
   const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
 
-  // Auto-grow the composer so a long paste is fully visible and easy to edit
-  // before sending (capped, then it scrolls).
-  useEffect(() => {
+  // Auto-grow the composer so a long paste is fully visible and easy to edit.
+  // Guard against being measured while the tab is hidden (scrollHeight is 0
+  // then), which previously collapsed the box until you clicked it.
+  const resizeComposer = useCallback(() => {
     const el = composerRef.current;
     if (!el) return;
     el.style.height = "auto";
-    el.style.height = `${Math.min(el.scrollHeight, 200)}px`;
-  }, [input]);
+    const h = el.scrollHeight;
+    el.style.height = h > 0 ? `${Math.min(h, 200)}px` : ""; // "" → fall back to CSS min-height
+  }, []);
+  useEffect(() => { resizeComposer(); }, [input, resizeComposer]);
+  // Re-measure when the composer becomes visible again (e.g. switching to this
+  // tab), so it's never stuck collapsed.
+  useEffect(() => {
+    const el = composerRef.current;
+    if (!el || typeof IntersectionObserver === "undefined") return;
+    const obs = new IntersectionObserver(() => resizeComposer());
+    obs.observe(el);
+    return () => obs.disconnect();
+  }, [resizeComposer]);
   const stuckToBottomRef = useRef(true);
   const [showJump, setShowJump] = useState(false);
   const fileRef = useRef<HTMLInputElement | null>(null);
@@ -474,7 +486,7 @@ export function AssistantTab({
   }, []);
 
   const handleStartAutonomous = useCallback(() => {
-    if (!city.trim() || running) return;
+    if (!city.trim() || running || externalBusy) return;
     const cityLine = `${city.trim()}${country.trim() ? ", " + country.trim() : ""}`;
     const already = filledCount(draftRef.current);
     const scope =
@@ -487,11 +499,11 @@ export function AssistantTab({
       `Research the city as needed, set every indicator with a short note, and only ask me if something truly cannot be researched.`;
     setChat((c) => [...c, { kind: "user", text: already > 0 ? `Complete the rest for ${cityLine}.` : `Fill it out for ${cityLine}.` }]);
     void runTurn(msg, { mode: "autonomous" });
-  }, [city, country, info, running, runTurn]);
+  }, [city, country, info, running, externalBusy, runTurn]);
 
   const handleSend = useCallback(() => {
     const text = input.trim();
-    if (!text) return;
+    if (!text || externalBusy) return;
     setInput("");
     setChat((c) => [...c, { kind: "user", text }]);
     if (running) {
@@ -501,13 +513,13 @@ export function AssistantTab({
       return;
     }
     void runTurn(text, { mode: "assist" });
-  }, [input, running, runTurn]);
+  }, [input, running, externalBusy, runTurn]);
 
   const handleContinue = useCallback(() => {
-    if (running) return;
+    if (running || externalBusy) return;
     setChat((c) => [...c, { kind: "tool", label: "Continuing", detail: `with ${settings.provider}` }]);
     void runTurn("Continue from where you left off."); // keeps the last mode
-  }, [running, runTurn, settings.provider]);
+  }, [running, externalBusy, runTurn, settings.provider]);
 
   const stop = useCallback(() => abortRef.current?.abort(), []);
 
@@ -817,11 +829,11 @@ export function AssistantTab({
             placeholder="Anything you already know (optional): e.g. we have a flood plan but no early-warning system."
             className="w-full px-2.5 py-1.5 rounded-lg bg-surface-overlay border border-border text-text-primary text-sm resize-none" />
           <div className="flex flex-wrap gap-2">
-            <button onClick={handleStartAutonomous} disabled={!city.trim() || !providerReady || running}
+            <button onClick={handleStartAutonomous} disabled={!city.trim() || !providerReady || running || externalBusy}
               className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-semibold btn-accent disabled:opacity-50 disabled:cursor-not-allowed">
               <Sparkles size={16} /> Fill it out for me
             </button>
-            <button onClick={() => fileRef.current?.click()} disabled={running}
+            <button onClick={() => fileRef.current?.click()} disabled={running || externalBusy}
               className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium bg-surface-overlay border border-border text-text-primary disabled:opacity-50">
               <Upload size={15} /> Continue from a file
             </button>
@@ -879,7 +891,7 @@ export function AssistantTab({
           {(showContinue || (!running && canUndo)) && (
             <div className="flex flex-col gap-2">
               {showContinue && (
-                <button onClick={handleContinue} className="self-start flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold btn-accent">
+                <button onClick={handleContinue} disabled={externalBusy} className="self-start flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-semibold btn-accent disabled:opacity-50 disabled:cursor-not-allowed">
                   <Play size={15} /> Continue
                 </button>
               )}
@@ -936,19 +948,20 @@ export function AssistantTab({
 
         {/* Composer */}
         <div className="shrink-0 mt-3 flex items-end gap-2">
-          <button onClick={() => docRef.current?.click()} title="Attach reference documents"
-            className="p-2.5 rounded-xl bg-surface-overlay border border-border text-text-secondary hover:text-text-primary shrink-0">
+          <button onClick={() => docRef.current?.click()} title="Attach reference documents" disabled={externalBusy}
+            className="p-2.5 rounded-xl bg-surface-overlay border border-border text-text-secondary hover:text-text-primary shrink-0 disabled:opacity-40 disabled:cursor-not-allowed">
             <Paperclip size={16} />
           </button>
           <input ref={docRef} type="file" multiple accept=".pdf,.txt,.md,.markdown,.csv,.tsv,.json,.log,.rtf,.html,.htm,.xml,.yaml,.yml,text/*,application/pdf" className="hidden"
             onChange={(e) => { if (e.target.files?.length) void onDocsPicked(e.target.files); e.currentTarget.value = ""; }} />
           <textarea ref={composerRef} value={input} onChange={(e) => setInput(e.target.value)}
             onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); handleSend(); } }}
-            rows={2} placeholder={running ? "Add a note to steer it, picked up on the next step…" : "Reply, paste details, or ask it to adjust something… (Shift+Enter for a new line)"}
-            className="flex-1 px-3 py-2.5 rounded-xl bg-surface-overlay border border-border text-text-primary text-sm resize-none leading-relaxed" />
+            disabled={externalBusy}
+            rows={2} placeholder={externalBusy ? "Waiting for the other task to finish…" : running ? "Add a note to steer it, picked up on the next step…" : "Reply, paste details, or ask it to adjust something… (Shift+Enter for a new line)"}
+            className="flex-1 px-3 py-2.5 rounded-xl bg-surface-overlay border border-border text-text-primary text-sm resize-none leading-relaxed min-h-[3rem] disabled:opacity-60 disabled:cursor-not-allowed" />
           {running ? (
             <>
-              <button onClick={handleSend} disabled={!input.trim()}
+              <button onClick={handleSend} disabled={!input.trim() || externalBusy}
                 title="Add this while it works, it's picked up on the next step"
                 className="flex items-center justify-center px-3.5 py-2.5 rounded-xl btn-accent disabled:opacity-40" aria-label="Queue message">
                 <Send size={16} />
@@ -959,7 +972,7 @@ export function AssistantTab({
               </button>
             </>
           ) : (
-            <button onClick={handleSend} disabled={!input.trim()}
+            <button onClick={handleSend} disabled={!input.trim() || externalBusy}
               className="flex items-center justify-center px-3.5 py-2.5 rounded-xl btn-accent disabled:opacity-50" aria-label="Send">
               <Send size={16} />
             </button>
