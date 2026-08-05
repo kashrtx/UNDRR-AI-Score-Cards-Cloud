@@ -10,7 +10,7 @@
 import { useEffect, useState, useRef, type ReactNode } from "react";
 import {
   Cloud, Cpu, Sparkles, Boxes, MonitorSmartphone, Save, Loader2,
-  CheckCircle2, XCircle, KeyRound, Trash2, Plug, Globe, Search, Compass, ArrowDown, BookCheck,
+  CheckCircle2, XCircle, KeyRound, Trash2, Plug, Globe, Search, Compass, BookCheck,
 } from "lucide-react";
 import {
   type AppSettings, type ProviderId, type CloudProviderId,
@@ -150,29 +150,6 @@ export function SettingsTab({
   const [testing, setTesting] = useState(false);
   const [testMsg, setTestMsg] = useState<{ ok: boolean; message: string } | null>(null);
   const [searchKeyInput, setSearchKeyInput] = useState("");
-  const [moreBelow, setMoreBelow] = useState(false);
-
-  // Show a friendly "more below" pointer while the page is taller than the
-  // screen AND you're not near the bottom yet, so novices know to keep
-  // scrolling. Hides once you reach the end (where there's nothing more).
-  useEffect(() => {
-    const check = () => {
-      const doc = document.documentElement;
-      const scrollable = doc.scrollHeight > window.innerHeight + 40;
-      const nearBottom = window.innerHeight + window.scrollY >= doc.scrollHeight - 120;
-      setMoreBelow(scrollable && !nearBottom);
-    };
-    check();
-    const t1 = setTimeout(check, 200);
-    const t2 = setTimeout(check, 600); // after layout/fonts settle
-    window.addEventListener("scroll", check, { passive: true });
-    window.addEventListener("resize", check);
-    return () => {
-      clearTimeout(t1); clearTimeout(t2);
-      window.removeEventListener("scroll", check);
-      window.removeEventListener("resize", check);
-    };
-  }, []);
   const [searchKeyPresent, setSearchKeyPresent] = useState(false);
 
   useEffect(() => setDraft(settings), [settings]);
@@ -272,8 +249,32 @@ export function SettingsTab({
 
   const origin = typeof window !== "undefined" ? window.location.origin : "https://your-app.vercel.app";
 
+  const jump = (id: string) => {
+    document.getElementById(id)?.scrollIntoView({ behavior: "smooth", block: "start" });
+  };
+
   return (
     <div className="max-w-2xl mx-auto space-y-6">
+      {/* A plain map of the page. Novices can see at a glance that there are
+          three steps plus extras, and jump straight to any of them. */}
+      <nav className="glass-card p-3 flex flex-wrap items-center gap-2" aria-label="Settings sections">
+        <span className="text-xs text-text-secondary px-1">On this page:</span>
+        {[
+          { id: "settings-provider", label: "1. Choose an AI" },
+          { id: "settings-setup", label: "2. Add your key" },
+          { id: "settings-search", label: "3. Web search" },
+          { id: "settings-data", label: "Find data" },
+        ].map((x) => (
+          <button
+            key={x.id}
+            type="button"
+            onClick={() => jump(x.id)}
+            className="press text-xs font-medium px-2.5 py-1.5 rounded-full border border-border text-text-secondary hover:text-text-primary hover:border-accent-500/50 transition-colors"
+          >
+            {x.label}
+          </button>
+        ))}
+      </nav>
       {onReplayTutorial && (
         <div className="glass-card p-4 flex items-center gap-3">
           <div className="w-9 h-9 rounded-xl bg-accent-500/15 text-accent-400 flex items-center justify-center shrink-0">
@@ -297,12 +298,11 @@ export function SettingsTab({
         <ol className="text-sm text-text-secondary space-y-1.5">
           <li><span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-accent-500/20 text-accent-400 text-xs font-bold mr-1.5">1</span> Pick an AI helper from the boxes below (the free ones are listed first).</li>
           <li><span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-accent-500/20 text-accent-400 text-xs font-bold mr-1.5">2</span> Paste its key where it asks, then press <strong>Test</strong> to make sure it works.</li>
-          <li><span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-accent-500/20 text-accent-400 text-xs font-bold mr-1.5">3</span> Scroll down for optional web search and other settings, then press <strong>Save</strong>.</li>
+          <li><span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-accent-500/20 text-accent-400 text-xs font-bold mr-1.5">3</span> Optionally turn on web search, then press <strong>Save</strong>. The row above jumps to any section.</li>
         </ol>
-        <p className="text-xs text-text-secondary mt-2.5">Keep scrolling, there is more further down the page than fits on one screen.</p>
       </div>
 
-      <div>
+      <div id="settings-provider" className="scroll-mt-24">
         <h2 className="text-lg font-semibold text-text-primary mb-1">
           <span className="text-accent-400">Step 1.</span> Choose your AI helper
         </h2>
@@ -360,7 +360,7 @@ export function SettingsTab({
       </div>
 
       {/* Provider-specific configuration */}
-      <div className="glass-card p-5 space-y-4">
+      <div id="settings-setup" className="glass-card p-5 space-y-4 scroll-mt-24">
         <h2 className="text-lg font-semibold text-text-primary">
           <span className="text-accent-400">Step 2.</span> Set up {PROVIDER_META[provider].title}
         </h2>
@@ -625,7 +625,7 @@ export function SettingsTab({
       </div>
 
       {/* Web search (optional Tavily, keyless by default) */}
-      <div className="glass-card p-5 space-y-4">
+      <div id="settings-search" className="glass-card p-5 space-y-4 scroll-mt-24">
         <div>
           <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
             <span className="text-accent-400">Step 3.</span> <Search size={17} className="text-accent-400" /> Web search <span className="text-xs font-normal text-text-secondary">(optional)</span>
@@ -760,7 +760,7 @@ export function SettingsTab({
       </div>
 
       {/* Pointer to the full data-source directory (its own page) */}
-      <div className="glass-card p-5 flex items-center gap-3 flex-wrap">
+      <div id="settings-data" className="glass-card p-5 flex items-center gap-3 flex-wrap scroll-mt-24">
         <span className="grid place-items-center w-10 h-10 rounded-xl bg-accent-500/15 text-accent-300 shrink-0">
           <BookCheck size={18} />
         </span>
@@ -776,16 +776,6 @@ export function SettingsTab({
       {/* Sentinel kept for spacing at the very bottom. */}
       <div aria-hidden="true" className="h-1" />
 
-      {moreBelow && (
-        <button
-          type="button"
-          onClick={() => window.scrollBy({ top: Math.round(window.innerHeight * 0.7), behavior: "smooth" })}
-          className="fixed bottom-5 left-1/2 -translate-x-1/2 z-30 flex items-center gap-2 px-4 py-2.5 rounded-full text-sm font-semibold bg-accent-500 text-white shadow-lg shadow-accent-500/30 animate-bounce"
-          aria-label="Scroll down to see more settings"
-        >
-          <ArrowDown size={16} /> More settings below
-        </button>
-      )}
     </div>
   );
 }
