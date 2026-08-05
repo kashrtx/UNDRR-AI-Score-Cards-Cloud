@@ -145,19 +145,13 @@ The AI is always told to treat the scorecard as the truth and to cross-check the
 
 ---
 
-## The look: Liquid Glass
+## The look
 
-The navigation and floating controls borrow Apple's Liquid Glass material from iOS 26, built in plain CSS and SVG with no extra dependencies.
+The nav bar, floating buttons, dialogs and the advisor panel use a translucent frosted treatment: a backdrop blur over a soft colour wash, so surfaces feel layered instead of flat. It is plain CSS, no extra dependencies and no SVG filters, so it is cheap to paint.
 
-Glass only looks like glass if there is something behind it to bend, so three things work together. A very soft colour field is painted behind the page, low contrast so text stays readable but enough for the material to pick up. The surfaces are genuinely translucent, blurring and saturating whatever they sit over. And the edges behave like glass: light gathers along the top, a specular sheen follows your pointer, and a faint cool and warm fringe at the sides stands in for the way real glass splits light.
+Selecting a section slides a pill behind it. You can also press and drag sideways across the bar and let go on the section you want; pull past either end and it resists rather than escaping.
 
-Apple bends the backdrop through a true lens. On the web that needs an SVG displacement map used as a backdrop filter, which only Chromium supports and which samples an empty backdrop when nested inside another glass surface, so it was unreliable in exactly the places this app needs it. The lensing here is done with light and edge behaviour instead, which renders the same in every browser.
-
-The tab bar is where the motion lives. The active pill is tinted glass rather than paint, so the backdrop still shows through while the tint stays dark enough for white text to stay legible in both themes. Press and drag left or right and the pill follows your finger; as it nears another tab a drop swells out and the two fuse like water touching. Pull past either end and it rubber-bands with damping instead of escaping. Let go and it lands with a small squash.
-
-Getting that smooth took some care, and the approach is worth knowing if you touch it. While you drag, the pill is positioned by writing to its style directly, so React does not re-render on pointer moves. The selection is committed when you let go rather than on every move, because committing mid-drag re-rendered the whole page dozens of times a second. Tab geometry is measured independently of which tab is active, so nothing re-measures underneath the drag. And no keyframe animation ever touches the pill's transform: a CSS animation overrides inline styles, which wiped out the translate that positions it and made it jump to the far left.
-
-Apple's guidance shaped the restraint: one glass sheet per area rather than translucent panes stacked on each other, tint only on primary elements, and labels never drawn over the moving highlight. Reduce Transparency makes every surface solid, Increase Contrast adds a hard border, and Reduce Motion removes the elastic behaviour.
+If you find translucency distracting, the system settings for Reduce Transparency, Increase Contrast and Reduce Motion each turn it down: surfaces go solid, borders get firmer, and the slide becomes near-instant.
 
 ---
 

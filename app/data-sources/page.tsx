@@ -171,7 +171,7 @@ export default function DataSourcesPage() {
                   href={s.url}
                   target="_blank"
                   rel="noreferrer"
-                  className="lg-glass lift group block p-4 rounded-xl hover:border-accent-500/50"
+                  className="lift group block p-4 rounded-xl border border-border bg-surface-raised/70 hover:border-accent-500/50"
                 >
                   <div className="flex items-center gap-2 mb-1">
                     <h3 className="font-semibold text-text-primary group-hover:text-accent-300 transition-colors">{s.name}</h3>

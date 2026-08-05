@@ -1,7 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import "./globals.css";
 import { ErrorBoundary } from "@/components/ErrorBoundary";
-import { GlassFilters } from "@/components/GlassFilters";
 
 export const metadata: Metadata = {
   title: "UNDRR ARISE Scorecard Analyzer",
@@ -30,9 +29,8 @@ export default function RootLayout({
         <script dangerouslySetInnerHTML={{ __html: themeScript }} />
       </head>
       <body className="antialiased">
-        {/* The soft colour field the glass picks up, and the filters it uses. */}
-        <div className="lg-aurora" aria-hidden="true" />
-        <GlassFilters />
+        {/* A soft colour wash so translucent surfaces have something to pick up. */}
+        <div className="bg-glow" aria-hidden="true" />
         <ErrorBoundary>{children}</ErrorBoundary>
       </body>
     </html>

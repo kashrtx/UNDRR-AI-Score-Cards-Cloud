@@ -182,251 +182,118 @@ a, button, input, textarea, select, [role="button"] {
 .lift:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.10); }
 @media (prefers-reduced-motion: reduce) { .lift:hover { transform: none; } }
 
-/* ═══════════════════════════════════════════════════════════════
-   Liquid Glass
-   Apple's iOS 26 material, rebuilt for the web. Glass only looks like
-   glass if there is something behind it to bend, so three things work
-   together here: a soft colour field painted behind the page, a real
-   translucent surface that blurs and saturates whatever it sits over,
-   and light behaviour at the edges (specular sheen plus a faint
-   chromatic fringe, the way real glass splits light).
+/* ── Frosted surfaces ─────────────────────────────────────────
+   A translucent bar/panel treatment used for the nav, the floating
+   buttons, dialogs and the advisor panel. Kept cheap on purpose: one
+   backdrop blur per surface, no SVG filters, no per-frame repaints.
+   Everything collapses to a solid surface when the reader has asked
+   for less transparency, more contrast, or less motion.
+   ──────────────────────────────────────────────────────────── */
 
-   Chromium can run an SVG displacement map as a backdrop filter, which
-   gives true refraction. Safari and Firefox cannot, so that is layered
-   on as an enhancement and everyone else gets the (still very glassy)
-   blur build. Apple's guidance is respected throughout: one glass
-   sheet per area, tint only on primary elements, legibility first, and
-   Reduce Transparency / Increase Contrast / Reduce Motion all honoured.
-   ═══════════════════════════════════════════════════════════════ */
-
-/* A gentle colour field behind everything. Very low contrast, so text
-   stays readable, but it gives the glass something to pick up and is
-   what makes the material feel alive rather than grey. */
-.lg-aurora {
+/* A soft colour wash behind the page so translucent surfaces have
+   something to pick up instead of reading as flat white. Plain
+   gradients, no blur filter, so it costs nothing to paint. */
+.bg-glow {
   position: fixed;
-  inset: -10%;
+  inset: 0;
   z-index: -1;
   pointer-events: none;
   background:
-    radial-gradient(38rem 28rem at 12% 8%, color-mix(in oklch, var(--color-primary-500) 22%, transparent), transparent 70%),
-    radial-gradient(32rem 26rem at 88% 12%, color-mix(in oklch, var(--color-accent-500) 20%, transparent), transparent 70%),
-    radial-gradient(36rem 30rem at 70% 88%, color-mix(in oklch, var(--color-primary-600) 16%, transparent), transparent 72%);
-  filter: blur(30px);
-  opacity: 0.55;
+    radial-gradient(60rem 40rem at 8% -5%, color-mix(in oklch, var(--color-primary-500) 16%, transparent), transparent 65%),
+    radial-gradient(50rem 36rem at 95% 5%, color-mix(in oklch, var(--color-accent-500) 14%, transparent), transparent 65%),
+    radial-gradient(55rem 42rem at 70% 100%, color-mix(in oklch, var(--color-primary-600) 11%, transparent), transparent 68%);
 }
-.dark .lg-aurora { opacity: 0.42; }
+.dark .bg-glow { opacity: 0.5; }
 
-/* ── The material ─────────────────────────────────────────────── */
-.lg-glass {
-  position: relative;
-  isolation: isolate;
-  /* Fallback for anything without backdrop-filter: still readable. */
-  background: color-mix(in oklch, var(--color-surface-raised) 82%, transparent);
-  border: 1px solid rgba(255, 255, 255, 0.55);
+.glass-bar {
+  background: color-mix(in oklch, var(--color-surface-raised) 80%, transparent);
+  border: 1px solid rgba(255, 255, 255, 0.6);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.75),      /* top light edge   */
-    inset 0 -1px 0 rgba(0, 0, 0, 0.05),           /* bottom shade     */
-    inset 1px 0 10px -7px rgba(90, 170, 255, 0.55),  /* cool fringe   */
-    inset -1px 0 10px -7px rgba(255, 140, 180, 0.45),/* warm fringe   */
-    0 10px 30px -12px rgba(15, 23, 42, 0.28);     /* lift             */
+    inset 0 1px 0 rgba(255, 255, 255, 0.7),
+    0 6px 20px -8px rgba(15, 23, 42, 0.2);
 }
 @supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
-  .lg-glass {
-    background: color-mix(in oklch, var(--color-surface-raised) 26%, transparent);
-    -webkit-backdrop-filter: blur(24px) saturate(200%) contrast(1.06) brightness(1.06);
-    backdrop-filter: blur(24px) saturate(200%) contrast(1.06) brightness(1.06);
+  .glass-bar {
+    background: color-mix(in oklch, var(--color-surface-raised) 42%, transparent);
+    -webkit-backdrop-filter: blur(20px) saturate(180%);
+    backdrop-filter: blur(20px) saturate(180%);
   }
 }
-.dark .lg-glass {
-  background: color-mix(in oklch, var(--color-surface-raised) 46%, transparent);
-  border-color: rgba(255, 255, 255, 0.16);
+.dark .glass-bar {
+  background: color-mix(in oklch, var(--color-surface-raised) 62%, transparent);
+  border-color: rgba(255, 255, 255, 0.12);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.16),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.4),
-    inset 1px 0 10px -7px rgba(90, 170, 255, 0.4),
-    inset -1px 0 10px -7px rgba(255, 140, 180, 0.3),
-    0 12px 34px -14px rgba(0, 0, 0, 0.65);
+    inset 0 1px 0 rgba(255, 255, 255, 0.12),
+    0 8px 24px -10px rgba(0, 0, 0, 0.55);
 }
 
-/* Lensing: light gathers at the top and spills down through the pane.
-   Sits behind content, never over text. */
-.lg-glass::before {
-  content: "";
-  position: absolute;
-  inset: 0;
-  border-radius: inherit;
-  pointer-events: none;
-  z-index: -1;
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.5) 0%, rgba(255, 255, 255, 0.06) 42%, rgba(255, 255, 255, 0) 100%),
-    radial-gradient(140% 120% at 50% -30%, rgba(255, 255, 255, 0.4), transparent 62%);
+/* A calmer version for large panels, where long text needs a steadier
+   backdrop than a toolbar does. */
+.glass-sheet {
+  background: color-mix(in oklch, var(--color-surface-raised) 90%, transparent);
+  border-color: rgba(255, 255, 255, 0.4);
 }
-.dark .lg-glass::before {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.13) 0%, rgba(255, 255, 255, 0.02) 42%, rgba(255, 255, 255, 0) 100%),
-    radial-gradient(140% 120% at 50% -30%, rgba(255, 255, 255, 0.12), transparent 62%);
+@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
+  .glass-sheet {
+    background: color-mix(in oklch, var(--color-surface-raised) 78%, transparent);
+    -webkit-backdrop-filter: blur(24px) saturate(160%);
+    backdrop-filter: blur(24px) saturate(160%);
+  }
 }
-
-/* A note on refraction: Apple bends the backdrop through a real lens. On the
-   web that needs an SVG displacement map as a backdrop-filter, which only
-   Chromium supports, and which samples an empty backdrop when nested inside
-   another glass surface. It was unreliable in exactly the places this app needs
-   it, so the lensing here is done with light and edge behaviour instead, which
-   renders the same in every browser. */
-
-/* Specular highlight that tracks the pointer. Small amplitude on
-   purpose: a sheen, not a light show. --lg-x/--lg-y come from JS. */
-.lg-specular {
-  --lg-x: 50%;
-  --lg-y: 50%;
-  --lg-glow: 0;
-  isolation: isolate;   /* keeps the sheen's blending local, and its own layer */
-}
-.lg-specular > .lg-sheen {
-  position: absolute;
-  inset: 0;
-  z-index: -1;          /* above the glass surface, never over text */
-  border-radius: inherit;
-  pointer-events: none;
-  opacity: var(--lg-glow);
-  transition: opacity 0.35s ease;
-  background:
-    radial-gradient(circle 150px at var(--lg-x) var(--lg-y), rgba(255, 255, 255, 0.55), transparent 68%);
-  mix-blend-mode: screen;
-}
-.dark .lg-specular > .lg-sheen {
-  background:
-    radial-gradient(circle 150px at var(--lg-x) var(--lg-y), rgba(255, 255, 255, 0.2), transparent 68%);
+.dark .glass-sheet {
+  background: color-mix(in oklch, var(--color-surface-raised) 86%, transparent);
+  border-color: rgba(255, 255, 255, 0.1);
 }
 
-/* ── The tinted pill that marks the active section ────────────── */
-/* Tinted glass, not paint: the backdrop still shows through, while the
-   tint stays dark enough that white text clears 4.5:1. */
-.lg-pill {
+/* The marker behind the selected section. Tinted glass rather than flat
+   paint, but solid enough that white text stays clearly legible. */
+.glass-pill {
   background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.42) 0%, rgba(255, 255, 255, 0.08) 38%, rgba(255, 255, 255, 0) 62%),
-    linear-gradient(
-      180deg,
-      color-mix(in oklch, var(--color-primary-600) 62%, transparent),
-      color-mix(in oklch, var(--color-primary-700) 80%, transparent)
-    );
-  -webkit-backdrop-filter: blur(10px) saturate(170%) brightness(1.06);
-  backdrop-filter: blur(10px) saturate(170%) brightness(1.06);
-  border: 1px solid rgba(255, 255, 255, 0.34);
+    linear-gradient(180deg, rgba(255, 255, 255, 0.3) 0%, rgba(255, 255, 255, 0) 55%),
+    linear-gradient(180deg, var(--color-primary-600), var(--color-primary-700));
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.5),
-    inset 0 -2px 6px -2px rgba(0, 0, 0, 0.28),
-    inset 1px 0 8px -6px rgba(140, 200, 255, 0.7),
-    inset -1px 0 8px -6px rgba(255, 150, 190, 0.5),
-    0 8px 20px -8px color-mix(in oklch, var(--color-primary-700) 65%, transparent);
-}
-.dark .lg-pill {
-  background:
-    linear-gradient(180deg, rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0.04) 38%, rgba(255, 255, 255, 0) 62%),
-    linear-gradient(
-      180deg,
-      color-mix(in oklch, var(--color-primary-600) 70%, transparent),
-      color-mix(in oklch, var(--color-primary-700) 86%, transparent)
-    );
-  border-color: rgba(255, 255, 255, 0.18);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.24),
-    inset 0 -2px 6px -2px rgba(0, 0, 0, 0.45),
-    0 10px 24px -10px rgba(0, 0, 0, 0.6);
+    inset 0 1px 0 rgba(255, 255, 255, 0.4),
+    inset 0 -2px 5px -2px rgba(0, 0, 0, 0.25),
+    0 4px 12px -4px color-mix(in oklch, var(--color-primary-700) 55%, transparent);
 }
 
-/* ── Motion: spring, squash, settle ──────────────────────────── */
-.lg-spring {
+/* Tint for one prominent action. Used sparingly. */
+.glass-tint {
+  background: linear-gradient(180deg,
+    color-mix(in oklch, var(--color-accent-500) 88%, transparent),
+    var(--color-accent-500));
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.4),
+    0 8px 22px -8px color-mix(in oklch, var(--color-accent-500) 55%, transparent);
+}
+
+/* One easing for both properties so they can never disagree. */
+.glass-spring {
   transition:
-    transform 0.44s cubic-bezier(0.32, 1.28, 0.42, 1),
-    width 0.44s cubic-bezier(0.32, 1.28, 0.42, 1);
+    transform 0.34s cubic-bezier(0.3, 1.2, 0.4, 1),
+    width 0.34s cubic-bezier(0.3, 1.2, 0.4, 1);
   will-change: transform, width;
 }
-.lg-dragging { transition: none; }
+.glass-still { transition: none; }
 
-/* Note: the pill's squash-and-stretch is applied through its inline transform,
-   never a keyframe animation. An animation on `transform` would override the
-   inline transform that positions the pill, which made it jump to the far left
-   for the duration of the animation. */
+/* Buttons give a little when pressed. */
+.press { transition: transform 0.16s ease; }
+.press:active { transform: scale(0.97); }
 
-/* Press feedback: glass gives a little, the way Apple's controls do. */
-.lg-press { transition: transform 0.18s cubic-bezier(0.22, 1.2, 0.36, 1); }
-.lg-press:active { transform: scale(0.97); }
-
-/* ── Accessibility modifiers ─────────────────────────────────── */
-@media (prefers-reduced-transparency: reduce) {
-  .lg-glass {
+@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
+  .glass-bar, .glass-sheet {
     background: var(--color-surface-raised);
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
-  .lg-glass::before, .lg-specular > .lg-sheen { display: none; }
-  .lg-pill {
-    background: var(--color-primary-700);
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
-  }
-  .lg-aurora { display: none; }
+  .glass-pill { background: var(--color-primary-700); }
+  .glass-tint { background: var(--color-accent-500); }
+  .bg-glow { display: none; }
 }
-
 @media (prefers-contrast: more) {
-  .lg-glass {
-    background: var(--color-surface-raised);
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
-    border-color: var(--color-text-primary);
-  }
-  .lg-glass::before, .lg-specular > .lg-sheen { display: none; }
-  .lg-pill { background: var(--color-primary-700); }
-  .lg-aurora { display: none; }
+  .glass-bar, .glass-sheet { border-color: var(--color-text-primary); }
 }
-
 @media (prefers-reduced-motion: reduce) {
-  .lg-spring { transition: transform 0.12s linear, width 0.12s linear; }
-  .lg-settle { animation: none; }
-  .lg-press:active { transform: none; }
-  .lg-specular > .lg-sheen { display: none; }
-}
-
-/* A calmer glass for large panels and sheets. Long-form text needs a
-   more settled backdrop than a toolbar does, so this reads as thicker
-   glass: less see-through, same light behaviour. */
-.lg-sheet {
-  background: color-mix(in oklch, var(--color-surface-raised) 88%, transparent);
-}
-@supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
-  .lg-sheet {
-    background: color-mix(in oklch, var(--color-surface-raised) 72%, transparent);
-    -webkit-backdrop-filter: blur(30px) saturate(170%);
-    backdrop-filter: blur(30px) saturate(170%);
-  }
-}
-@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
-  .lg-sheet {
-    background: var(--color-surface-raised);
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
-  }
-}
-
-/* Tinted glass for a prominent action (used sparingly, as Apple advises). */
-.lg-tint-accent {
-  background: linear-gradient(
-    180deg,
-    color-mix(in oklch, var(--color-accent-500) 74%, transparent),
-    color-mix(in oklch, var(--color-accent-500) 92%, transparent)
-  );
-  -webkit-backdrop-filter: blur(10px) saturate(170%);
-  backdrop-filter: blur(10px) saturate(170%);
-  box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.45),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.16),
-    0 10px 26px -8px color-mix(in oklch, var(--color-accent-500) 55%, transparent);
-}
-@media (prefers-reduced-transparency: reduce), (prefers-contrast: more) {
-  .lg-tint-accent {
-    background: var(--color-accent-500);
-    -webkit-backdrop-filter: none;
-    backdrop-filter: none;
-  }
+  .glass-spring { transition: transform 0.1s linear, width 0.1s linear; }
+  .press:active { transform: none; }
 }

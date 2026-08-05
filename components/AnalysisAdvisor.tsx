@@ -347,8 +347,7 @@ Reply to the latest User message only.`;
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       <div className="absolute inset-0 bg-black/35 [backdrop-filter:blur(3px)] animate-fadeInUp" onClick={onClose} aria-hidden="true" />
-      <div className="lg-glass lg-sheet lg-specular relative w-full sm:max-w-lg h-full border-l border-border/70 rounded-none flex flex-col animate-fadeInUp">
-        <span className="lg-sheen" aria-hidden="true" />
+      <div className="glass-sheet relative w-full sm:max-w-lg h-full border-l border-border/70 flex flex-col animate-fadeInUp">
         {/* Header */}
         <div className="flex items-center gap-2 p-4 border-b border-border shrink-0">
           <span className="grid place-items-center w-8 h-8 rounded-lg bg-accent-500/20 text-accent-300 animate-breathe">
