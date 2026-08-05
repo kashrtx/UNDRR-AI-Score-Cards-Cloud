@@ -232,13 +232,14 @@ a, button, input, textarea, select, [role="button"] {
 }
 @supports ((-webkit-backdrop-filter: blur(1px)) or (backdrop-filter: blur(1px))) {
   .lg-glass {
-    background: color-mix(in oklch, var(--color-surface-raised) 38%, transparent);
-    -webkit-backdrop-filter: blur(22px) saturate(185%) contrast(1.04) brightness(1.04);
-    backdrop-filter: blur(22px) saturate(185%) contrast(1.04) brightness(1.04);
+    background: color-mix(in oklch, var(--color-surface-raised) 26%, transparent);
+    -webkit-backdrop-filter: blur(24px) saturate(200%) contrast(1.06) brightness(1.06);
+    backdrop-filter: blur(24px) saturate(200%) contrast(1.06) brightness(1.06);
   }
 }
 .dark .lg-glass {
-  border-color: rgba(255, 255, 255, 0.14);
+  background: color-mix(in oklch, var(--color-surface-raised) 46%, transparent);
+  border-color: rgba(255, 255, 255, 0.16);
   box-shadow:
     inset 0 1px 0 rgba(255, 255, 255, 0.16),
     inset 0 -1px 0 rgba(0, 0, 0, 0.4),
@@ -266,22 +267,12 @@ a, button, input, textarea, select, [role="button"] {
     radial-gradient(140% 120% at 50% -30%, rgba(255, 255, 255, 0.12), transparent 62%);
 }
 
-/* True refraction, where the browser can do it (Chromium today). The
-   backdrop is warped through a displacement map, so edges bend the
-   content behind them like a real lens. */
-@supports (backdrop-filter: url(#lg-refract)) {
-  .lg-refract::after {
-    content: "";
-    position: absolute;
-    inset: 0;
-    border-radius: inherit;
-    pointer-events: none;
-    z-index: -1;
-    opacity: 0.55;
-    -webkit-backdrop-filter: url(#lg-refract);
-    backdrop-filter: url(#lg-refract);
-  }
-}
+/* A note on refraction: Apple bends the backdrop through a real lens. On the
+   web that needs an SVG displacement map as a backdrop-filter, which only
+   Chromium supports, and which samples an empty backdrop when nested inside
+   another glass surface. It was unreliable in exactly the places this app needs
+   it, so the lensing here is done with light and edge behaviour instead, which
+   renders the same in every browser. */
 
 /* Specular highlight that tracks the pointer. Small amplitude on
    purpose: a sheen, not a light show. --lg-x/--lg-y come from JS. */
@@ -312,33 +303,51 @@ a, button, input, textarea, select, [role="button"] {
 /* Tinted glass, not paint: the backdrop still shows through, while the
    tint stays dark enough that white text clears 4.5:1. */
 .lg-pill {
-  background: linear-gradient(
-    180deg,
-    color-mix(in oklch, var(--color-primary-600) 68%, transparent),
-    color-mix(in oklch, var(--color-primary-700) 84%, transparent)
-  );
-  -webkit-backdrop-filter: blur(8px) saturate(160%);
-  backdrop-filter: blur(8px) saturate(160%);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.42) 0%, rgba(255, 255, 255, 0.08) 38%, rgba(255, 255, 255, 0) 62%),
+    linear-gradient(
+      180deg,
+      color-mix(in oklch, var(--color-primary-600) 62%, transparent),
+      color-mix(in oklch, var(--color-primary-700) 80%, transparent)
+    );
+  -webkit-backdrop-filter: blur(10px) saturate(170%) brightness(1.06);
+  backdrop-filter: blur(10px) saturate(170%) brightness(1.06);
+  border: 1px solid rgba(255, 255, 255, 0.34);
   box-shadow:
-    inset 0 1px 0 rgba(255, 255, 255, 0.45),
-    inset 0 -1px 0 rgba(0, 0, 0, 0.18),
-    0 6px 18px -6px color-mix(in oklch, var(--color-primary-700) 60%, transparent);
+    inset 0 1px 0 rgba(255, 255, 255, 0.5),
+    inset 0 -2px 6px -2px rgba(0, 0, 0, 0.28),
+    inset 1px 0 8px -6px rgba(140, 200, 255, 0.7),
+    inset -1px 0 8px -6px rgba(255, 150, 190, 0.5),
+    0 8px 20px -8px color-mix(in oklch, var(--color-primary-700) 65%, transparent);
+}
+.dark .lg-pill {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.22) 0%, rgba(255, 255, 255, 0.04) 38%, rgba(255, 255, 255, 0) 62%),
+    linear-gradient(
+      180deg,
+      color-mix(in oklch, var(--color-primary-600) 70%, transparent),
+      color-mix(in oklch, var(--color-primary-700) 86%, transparent)
+    );
+  border-color: rgba(255, 255, 255, 0.18);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.24),
+    inset 0 -2px 6px -2px rgba(0, 0, 0, 0.45),
+    0 10px 24px -10px rgba(0, 0, 0, 0.6);
 }
 
 /* ── Motion: spring, squash, settle ──────────────────────────── */
 .lg-spring {
   transition:
-    transform 0.5s cubic-bezier(0.22, 1.4, 0.36, 1),
-    width 0.42s cubic-bezier(0.22, 1.2, 0.36, 1);
+    transform 0.44s cubic-bezier(0.32, 1.28, 0.42, 1),
+    width 0.44s cubic-bezier(0.32, 1.28, 0.42, 1);
+  will-change: transform, width;
 }
 .lg-dragging { transition: none; }
 
-@keyframes lgSettle {
-  0%   { transform: scale(1.06, 0.92); }
-  55%  { transform: scale(0.98, 1.04); }
-  100% { transform: scale(1, 1); }
-}
-.lg-settle { animation: lgSettle 0.45s cubic-bezier(0.22, 1.2, 0.36, 1); }
+/* Note: the pill's squash-and-stretch is applied through its inline transform,
+   never a keyframe animation. An animation on `transform` would override the
+   inline transform that positions the pill, which made it jump to the far left
+   for the duration of the animation. */
 
 /* Press feedback: glass gives a little, the way Apple's controls do. */
 .lg-press { transition: transform 0.18s cubic-bezier(0.22, 1.2, 0.36, 1); }
@@ -351,7 +360,7 @@ a, button, input, textarea, select, [role="button"] {
     -webkit-backdrop-filter: none;
     backdrop-filter: none;
   }
-  .lg-glass::before, .lg-refract::after, .lg-specular > .lg-sheen { display: none; }
+  .lg-glass::before, .lg-specular > .lg-sheen { display: none; }
   .lg-pill {
     background: var(--color-primary-700);
     -webkit-backdrop-filter: none;
@@ -367,7 +376,7 @@ a, button, input, textarea, select, [role="button"] {
     backdrop-filter: none;
     border-color: var(--color-text-primary);
   }
-  .lg-glass::before, .lg-refract::after, .lg-specular > .lg-sheen { display: none; }
+  .lg-glass::before, .lg-specular > .lg-sheen { display: none; }
   .lg-pill { background: var(--color-primary-700); }
   .lg-aurora { display: none; }
 }

@@ -1013,7 +1013,7 @@ export default function Page() {
             onClick={replayTour}
             title="New here? Take the quick tour"
             aria-label="Take the quick tour"
-            className="lg-glass lg-refract lg-specular lg-press relative overflow-hidden flex items-center gap-2 rounded-full text-text-primary pl-3 pr-4 py-2.5 hover:scale-105 transition-transform"
+            className="lg-glass lg-specular lg-press relative overflow-hidden flex items-center gap-2 rounded-full text-text-primary pl-3 pr-4 py-2.5 hover:scale-105 transition-transform"
           >
             <span className="lg-sheen" aria-hidden="true" />
             <HelpCircle size={18} className="text-accent-400" />
