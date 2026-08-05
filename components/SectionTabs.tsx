@@ -67,6 +67,11 @@ export function SectionTabs<T extends string>({
   const rectsRef = useRef<Rect[]>([]);
   const previewRef = useRef<number | null>(null);
   const dragXRef = useRef<number | null>(null);
+  /** Where the press started, and whether it has become a real drag yet. */
+  const pressXRef = useRef<number | null>(null);
+  const draggingRef = useRef(false);
+  /** Set briefly after a drag so the click it generates does not also fire. */
+  const didDragRef = useRef(false);
   useEffect(() => { rectsRef.current = rects; }, [rects]);
 
   // Measure every tab once, and on resize. Deliberately independent of which
@@ -124,17 +129,26 @@ export function SectionTabs<T extends string>({
     if (e.pointerType === "mouse" && e.button !== 0) return;
     const wrap = wrapRef.current;
     if (!wrap || rectsRef.current.length === 0) return;
-    dragXRef.current = e.clientX - wrap.getBoundingClientRect().left;
-    setDragging(true);
-    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+    // Only record the press here. Capturing the pointer now would retarget the
+    // pointerup and stop the button's click from firing, which is exactly why a
+    // plain click used to slide the pill and then snap back without navigating.
+    pressXRef.current = e.clientX - wrap.getBoundingClientRect().left;
   };
 
   const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (!dragging) return;
+    if (pressXRef.current == null) return;
     const wrap = wrapRef.current;
     const rs = rectsRef.current;
     if (!wrap || rs.length === 0) return;
     const raw = e.clientX - wrap.getBoundingClientRect().left;
+    // A press only becomes a drag once it has travelled a few pixels, so a
+    // normal click (or a slightly shaky one) still selects the section.
+    if (!draggingRef.current) {
+      if (Math.abs(raw - pressXRef.current) < 6) return;
+      draggingRef.current = true;
+      setDragging(true);
+      try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+    }
     const i = nearest(raw);
     const w = rs[i].width;
     const min = rs[0].left + w / 2;
@@ -147,13 +161,20 @@ export function SectionTabs<T extends string>({
   };
 
   const endDrag = (e: React.PointerEvent<HTMLDivElement>) => {
+    const wasDragging = draggingRef.current;
+    pressXRef.current = null;
+    draggingRef.current = false;
+    if (!wasDragging) return; // a plain click: the button's onClick handles it
     try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
-    if (!dragging) return;
     const target = previewRef.current ?? activeIndex;
     dragXRef.current = null;
     previewRef.current = null;
     setPreview(null);
     setDragging(false);
+    // Swallow the click this drag will generate, so it cannot select whichever
+    // tab the press started on.
+    didDragRef.current = true;
+    setTimeout(() => { didDragRef.current = false; }, 0);
     if (tabs[target] && tabs[target].id !== value) onChange(tabs[target].id);
   };
 
@@ -203,9 +224,9 @@ export function SectionTabs<T extends string>({
             role="tab"
             aria-selected={t.id === value}
             tabIndex={t.id === value ? 0 : -1}
-            onClick={() => onChange(t.id)}
-            className={`press relative z-10 flex items-center gap-1.5 px-3.5 sm:px-4 py-2 rounded-full text-sm font-semibold whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-primary-400 focus-visible:ring-offset-0 transition-colors duration-150 ${
-              lit ? "text-white" : "text-text-secondary hover:text-text-primary"
+            onClick={() => { if (didDragRef.current) return; onChange(t.id); }}
+            className={`press relative z-10 flex items-center gap-1.5 px-3.5 sm:px-4 py-2 rounded-full text-sm font-semibold whitespace-nowrap outline-none focus-visible:ring-2 focus-visible:ring-accent-400 focus-visible:ring-offset-0 transition-colors duration-150 ${
+              lit ? "on-accent" : "text-text-secondary hover:text-text-primary"
             }`}
           >
             {t.icon}

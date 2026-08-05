@@ -1001,7 +1001,7 @@ export default function Page() {
             onClick={() => setRefineOpen(true)}
             title="Ask the analysis advisor to help sharpen this analysis"
             aria-label="Open the analysis advisor"
-            className="glass-tint press flex items-center gap-2 rounded-full text-white pl-4 pr-5 py-3.5 animate-breathe hover:scale-105 transition-transform"
+            className="glass-tint press on-accent flex items-center gap-2 rounded-full pl-4 pr-5 py-3.5 animate-breathe hover:scale-105 transition-transform"
           >
             <Sparkles size={20} />
             <span className="text-sm font-semibold">Ask the advisor</span>
