@@ -88,7 +88,7 @@ export class LMStudioProvider implements LLMProvider {
       const reasoning = choice?.delta?.reasoning ?? choice?.delta?.reasoning_content;
       if (reasoning) {
         sawReasoning = true;
-        handlers?.onToken?.(reasoning);
+        if (handlers?.onReasoning) handlers.onReasoning(reasoning); else handlers?.onToken?.(reasoning);
       }
       if (choice?.delta?.content) {
         full += choice.delta.content;

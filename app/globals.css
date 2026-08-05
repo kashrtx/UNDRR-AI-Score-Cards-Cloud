@@ -181,3 +181,125 @@ a, button, input, textarea, select, [role="button"] {
 .lift { transition: transform 0.15s ease, box-shadow 0.15s ease, border-color 0.15s ease; }
 .lift:hover { transform: translateY(-2px); box-shadow: 0 8px 24px rgba(0,0,0,0.10); }
 @media (prefers-reduced-motion: reduce) { .lift:hover { transform: none; } }
+
+/* ═══════════════════════════════════════════════════════════════
+   Liquid Glass
+   Modelled on Apple's iOS 26 material: translucency plus real-time
+   blur, light bending (lensing) at the edges, and a moving specular
+   highlight. Apple's own guidance is followed on the parts that
+   matter for usability: layer economy (one glass sheet per area, no
+   stacking), selective tinting for primary elements only, and full
+   respect for Reduce Transparency, Increase Contrast and Reduce
+   Motion. Legibility wins over gloss every time.
+   ═══════════════════════════════════════════════════════════════ */
+
+.lg-glass {
+  position: relative;
+  isolation: isolate;
+  background: rgba(255, 255, 255, 0.55);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  border: 1px solid rgba(255, 255, 255, 0.7);
+  box-shadow:
+    0 1px 0 0 rgba(255, 255, 255, 0.75) inset,          /* top light edge */
+    0 -1px 0 0 rgba(0, 0, 0, 0.04) inset,               /* bottom shade   */
+    0 8px 24px -8px rgba(15, 23, 42, 0.18);             /* lift           */
+}
+.dark .lg-glass {
+  background: rgba(30, 35, 48, 0.55);
+  border-color: rgba(255, 255, 255, 0.12);
+  box-shadow:
+    0 1px 0 0 rgba(255, 255, 255, 0.10) inset,
+    0 -1px 0 0 rgba(0, 0, 0, 0.30) inset,
+    0 10px 28px -10px rgba(0, 0, 0, 0.55);
+}
+
+/* Lensing: light gathers along the top edge and bends through the
+   surface. A pseudo-element keeps it behind content, never over text. */
+.lg-glass::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: -1;
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.45) 0%, rgba(255, 255, 255, 0) 55%),
+    radial-gradient(120% 100% at 50% -20%, rgba(255, 255, 255, 0.35), transparent 60%);
+}
+.dark .lg-glass::before {
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.10) 0%, rgba(255, 255, 255, 0) 55%),
+    radial-gradient(120% 100% at 50% -20%, rgba(255, 255, 255, 0.10), transparent 60%);
+}
+
+/* Specular highlight that tracks the pointer. Amplitude is kept small
+   (Apple's accessibility guidance suggests ~6px of movement) so it
+   reads as a sheen rather than a distraction. --lg-x / --lg-y are set
+   in JS; without JS it simply sits centred and still. */
+.lg-specular::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  z-index: -1;
+  opacity: var(--lg-glow, 0);
+  transition: opacity 0.3s ease;
+  background: radial-gradient(
+    circle 120px at var(--lg-x, 50%) var(--lg-y, 50%),
+    rgba(255, 255, 255, 0.5),
+    transparent 70%
+  );
+}
+.dark .lg-specular::after {
+  background: radial-gradient(
+    circle 120px at var(--lg-x, 50%) var(--lg-y, 50%),
+    rgba(255, 255, 255, 0.16),
+    transparent 70%
+  );
+}
+
+/* The tinted pill that marks the active section. Tinting is used only
+   here (a primary element), as Apple advises, not on every surface. */
+.lg-pill {
+  background: linear-gradient(180deg, var(--color-primary-500), var(--color-primary-700));
+  box-shadow:
+    0 1px 0 0 rgba(255, 255, 255, 0.35) inset,
+    0 6px 16px -6px rgba(15, 23, 42, 0.45);
+}
+
+/* Spring-ish easing for the slide, and the squash-and-stretch that
+   makes the pill feel like liquid rather than a rectangle. */
+.lg-spring { transition: transform 0.42s cubic-bezier(0.34, 1.4, 0.5, 1), width 0.42s cubic-bezier(0.34, 1.4, 0.5, 1); }
+.lg-dragging { transition: none; }
+
+/* ── Accessibility modifiers ─────────────────────────────────── */
+
+/* Reduce Transparency: frostier, then fully solid. Content behind is
+   obscured rather than shining through. */
+@media (prefers-reduced-transparency: reduce) {
+  .lg-glass {
+    background: var(--color-surface-raised);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .lg-glass::before, .lg-specular::after { display: none; }
+}
+
+/* Increase Contrast: solid surface and a clearly contrasting border. */
+@media (prefers-contrast: more) {
+  .lg-glass {
+    background: var(--color-surface-raised);
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    border-color: var(--color-text-primary);
+  }
+  .lg-glass::before, .lg-specular::after { display: none; }
+}
+
+/* Reduce Motion: keep the material, drop the elastic behaviour. */
+@media (prefers-reduced-motion: reduce) {
+  .lg-spring { transition: transform 0.12s linear, width 0.12s linear; }
+  .lg-specular::after { display: none; }
+}

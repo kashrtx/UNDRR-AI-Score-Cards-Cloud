@@ -84,7 +84,7 @@ export class GeminiProvider implements LLMProvider {
         if (p.thought) {
           // Internal reasoning — show it live, but keep it out of the answer.
           sawThinking = true;
-          handlers?.onToken?.(p.text);
+          if (handlers?.onReasoning) handlers.onReasoning(p.text); else handlers?.onToken?.(p.text);
         } else {
           full += p.text;
           handlers?.onToken?.(p.text);

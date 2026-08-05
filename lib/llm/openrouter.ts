@@ -91,7 +91,7 @@ export class OpenRouterProvider implements LLMProvider {
       const reasoning = delta?.reasoning ?? delta?.reasoning_content;
       if (reasoning) {
         sawReasoning = true;
-        handlers?.onToken?.(reasoning);
+        if (handlers?.onReasoning) handlers.onReasoning(reasoning); else handlers?.onToken?.(reasoning);
       }
       if (delta?.content) {
         full += delta.content;

@@ -7,8 +7,17 @@
  */
 
 export interface LLMStreamHandlers {
-  /** Called with each incremental text delta as it streams in. */
+  /** Called with each incremental text delta of the ANSWER as it streams in. */
   onToken?: (delta: string) => void;
+  /**
+   * Called with a thinking-model's internal reasoning, separately from the
+   * answer. If a caller provides this, providers send reasoning here instead of
+   * to onToken, so a chat UI can show a discreet "thinking" indicator without
+   * leaking the model's scratchpad into the visible message. Callers that don't
+   * provide it keep the old behaviour (reasoning flows into onToken) so the
+   * analysis narration still shows life while a reasoning model works.
+   */
+  onReasoning?: (delta: string) => void;
 }
 
 export interface LLMProvider {

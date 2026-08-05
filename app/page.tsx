@@ -28,6 +28,7 @@ import { StatusBar } from "@/components/StatusBar";
 import { GettingStarted } from "@/components/GettingStarted";
 import { ModelSuggestion } from "@/components/ModelSuggestion";
 import { AnalysisAdvisor } from "@/components/AnalysisAdvisor";
+import { LiquidTabs } from "@/components/LiquidTabs";
 import { renderInline } from "@/lib/ui/markdown";
 import { AnalysisProgress } from "@/components/AnalysisProgress";
 import { DataSourcesPanel } from "@/components/DataSourcesPanel";
@@ -227,7 +228,7 @@ export default function Page() {
     setRefineFacts([]);
     try {
       localStorage.removeItem(REFINE_KEY);
-      localStorage.removeItem("undrr.advisor.chat");
+      localStorage.removeItem("undrr.advisor.threads");
     } catch { /* ignore */ }
   }, []);
 
@@ -455,7 +456,7 @@ export default function Page() {
   return (
     <div className="min-h-screen flex flex-col">
       {/* ── Header ─────────────────────────────── */}
-      <header className="sticky top-0 z-40 backdrop-blur-xl bg-surface/80 border-b border-border">
+      <header className="sticky top-0 z-40 backdrop-blur-xl [backdrop-filter:blur(24px)_saturate(180%)] bg-surface/70 border-b border-border">
         <div className="max-w-[1600px] mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-2 sm:gap-4 flex-wrap">
           <div className="flex items-center gap-2.5 min-w-0">
             <Logo size={34} />
@@ -470,32 +471,15 @@ export default function Page() {
           </div>
 
           <div className="flex items-center gap-2 order-3 sm:order-none w-full sm:w-auto justify-between sm:justify-normal">
-            <nav className="flex items-center gap-1 bg-surface-overlay/40 rounded-xl p-1">
-              <button
-                onClick={() => setTab("dashboard")}
-                className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                  tab === "dashboard" ? "bg-primary-700 text-white" : "text-text-secondary hover:text-text-primary"
-                }`}
-              >
-                <LayoutDashboard size={15} /> <span className="hidden sm:inline">Dashboard</span>
-              </button>
-              <button
-                onClick={() => setTab("assistant")}
-                className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                  tab === "assistant" ? "bg-primary-700 text-white" : "text-text-secondary hover:text-text-primary"
-                }`}
-              >
-                <Bot size={15} /> <span className="hidden sm:inline">Assistant</span>
-              </button>
-              <button
-                onClick={() => setTab("settings")}
-                className={`flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-sm font-medium transition-all ${
-                  tab === "settings" ? "bg-primary-700 text-white" : "text-text-secondary hover:text-text-primary"
-                }`}
-              >
-                <SettingsIcon size={15} /> <span className="hidden sm:inline">Settings</span>
-              </button>
-            </nav>
+            <LiquidTabs
+              value={tab}
+              onChange={setTab}
+              tabs={[
+                { id: "dashboard" as const, label: "Dashboard", shortLabel: "Home", icon: <LayoutDashboard size={15} /> },
+                { id: "assistant" as const, label: "Assistant", shortLabel: "Build", icon: <Bot size={15} /> },
+                { id: "settings" as const, label: "Settings", shortLabel: "Setup", icon: <SettingsIcon size={15} /> },
+              ]}
+            />
 
             <a
               href="/data-sources"
@@ -921,7 +905,8 @@ export default function Page() {
       >
         Loading <strong className="text-text-primary">{pendingUpload?.name}</strong> will replace the
         {state === "analyzing" ? " analysis that's currently running" : analysis ? " current analysis results" : " scorecard currently loaded"} for{" "}
-        <strong className="text-text-primary">{scorecard?.city.name}</strong>.
+        <strong className="text-text-primary">{scorecard?.city.name}</strong>. Any data you added and your saved advisor
+        conversations for that city are cleared too.
         {analysis ? " You can download the current report first, otherwise it's discarded." : " This can't be undone."}
       </ConfirmModal>
 
@@ -952,9 +937,9 @@ export default function Page() {
           { label: "Cancel", variant: "ghost", onClick: () => setConfirmRemove(false) },
         ]}
       >
-        Removing <strong className="text-text-primary">{scorecard?.city.name}</strong> will erase its
-        completed analysis results. This can&apos;t be undone, download them first if you want to
-        keep a copy.
+        Removing <strong className="text-text-primary">{scorecard?.city.name}</strong> will erase its completed
+        analysis, any data you added, and your saved advisor conversations for it. This can&apos;t be undone, download
+        them first if you want to keep a copy.
       </ConfirmModal>
 
       {/* ── Clear-results warning modal ─────────── */}
@@ -982,8 +967,9 @@ export default function Page() {
         ]}
       >
         This clears the analysis for <strong className="text-text-primary">{scorecard?.city.name}</strong>
-        {refineFacts.length > 0 ? ", along with the " + refineFacts.length + " piece(s) of data you added" : ""}. The
-        scorecard itself stays. This can&apos;t be undone, so download the report first if you want to keep it.
+        {refineFacts.length > 0 ? ", the " + refineFacts.length + " piece(s) of data you added" : ""}, and your saved
+        advisor conversations for this city. The scorecard itself stays. This can&apos;t be undone, so download the
+        report first if you want to keep it.
       </ConfirmModal>
 
       {/* ── First-visit / replayable tour ──────── */}
@@ -1026,7 +1012,7 @@ export default function Page() {
             onClick={replayTour}
             title="New here? Take the quick tour"
             aria-label="Take the quick tour"
-            className="flex items-center gap-2 rounded-full bg-surface-raised text-text-primary border border-border pl-3 pr-4 py-2.5 shadow-lg hover:scale-105 active:scale-95 transition-transform"
+            className="lg-glass lg-specular flex items-center gap-2 rounded-full text-text-primary pl-3 pr-4 py-2.5 hover:scale-105 active:scale-95 transition-transform"
           >
             <HelpCircle size={18} className="text-accent-400" />
             <span className="text-sm font-medium hidden sm:inline">Need help?</span>

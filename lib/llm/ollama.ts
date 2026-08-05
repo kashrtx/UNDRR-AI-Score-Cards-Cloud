@@ -76,7 +76,7 @@ export class OllamaProvider implements LLMProvider {
       if (o.error) throw new Error(`Ollama error: ${o.error}`);
       if (o.message?.thinking) {
         sawThinking = true;
-        handlers?.onToken?.(o.message.thinking);
+        if (handlers?.onReasoning) handlers.onReasoning(o.message.thinking); else handlers?.onToken?.(o.message.thinking);
       }
       if (o.message?.content) {
         full += o.message.content;

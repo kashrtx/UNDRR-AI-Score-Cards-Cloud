@@ -16,7 +16,7 @@ It is built to be genuinely useful for a city planner, and genuinely cheap to ru
 
 **Dashboard** *analyzes* a scorecard, whether you uploaded a real one or built it in the Assistant. This is the part described in most of this guide.
 
-**Analysis advisor** (on the Dashboard, once you have results) helps you *improve* it. It already knows the scores and the analysis, so you can ask what looks thin, question a score, or share real data you found. Anything substantial you share is saved automatically, and one press of Re-run rebuilds the analysis with it, while also showing the model its previous answer so it refines rather than starting over. The conversation is remembered per city, so you can close it and come back.
+**Analysis advisor** (on the Dashboard, once you have results) helps you *improve* it. It already knows the scores and the analysis, so you can ask what looks thin, question a score, or share real data you found. Anything substantial you share is saved automatically, and one press of Re-run rebuilds the analysis with it, while also showing the model its previous answer so it refines rather than starting over. Conversations are remembered per city, with a History list so you can keep several threads and pick any of them back up. If your model is a thinking model, its internal reasoning stays behind a quiet "Thinking it through" line instead of spilling into the reply.
 
 **Find data** (a link in the header) opens a directory of free, credible places to get real numbers: the UN, World Bank, NASA, Copernicus, EM-DAT, ThinkHazard and more. The whole point is to make fact-checking easy: grab a real figure, paste it into the advisor or the Assistant, and let it shape the result.
 
@@ -145,6 +145,14 @@ The AI is always told to treat the scorecard as the truth and to cross-check the
 
 ---
 
+## The look: Liquid Glass
+
+The navigation borrows Apple's Liquid Glass material from iOS 26, done in plain CSS and SVG rather than any library. The tab bar is a single translucent sheet that blurs and saturates whatever is behind it, with light gathering along its top edge and a small specular highlight that follows your pointer. The active pill slides on a spring, and you can press and drag left or right across the tabs: the pill follows your finger, stretches slightly, and as it nears the next tab a drop swells and the two merge like water touching, which is an SVG blur-and-sharpen filter doing the work.
+
+Apple's own guidance shaped the restraint here. There is one glass sheet per area rather than translucent panes stacked on each other, tinting is used only on the primary element (the active pill), and labels are never drawn over the moving highlight. Reduce Transparency turns the glass solid, Increase Contrast adds a hard border, and Reduce Motion drops the elastic behaviour, so the interface stays readable for everyone. If you dislike the effect, those three system settings each tone it down without breaking anything.
+
+---
+
 ## How it stays reliable
 
 A few deliberate guardrails, mostly learned the hard way:
@@ -154,6 +162,7 @@ A few deliberate guardrails, mostly learned the hard way:
 - **Every call path is bounded.** Retries are capped and only happen on rate limits, the analysis makes at most a few calls before falling back gracefully, and long conversations are trimmed so prompts do not balloon into the model's context limit.
 - **Switching model mid-run is safe.** Each run captures its model when it starts, so a switch applies to the next run instead of corrupting the one in flight.
 - **Nothing is deleted without asking.** Clearing results, removing a scorecard, or loading a new one over existing work all confirm first, and offer to download the report before it goes.
+- **A thinking model's scratchpad stays private.** Providers stream internal reasoning on a separate channel from the answer, so a chat shows a discreet "thinking" line rather than leaking the model's notes (or its instructions) into the visible reply.
 - **A crash does not brick the app.** If a screen ever throws, you get a calm recovery screen with reload and reset options instead of a blank page.
 
 ---
@@ -233,3 +242,11 @@ npm run lint    # check the code style
 ## A note on the analysis itself
 
 The AI is a helpful assistant, not an oracle. Different models, and even repeated runs of the same model, can surface different strengths, gaps, and recommendations. Treat the output as a strong first draft to review with your team, not as a final verdict. For important decisions, it is worth comparing a couple of models.
+
+---
+
+## License
+
+Apache License 2.0. Copyright 2026 Kaushal Bhingaradia. See `LICENSE` for the full text and `NOTICE` for attribution.
+
+The UNDRR Disaster Resilience Scorecard for Cities is the work of UNDRR and its partners. This tool is independent software built to work with that scorecard, and is not affiliated with or endorsed by UNDRR.

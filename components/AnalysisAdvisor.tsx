@@ -17,7 +17,7 @@
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { X, Send, Loader2, ClipboardCheck, Sparkles, Globe2, RefreshCw, Plus, Trash2, ChevronDown, Check } from "lucide-react";
+import { X, Send, Loader2, ClipboardCheck, Sparkles, Globe2, RefreshCw, Plus, Trash2, ChevronDown, Check, History, AlertTriangle } from "lucide-react";
 import { createProvider } from "@/lib/llm";
 import type { AppSettings } from "@/lib/settings/store";
 import type { NormalizedScorecard } from "@/lib/scorecard/schema";
@@ -28,7 +28,38 @@ import { UserMessageBubble } from "@/components/UserMessageBubble";
 
 type Msg = { role: "user" | "assistant"; text: string };
 
-const CHAT_KEY = "undrr.advisor.chat";
+const THREADS_KEY = "undrr.advisor.threads";
+
+type Thread = { id: string; title: string; updatedAt: number; messages: Msg[] };
+
+/** Hide a thinking model's scratchpad from the visible answer. Some models wrap
+ * reasoning in <think> tags inside the content itself, so strip complete blocks
+ * and, if a block is still open, everything after it. */
+function stripThinking(text: string): string {
+  let t = text.replace(/<think>[\s\S]*?<\/think>/gi, "");
+  const open = t.search(/<think>/i);
+  if (open !== -1) t = t.slice(0, open);
+  return t.replace(/<\/?think>/gi, "");
+}
+
+function titleFor(messages: Msg[]): string {
+  const first = messages.find((m) => m.role === "user")?.text.trim() || "New conversation";
+  const oneLine = first.replace(/\s+/g, " ");
+  return oneLine.length > 44 ? oneLine.slice(0, 44) + "…" : oneLine;
+}
+
+function newThread(): Thread {
+  return { id: `t_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`, title: "New conversation", updatedAt: Date.now(), messages: [] };
+}
+
+function whenText(ts: number): string {
+  const mins = Math.round((Date.now() - ts) / 60000);
+  if (mins < 1) return "just now";
+  if (mins < 60) return `${mins}m ago`;
+  const hrs = Math.round(mins / 60);
+  if (hrs < 24) return `${hrs}h ago`;
+  return `${Math.round(hrs / 24)}d ago`;
+}
 
 const SYSTEM = `You are a friendly, encouraging advisor sitting beside a city official who just ran a disaster-resilience analysis of their city. Think of yourself as a knowledgeable, supportive teammate whose whole goal is to help them end up with a scorecard they feel confident about. You are given the scorecard scores and the analysis that was produced.
 
@@ -131,44 +162,82 @@ export function AnalysisAdvisor({
   onBusyChange?: (busy: boolean) => void;
   externalBusy?: boolean;
 }) {
-  const [messages, setMessages] = useState<Msg[]>([]);
+  const [threads, setThreads] = useState<Thread[]>([]);
+  const [activeId, setActiveId] = useState<string>("");
   const [input, setInput] = useState("");
   const [busy, setBusy] = useState(false);
   const [stream, setStream] = useState("");
+  const [thinking, setThinking] = useState(false);
   const [pendingPaste, setPendingPaste] = useState<string | null>(null);
   const [showContext, setShowContext] = useState(false);
+  const [showHistory, setShowHistory] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState<string | null>(null);
+  const [justArchived, setJustArchived] = useState(false);
   const [loaded, setLoaded] = useState(false);
   const abortRef = useRef<AbortController | null>(null);
   const endRef = useRef<HTMLDivElement | null>(null);
 
-  // ── Remember the conversation (per city) ──────────────────
+  const active = threads.find((t) => t.id === activeId) ?? null;
+  const messages = active?.messages ?? [];
+
+  /** Update the active thread's messages, keeping its title and timestamp fresh. */
+  const setMessages = useCallback((next: Msg[] | ((prev: Msg[]) => Msg[])) => {
+    setThreads((prev) =>
+      prev.map((t) => {
+        if (t.id !== activeId) return t;
+        const msgs = typeof next === "function" ? (next as (p: Msg[]) => Msg[])(t.messages) : next;
+        return { ...t, messages: msgs, title: titleFor(msgs), updatedAt: Date.now() };
+      })
+    );
+  }, [activeId]);
+
+  // ── Remember conversations (a history of threads, per city) ───
   useEffect(() => {
+    let restored: Thread[] = [];
+    let restoredActive = "";
     try {
-      const raw = localStorage.getItem(CHAT_KEY);
+      const raw = localStorage.getItem(THREADS_KEY);
       if (raw) {
         const saved = JSON.parse(raw);
-        if (saved && saved.city === scorecard.city.name && Array.isArray(saved.messages)) {
-          setMessages(saved.messages);
+        if (saved && saved.city === scorecard.city.name && Array.isArray(saved.threads)) {
+          restored = saved.threads.filter((t: Thread) => t && Array.isArray(t.messages));
+          restoredActive = typeof saved.active === "string" ? saved.active : "";
         }
       }
     } catch {
-      /* ignore */
+      /* ignore a corrupt cache and start fresh */
     }
+    if (restored.length === 0) {
+      const t = newThread();
+      restored = [t];
+      restoredActive = t.id;
+    } else if (!restored.some((t) => t.id === restoredActive)) {
+      restoredActive = restored[0].id;
+    }
+    setThreads(restored);
+    setActiveId(restoredActive);
     setLoaded(true);
   }, [scorecard.city.name]);
 
   useEffect(() => {
     if (!loaded) return;
     try {
-      if (messages.length) {
-        localStorage.setItem(CHAT_KEY, JSON.stringify({ city: scorecard.city.name, messages: messages.slice(-40) }));
+      // Keep only threads that actually have content, newest first, and cap the
+      // history so local storage never grows without bound.
+      const keep = threads
+        .filter((t) => t.messages.length > 0 || t.id === activeId)
+        .sort((a, b) => b.updatedAt - a.updatedAt)
+        .slice(0, 12)
+        .map((t) => ({ ...t, messages: t.messages.slice(-40) }));
+      if (keep.some((t) => t.messages.length > 0)) {
+        localStorage.setItem(THREADS_KEY, JSON.stringify({ city: scorecard.city.name, active: activeId, threads: keep }));
       } else {
-        localStorage.removeItem(CHAT_KEY);
+        localStorage.removeItem(THREADS_KEY);
       }
     } catch {
       /* quota, non-fatal */
     }
-  }, [messages, loaded, scorecard.city.name]);
+  }, [threads, activeId, loaded, scorecard.city.name]);
 
   useEffect(() => {
     if (open) endRef.current?.scrollIntoView({ behavior: "smooth" });
@@ -199,14 +268,26 @@ ${convo}
 Reply to the latest User message only.`;
       let full = "";
       abortRef.current = new AbortController();
-      const answer = await provider.complete(SYSTEM, user, { onToken: (t) => { full += t; setStream(full); } }, abortRef.current.signal);
-      setMessages((m) => [...m, { role: "assistant", text: answer || full }]);
+      const answer = await provider.complete(
+        SYSTEM,
+        user,
+        {
+          // Only the answer is shown as it streams. A thinking model's internal
+          // reasoning goes to onReasoning, so its scratchpad (and any restating
+          // of these instructions) never appears in the visible message.
+          onToken: (t) => { full += t; setThinking(false); setStream(stripThinking(full)); },
+          onReasoning: () => setThinking(true),
+        },
+        abortRef.current.signal
+      );
+      setMessages((m) => [...m, { role: "assistant", text: stripThinking(answer || full).trim() || "(no answer came back, try again)" }]);
     } catch (err) {
       if (!(err instanceof DOMException && err.name === "AbortError")) {
         setMessages((m) => [...m, { role: "assistant", text: `Sorry, that didn't go through: ${err instanceof Error ? err.message : String(err)}. If your model runs through the proxy it may have timed out, try Gemini for this.` }]);
       }
     } finally {
       setBusy(false);
+      setThinking(false);
       onBusyChange?.(false);
       setStream("");
     }
@@ -218,14 +299,48 @@ Reply to the latest User message only.`;
     if (!open) {
       abortRef.current?.abort();
       setBusy(false);
+      setThinking(false);
       onBusyChange?.(false);
     }
   }, [open, onBusyChange]);
 
-  const clearChat = () => {
-    setMessages([]);
-    try { localStorage.removeItem(CHAT_KEY); } catch { /* ignore */ }
+  // Start a fresh conversation. Nothing is erased: the current one is kept in
+  // History, which is why this needs no scary confirmation.
+  const startNewChat = () => {
+    if (busy) return;
+    const hadContent = messages.length > 0;
+    const t = newThread();
+    setThreads((prev) => [t, ...prev.filter((x) => x.messages.length > 0)]);
+    setActiveId(t.id);
+    setShowHistory(false);
+    if (hadContent) {
+      setJustArchived(true);
+      setTimeout(() => setJustArchived(false), 4000);
+    }
   };
+
+  const switchThread = (id: string) => {
+    if (busy) return;
+    setActiveId(id);
+    setShowHistory(false);
+  };
+
+  /** Delete one saved conversation. Confirmed, since this one really does erase. */
+  const deleteThread = (id: string) => {
+    setThreads((prev) => {
+      const left = prev.filter((t) => t.id !== id);
+      if (left.length === 0) {
+        const t = newThread();
+        setActiveId(t.id);
+        return [t];
+      }
+      if (id === activeId) setActiveId(left[0].id);
+      return left;
+    });
+    setConfirmDelete(null);
+  };
+
+  const savedThreads = threads.filter((t) => t.messages.length > 0);
 
   if (!open) return null;
 
@@ -242,15 +357,46 @@ Reply to the latest User message only.`;
             <h2 className="text-sm font-semibold text-text-primary">Analysis advisor</h2>
             <p className="text-[11px] text-text-secondary truncate">Reviewing {scorecard.city.name} with you</p>
           </div>
-          {messages.length > 0 && (
-            <button
-              onClick={clearChat}
-              title="Start a fresh conversation (your saved data stays)"
-              className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg text-text-secondary hover:text-text-primary hover:bg-surface-overlay shrink-0"
-            >
-              <Trash2 size={12} /> New chat
-            </button>
+          {savedThreads.length > 0 && (
+            <div className="relative shrink-0">
+              <button
+                onClick={() => setShowHistory((v) => !v)}
+                title="Your past conversations about this city"
+                className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg text-text-secondary hover:text-text-primary hover:bg-surface-overlay"
+              >
+                <History size={12} /> History
+                <ChevronDown size={10} className={showHistory ? "rotate-180 transition-transform" : "transition-transform"} />
+              </button>
+              {showHistory && (
+                <div className="absolute right-0 top-full mt-1 w-72 max-h-72 overflow-y-auto rounded-xl border border-border bg-surface-raised shadow-xl z-10 py-1">
+                  <p className="px-3 py-1.5 text-[10px] uppercase tracking-wide text-text-secondary">Conversations</p>
+                  {savedThreads.map((t) => (
+                    <div key={t.id} className={`flex items-start gap-1.5 px-2 py-1.5 ${t.id === activeId ? "bg-accent-500/10" : "hover:bg-surface-overlay"}`}>
+                      <button onClick={() => switchThread(t.id)} className="flex-1 text-left min-w-0">
+                        <span className="block text-xs text-text-primary truncate">{t.title}</span>
+                        <span className="block text-[10px] text-text-secondary">{t.messages.length} message{t.messages.length === 1 ? "" : "s"} · {whenText(t.updatedAt)}</span>
+                      </button>
+                      <button
+                        onClick={() => setConfirmDelete(t.id)}
+                        title="Delete this conversation"
+                        className="shrink-0 p-1 rounded text-text-secondary hover:text-danger-400"
+                      >
+                        <Trash2 size={11} />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
           )}
+          <button
+            onClick={startNewChat}
+            disabled={busy || messages.length === 0}
+            title="Start a fresh conversation. This one is kept in History."
+            className="flex items-center gap-1 text-[11px] px-2 py-1 rounded-lg text-text-secondary hover:text-text-primary hover:bg-surface-overlay shrink-0 disabled:opacity-40"
+          >
+            <Plus size={12} /> New chat
+          </button>
           <button onClick={onClose} aria-label="Close" className="p-1.5 rounded-lg text-text-secondary hover:text-text-primary hover:bg-surface-overlay shrink-0">
             <X size={18} />
           </button>
@@ -308,6 +454,11 @@ Reply to the latest User message only.`;
               )}
             </div>
           ))}
+          {justArchived && (
+            <p className="text-center text-[11px] text-text-secondary bg-surface-overlay/60 border border-border rounded-lg py-1.5 animate-fadeInUp">
+              Your previous conversation was saved to History.
+            </p>
+          )}
           {busy && (
             <div className="flex justify-start">
               <div className="max-w-[90%] px-3.5 py-2.5 rounded-2xl rounded-bl-sm text-sm leading-relaxed bg-surface-overlay border border-border text-text-primary break-words [overflow-wrap:anywhere]">
@@ -315,7 +466,9 @@ Reply to the latest User message only.`;
                   // Plain text while streaming (fast); markdown renders once complete.
                   <span className="whitespace-pre-wrap">{stream}</span>
                 ) : (
-                  <span className="inline-flex items-center gap-2 text-text-secondary"><Loader2 size={14} className="animate-spin" /> Thinking…</span>
+                  <span className="inline-flex items-center gap-2 text-text-secondary">
+                    <Loader2 size={14} className="animate-spin" /> {thinking ? "Thinking it through…" : "Working on it…"}
+                  </span>
                 )}
               </div>
             </div>
@@ -426,6 +579,33 @@ Reply to the latest User message only.`;
             <ClipboardCheck size={11} /> Data you share is saved automatically and used the next time you re-run.
           </p>
         </div>
+
+        {/* Delete-a-conversation confirmation (this one really does erase) */}
+        {confirmDelete && (
+          <div className="absolute inset-0 z-20 grid place-items-center bg-black/40 p-5">
+            <div className="w-full max-w-xs rounded-2xl border border-border bg-surface-raised p-4 shadow-2xl">
+              <div className="flex items-center gap-2 mb-1.5">
+                <AlertTriangle size={16} className="text-danger-400 shrink-0" />
+                <h3 className="text-sm font-semibold text-text-primary">Delete this conversation?</h3>
+              </div>
+              <p className="text-xs text-text-secondary mb-3">
+                This permanently removes that chat from your history. The data you shared for the re-run is kept, and you
+                can remove that separately from the &quot;Review&quot; list.
+              </p>
+              <div className="flex gap-2 justify-end">
+                <button onClick={() => setConfirmDelete(null)} className="px-3 py-1.5 rounded-lg text-xs font-medium text-text-secondary hover:text-text-primary">
+                  Cancel
+                </button>
+                <button
+                  onClick={() => deleteThread(confirmDelete)}
+                  className="px-3 py-1.5 rounded-lg text-xs font-semibold bg-danger-500 text-white active:scale-95"
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

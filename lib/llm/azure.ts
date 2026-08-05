@@ -81,7 +81,7 @@ export class AzureOpenAIProvider implements LLMProvider {
       if (choice?.finish_reason) finishReason = choice.finish_reason;
       const delta = choice?.delta;
       const reasoning = delta?.reasoning ?? delta?.reasoning_content;
-      if (reasoning) { reasoningFull += reasoning; handlers?.onToken?.(reasoning); }
+      if (reasoning) { reasoningFull += reasoning; if (handlers?.onReasoning) handlers.onReasoning(reasoning); else handlers?.onToken?.(reasoning); }
       if (delta?.content) { full += delta.content; handlers?.onToken?.(delta.content); }
     });
 

@@ -89,7 +89,7 @@ export class ClaudeProvider implements LLMProvider {
         } else if (evt.delta?.type === "thinking_delta" && evt.delta.thinking) {
           // Extended thinking — show it live, keep it out of the answer.
           sawThinking = true;
-          handlers?.onToken?.(evt.delta.thinking);
+          if (handlers?.onReasoning) handlers.onReasoning(evt.delta.thinking); else handlers?.onToken?.(evt.delta.thinking);
         }
       } else if (evt.type === "message_delta" && evt.delta?.stop_reason) {
         stopReason = evt.delta.stop_reason;
