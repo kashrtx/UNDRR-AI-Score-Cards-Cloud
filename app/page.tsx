@@ -27,7 +27,7 @@ import { ProvenanceBadge } from "@/components/Provenance";
 import { StatusBar } from "@/components/StatusBar";
 import { GettingStarted } from "@/components/GettingStarted";
 import { ModelSuggestion } from "@/components/ModelSuggestion";
-import { RefineAnalysisChat } from "@/components/RefineAnalysisChat";
+import { AnalysisAdvisor } from "@/components/AnalysisAdvisor";
 import { renderInline } from "@/lib/ui/markdown";
 import { AnalysisProgress } from "@/components/AnalysisProgress";
 import { DataSourcesPanel } from "@/components/DataSourcesPanel";
@@ -113,8 +113,8 @@ export default function Page() {
   const [showTour, setShowTour] = useState(false);
   const [refineOpen, setRefineOpen] = useState(false);
   const [assistantRunning, setAssistantRunning] = useState(false);
-  const [copilotBusy, setCopilotBusy] = useState(false);
-  // Local facts the user gave the copilot (pasted data / notes), folded into
+  const [advisorBusy, setAdvisorBusy] = useState(false);
+  // Local facts the user shared with the advisor (pasted data / notes), folded into
   // re-runs. Kept as a list so we can count them, show them, and persist them.
   const [refineFacts, setRefineFacts] = useState<string[]>([]);
   const refineFactsRef = useRef<string[]>([]);
@@ -220,6 +220,17 @@ export default function Page() {
   }, []);
 
   // Commit a scorecard (replaces any current one + clears results).
+  // Wipe both the shared facts and the saved advisor conversation. Used when the
+  // analysis is cleared or a different scorecard is loaded, so nothing stale
+  // carries over to a new city.
+  const clearAdvisorState = useCallback(() => {
+    setRefineFacts([]);
+    try {
+      localStorage.removeItem(REFINE_KEY);
+      localStorage.removeItem("undrr.advisor.chat");
+    } catch { /* ignore */ }
+  }, []);
+
   const commitUpload = useCallback((sc: NormalizedScorecard, name: string) => {
     abortRef.current?.abort(); // stop any analysis in progress before swapping
     setScorecard(sc);
@@ -229,7 +240,7 @@ export default function Page() {
     setDataReport(null);
     setNarration("");
     setError(null);
-    setRefineFacts([]); // fresh scorecard, drop any prior copilot facts
+    clearAdvisorState(); // fresh scorecard, drop prior advisor data and chat
     setState("ready");
     try {
       localStorage.setItem(SCORECARD_KEY, JSON.stringify(sc));
@@ -238,7 +249,7 @@ export default function Page() {
     } catch {
       /* quota, non-fatal */
     }
-  }, []);
+  }, [clearAdvisorState]);
 
   // Called by the upload widget. If results would be lost, ask first.
   const handleUpload = useCallback(
@@ -311,14 +322,14 @@ export default function Page() {
     setAnalysisMeta(null);
     setDataReport(null);
     setNarration("");
-    setRefineFacts([]);
+    clearAdvisorState();
     setState(scorecard ? "ready" : "empty");
     try {
       localStorage.removeItem(ANALYSIS_KEY);
     } catch {
       /* ignore */
     }
-  }, [scorecard]);
+  }, [scorecard, clearAdvisorState]);
 
   const handleRemove = useCallback(() => {
     abortRef.current?.abort();
@@ -350,7 +361,7 @@ export default function Page() {
     if (!scorecard || !settings) return;
     if (state === "analyzing") return; // don't stack a second run on a live one
     if (assistantRunning) return; // the Assistant is mid-task; don't run both at once
-    if (copilotBusy) return; // the copilot is generating; don't hit the API twice at once
+    if (advisorBusy) return; // the advisor is generating; don't hit the API twice at once
     if (!computeReady(settings)) {
       setTab("settings");
       return;
@@ -399,14 +410,18 @@ export default function Page() {
       setError(err instanceof Error ? err.message : String(err));
       setState("error");
     }
-  }, [scorecard, settings, state, assistantRunning, analysis, copilotBusy]);
+  }, [scorecard, settings, state, assistantRunning, analysis, advisorBusy]);
 
-  // Add a piece of local data the copilot gathered (deduped). The dashboard,
-  // the copilot banner, and the next re-run all read from this one list.
+  // Add a piece of local data the advisor gathered (deduped). The dashboard,
+  // the advisor banner, and the next re-run all read from this one list.
   const addRefineFact = useCallback((text: string) => {
     const t = text.trim();
     if (!t) return;
     setRefineFacts((prev) => (prev.includes(t) ? prev : [...prev, t]));
+  }, []);
+
+  const removeRefineFact = useCallback((text: string) => {
+    setRefineFacts((prev) => prev.filter((f) => f !== text));
   }, []);
 
   // Re-run the analysis folding in everything the user has added so far.
@@ -419,6 +434,7 @@ export default function Page() {
     setRefineFacts([]);
     try { localStorage.removeItem(REFINE_KEY); } catch { /* ignore */ }
   }, []);
+
 
   const cancelAnalyze = useCallback(() => {
     abortRef.current?.abort();
@@ -500,8 +516,8 @@ export default function Page() {
             {tab === "dashboard" && (state === "ready" || state === "results") && scorecard && (
               <button
                 onClick={() => handleAnalyze()}
-                disabled={assistantRunning || copilotBusy}
-                title={assistantRunning ? "The Assistant is still working. Let it finish, then run the analysis." : copilotBusy ? "The copilot is still writing. One moment, then you can re-run." : refineFacts.length ? `Re-run, folding in the ${refineFacts.length} piece(s) of data you added` : undefined}
+                disabled={assistantRunning || advisorBusy}
+                title={assistantRunning ? "The Assistant is still working. Let it finish, then run the analysis." : advisorBusy ? "The advisor is still writing. One moment, then you can re-run." : refineFacts.length ? `Re-run, folding in the ${refineFacts.length} piece(s) of data you added` : undefined}
                 className="relative flex items-center gap-2 px-3.5 sm:px-5 py-2 rounded-xl text-sm font-semibold btn-accent transition-all shadow-lg shadow-accent-500/25 active:scale-95 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {state === "results" ? <RotateCcw size={16} /> : <Play size={16} />}
@@ -541,7 +557,7 @@ export default function Page() {
             onLoadIntoAnalyzer={handleLoadFromAssistant}
             onUseProvider={useProvider}
             onRunningChange={setAssistantRunning}
-            externalBusy={state === "analyzing" || copilotBusy}
+            externalBusy={state === "analyzing" || advisorBusy}
           />
         </div>
 
@@ -761,7 +777,7 @@ export default function Page() {
                       <div className="w-px h-7 bg-border mx-0.5 hidden sm:block" />
                       <button
                         onClick={() => setRefineOpen(true)}
-                        title="Ask your copilot to sanity-check this or fold in data you found"
+                        title="Ask the analysis advisor to sanity-check this or fold in data you found"
                         className="flex items-center gap-2 px-3.5 py-2.5 rounded-xl text-sm font-medium text-text-secondary hover:text-accent-300 border border-transparent hover:border-accent-500/30 transition-all"
                       >
                         <Lightbulb size={15} /> Am I missing something?
@@ -973,9 +989,9 @@ export default function Page() {
       {/* ── First-visit / replayable tour ──────── */}
       <Onboarding open={showTour} onClose={closeTour} />
 
-      {/* ── Refine-the-analysis chat (opens from the results toolbar) ─ */}
+      {/* ── Analysis advisor (opens from the results toolbar or the floating button) ─ */}
       {scorecard && analysis && (
-        <RefineAnalysisChat
+        <AnalysisAdvisor
           open={refineOpen}
           onClose={() => setRefineOpen(false)}
           scorecard={scorecard}
@@ -984,24 +1000,25 @@ export default function Page() {
           settings={settings}
           contextFacts={refineFacts}
           onAddContext={addRefineFact}
+          onRemoveContext={removeRefineFact}
           onRerun={rerunWithFacts}
           onClearContext={clearRefineFacts}
-          onBusyChange={setCopilotBusy}
+          onBusyChange={setAdvisorBusy}
           externalBusy={state === "analyzing" || assistantRunning}
         />
       )}
 
-      {/* ── Floating actions (bottom-right): the copilot sits prominently above Help ─ */}
+      {/* ── Floating actions (bottom-right): the advisor sits prominently above Help ─ */}
       <div className="fixed bottom-5 right-5 z-40 flex flex-col items-end gap-3">
         {tab === "dashboard" && state === "results" && analysis && scorecard && !refineOpen && (
           <button
             onClick={() => setRefineOpen(true)}
-            title="Ask your copilot to help sharpen this scorecard"
-            aria-label="Open your scorecard copilot"
+            title="Ask the analysis advisor to help sharpen this analysis"
+            aria-label="Open the analysis advisor"
             className="flex items-center gap-2 rounded-full bg-accent-500 text-white pl-4 pr-5 py-3.5 shadow-xl shadow-accent-500/40 animate-breathe hover:scale-105 active:scale-95 transition-transform"
           >
             <Sparkles size={20} />
-            <span className="text-sm font-semibold">Ask your copilot</span>
+            <span className="text-sm font-semibold">Ask the advisor</span>
           </button>
         )}
         {!showTour && (

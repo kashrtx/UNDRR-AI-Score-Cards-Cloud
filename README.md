@@ -2,17 +2,25 @@
 
 Upload a completed disaster resilience scorecard for a city, and this app turns it into a clear, readable analysis: what the city is doing well, where it is weak, and a prioritized list of actions that would raise its score the most.
 
+Once the analysis is done, an **analysis advisor** sits beside it. You can ask what the analysis might have missed, paste in real data you found, and re-run so your own local knowledge shapes the result.
+
 Do not have a completed scorecard yet? There is also an **Assistant** that fills one out with you. Tell it about your city and it researches and drafts every answer, or you chat through it step by step, then hand the result straight to the analyzer.
 
 It is built to be genuinely useful for a city planner, and genuinely cheap to run (it can live on a free Vercel account). If you are new to the project, this page should get you from "no idea" to "I understand what we built" in about ten minutes.
 
 ---
 
-## The two tabs, in a nutshell
+## The parts, in a nutshell
 
-**Assistant** helps you *create* a scorecard. You give it a city and whatever you know, and an AI agent researches the city, searches the web, and fills in the 47 indicators, building a live draft you can edit. You can watch it think in real time, stop and continue later (even after switching model), attach reference documents for it to learn from, and keep a saved history of scorecards you can switch between. When it looks right, one click loads it into the analyzer, or downloads the **real official .xlsm** — the assistant fills the actual UNDRR template (every sheet, all the formatting, and the macros) by setting the answer cells, so it opens and totals correctly in Excel just like a hand-filled one.
+**Assistant** helps you *create* a scorecard. You give it a city and whatever you know, and an AI agent researches the city, searches the web, and fills in the 47 indicators, building a live draft you can edit. You can watch it think in real time, stop and continue later (even after switching model), attach reference documents for it to learn from, and keep a saved history of scorecards you can switch between. When it looks right, one click loads it into the analyzer, or downloads the **real official .xlsm**. The assistant fills the actual UNDRR template (every sheet, all the formatting, and the macros) by setting the answer cells, so it opens and totals correctly in Excel just like a hand-filled one.
 
 **Dashboard** *analyzes* a scorecard, whether you uploaded a real one or built it in the Assistant. This is the part described in most of this guide.
+
+**Analysis advisor** (on the Dashboard, once you have results) helps you *improve* it. It already knows the scores and the analysis, so you can ask what looks thin, question a score, or share real data you found. Anything substantial you share is saved automatically, and one press of Re-run rebuilds the analysis with it, while also showing the model its previous answer so it refines rather than starting over. The conversation is remembered per city, so you can close it and come back.
+
+**Find data** (a link in the header) opens a directory of free, credible places to get real numbers: the UN, World Bank, NASA, Copernicus, EM-DAT, ThinkHazard and more. The whole point is to make fact-checking easy: grab a real figure, paste it into the advisor or the Assistant, and let it shape the result.
+
+Only one of these ever talks to the AI at a time. If the Dashboard is analyzing, the Assistant and advisor wait, and the same in reverse, so nothing clashes and nothing burns through your rate limits twice over.
 
 ---
 
@@ -27,6 +35,7 @@ You drop that file into the app. Then it:
 3. Researches the city on the web for extra context.
 4. Asks an AI model to write the analysis, using the scorecard as the source of truth and the gathered data as supporting evidence.
 5. Shows the result as a summary, a radar chart, an impact-vs-difficulty map of the suggested actions, a full action plan, and a "what if we did these" score projection you can toggle.
+6. Lets you talk it over with the advisor, add your own data, and re-run to get a sharper version.
 
 The person using it never has to touch code, a terminal, or a spreadsheet formula.
 
@@ -74,6 +83,7 @@ You do not need to know all of these to help. If you know a little React, you ca
 |---|---|---|
 | `app/` | The page you see, plus the small server routes under `app/api` | The front door |
 | `app/page.tsx` | The whole dashboard screen and the app's state | The main screen |
+| `app/data-sources/` | The standalone "Find data" directory page | The reading list |
 | `app/api/` | Server routes: parse the file, fetch data, do research, proxy some AI calls | The back office |
 | `components/` | The visual building blocks (charts, panels, the settings screen, buttons) | The furniture |
 | `lib/` | The actual logic, with no UI in it | The brains |
@@ -101,17 +111,19 @@ You pick a provider in Settings and paste a key. The friendliest starting points
 
 | Provider | Cost | Notes |
 |---|---|---|
-| Gemini | Free tier | Fast and easy. The default. |
-| OpenRouter | Free open models | One key, many models. |
+| Gemini | Free tier | Fast and easy. The default (3.6 Flash), and the best pick for the Dashboard. |
+| OpenRouter | Free open models | One key, many models. The best pick for the Assistant, since its free tier is not tightly rate-limited. |
 | NVIDIA NIM | Free credits | Over 100 open models, including Llama, DeepSeek, Kimi, and GLM. |
 | z.AI | Free flash models, paid rest | The GLM family, including GLM 5.2. |
 | Claude | Paid | Anthropic's models, high quality. |
 | OpenAI | Paid | The GPT-5 family. |
 | xAI | Paid | Grok models. |
 | Meta | Paid (experimental) | Llama via Meta's own API. Llama is also free on NVIDIA NIM. |
+| Perplexity | Paid credits | Sonar models that search the web as they answer. Good for research, but weaker at the Assistant's step-by-step filling. |
+| Microsoft Azure OpenAI | Paid | Microsoft's own endpoint. Needs an endpoint URL, a deployment name, and a key. |
 | Ollama or LM Studio | Free and private | Runs a model on your own computer, no key needed. |
 
-**One thing to know about the last group of cloud providers.** Gemini, OpenRouter, Claude, and the local options can be called straight from your browser. OpenAI, xAI, z.AI, NVIDIA, and Meta block browser calls, so those requests hop through a tiny same-origin route in this app (`/api/llm`) that just forwards them. Your key is used once for that request and is never stored on the server. On Vercel's free plan that route can run for up to 60 seconds, so a very slow "reasoning" model can occasionally get cut off. If that happens, pick a faster model or use a provider that runs directly in the browser.
+**One thing to know about how these are reached.** Gemini, OpenRouter, Claude, and the local options can be called straight from your browser. OpenAI, xAI, z.AI, NVIDIA, Meta, Perplexity, and Azure block browser calls, so those requests hop through a tiny same-origin route in this app (`/api/llm`) that just forwards them. Your key is used once for that request and is never stored on the server. That route is capped at 120 seconds, so a very slow "reasoning" model can occasionally get cut off. Settings labels each provider with this ("Fast and reliable" versus "May time out on free hosting") so nobody has to guess, and if you do get cut off, pick a faster model or one that runs directly in the browser.
 
 ---
 
@@ -130,6 +142,19 @@ You pick a provider in Settings and paste a key. The friendliest starting points
 - If not, the app uses Wikipedia and Wikidata plus a light keyless web search.
 
 The AI is always told to treat the scorecard as the truth and to cross-check these extras rather than trust any single number.
+
+---
+
+## How it stays reliable
+
+A few deliberate guardrails, mostly learned the hard way:
+
+- **Nothing runs twice at once.** The Dashboard analysis, the Assistant, and the advisor are mutually exclusive. Whichever is busy disables the others and says why, so you cannot accidentally fire two model calls at the same time.
+- **Nothing loops forever.** The Assistant's agent has a hard step ceiling, and it also stops itself if it repeats the same action or stops making progress. Some models (search-focused ones especially) do not know when to stop, so the app decides for them. This matters because a runaway loop quietly eats your quota.
+- **Every call path is bounded.** Retries are capped and only happen on rate limits, the analysis makes at most a few calls before falling back gracefully, and long conversations are trimmed so prompts do not balloon into the model's context limit.
+- **Switching model mid-run is safe.** Each run captures its model when it starts, so a switch applies to the next run instead of corrupting the one in flight.
+- **Nothing is deleted without asking.** Clearing results, removing a scorecard, or loading a new one over existing work all confirm first, and offer to download the report before it goes.
+- **A crash does not brick the app.** If a screen ever throws, you get a calm recovery screen with reload and reset options instead of a blank page.
 
 ---
 
@@ -189,6 +214,8 @@ A quick map so you do not have to go hunting:
 - **Change how the web research behaves:** edit `lib/data/research.ts`.
 - **Change how the fill-out Assistant thinks or which tools it can call:** edit `lib/agent/agent.ts` (its instructions and the tool loop) and `lib/agent/draft.ts` (the draft it builds). Saved chat history lives in `lib/agent/sessions.ts`.
 - **Change the look, colors, or charts:** the pieces are in `components/`, and the color and theme tokens live in `app/globals.css`.
+- **Change how the advisor behaves:** edit `components/AnalysisAdvisor.tsx` (its instructions, and the rule that decides what gets saved for a re-run).
+- **Add or edit the data sources people can browse:** edit the list at the top of `app/data-sources/page.tsx`.
 
 ---
 

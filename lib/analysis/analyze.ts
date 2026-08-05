@@ -24,7 +24,7 @@ export interface AnalyzeHandlers {
   onDataReport?: (d: DataReport) => void;
   onNarration?: (fullTextSoFar: string) => void;
   signal?: AbortSignal;
-  /** Extra local facts/data the user supplied (e.g. via the copilot) to fold in. */
+  /** Extra local facts/data the user supplied (e.g. via the analysis advisor) to fold in. */
   extraContext?: string;
   /** The previous analysis summary, for continuity on a refine re-run. */
   priorSummary?: string;

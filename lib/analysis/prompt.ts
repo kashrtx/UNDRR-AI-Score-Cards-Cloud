@@ -115,8 +115,8 @@ export function buildUserPrompt(
   // the model treats them as authoritative and factors them into the analysis.
   if (extraContext && extraContext.trim()) {
     parts.push(
-      "## LOCAL FACTS & DATA THE USER PROVIDED (authoritative, factor these in)\n" +
-      "The user has shared the following real, local knowledge and data. Treat it as more reliable than general web data, weave it into the summary, risk lens, strengths, weaknesses and actions where relevant, and let it adjust your read of the scores:\n" +
+      "## WHAT THE USER TOLD YOU (authoritative, factor all of it in)\n" +
+      "While reviewing your previous analysis the user shared the notes below: local knowledge, data they found, and their own corrections or feedback on your last result. Treat it as more reliable than general web data. Act on their corrections, weave the facts into the summary, risk lens, strengths, weaknesses and actions where relevant, and let it adjust your read of the scores:\n" +
       extraContext.trim().slice(0, 6000)
     );
   }

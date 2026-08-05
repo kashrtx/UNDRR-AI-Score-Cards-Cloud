@@ -3,7 +3,7 @@
 /**
  * A standalone, modern directory of free, credible places to get real data for
  * a city's resilience scorecard. Opens in its own tab. The whole point is to
- * encourage people to fact-check and paste real numbers into the copilot or the
+ * encourage people to fact-check and paste real numbers into the analysis advisor or the
  * Assistant, so this goes well beyond the four links we were first given.
  *
  * Static, curated content, client-side search + category filter, no fetching.
@@ -116,7 +116,7 @@ export default function DataSourcesPage() {
           </div>
           <p className="text-text-secondary max-w-2xl leading-relaxed">
             The best scorecards are backed by real numbers. Here are {total} free, credible places to look, from the UN,
-            World Bank, NASA, Copernicus and more. Find something relevant, copy it, and paste it into the copilot on the
+            World Bank, NASA, Copernicus and more. Find something relevant, copy it, and paste it into the advisor on the
             Dashboard or into the Assistant. The AI will fold it in and tell you how it changes the picture.
           </p>
           <div className="mt-4 inline-flex items-center gap-2 text-sm text-accent-300 bg-accent-500/10 border border-accent-500/25 rounded-xl px-3.5 py-2">

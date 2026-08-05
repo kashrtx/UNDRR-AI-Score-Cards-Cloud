@@ -42,7 +42,7 @@ const STEPS: Step[] = [
     bullets: [
       "It quietly gathers free public data about your city while it works.",
       "You get a plain language summary, a clear picture of strong and weak areas, an action plan, and where your score could go.",
-      "When it's done, tap 'Ask your copilot' (bottom-right) to sanity-check the result or paste in real data you found, and use 'Download report' or 'Download data' to save or share it.",
+      "When it's done, tap 'Ask the advisor' (bottom-right) to sanity-check the result or share real data you found, and use 'Download report' or 'Download data' to save or share it.",
     ],
   },
   {

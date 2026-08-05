@@ -1,11 +1,11 @@
 "use client";
 
 /**
- * A shared chat bubble for the user's own messages, used by both the copilot and
+ * A shared chat bubble for the user's own messages, used by both the analysis advisor and
  * the Assistant. Short messages render as a normal bubble; long or multi-line
  * pastes are tidied and shown in a neat, scrollable, collapsible block so a big
  * copy-paste never makes the chat messy. An optional "Use in re-run" action lets
- * the copilot pull a paste's facts into the next analysis.
+ * the advisor pull a paste's facts into the next analysis.
  */
 
 import { useState } from "react";
