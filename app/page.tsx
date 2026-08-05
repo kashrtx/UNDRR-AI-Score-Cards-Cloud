@@ -456,7 +456,7 @@ export default function Page() {
   return (
     <div className="min-h-screen flex flex-col">
       {/* ── Header ─────────────────────────────── */}
-      <header className="sticky top-0 z-40 backdrop-blur-xl [backdrop-filter:blur(24px)_saturate(180%)] bg-surface/70 border-b border-border">
+      <header className="sticky top-0 z-40 [backdrop-filter:blur(26px)_saturate(180%)] [-webkit-backdrop-filter:blur(26px)_saturate(180%)] bg-surface/55 border-b border-border/70">
         <div className="max-w-[1600px] mx-auto px-4 sm:px-6 py-3 flex items-center justify-between gap-2 sm:gap-4 flex-wrap">
           <div className="flex items-center gap-2.5 min-w-0">
             <Logo size={34} />
@@ -486,7 +486,7 @@ export default function Page() {
               target="_blank"
               rel="noreferrer"
               title="Open a directory of free, credible data sources you can fact-check and paste in"
-              className="flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-lg text-sm font-medium text-accent-400 hover:text-accent-300 border border-accent-500/30 hover:border-accent-500/60 transition-all"
+              className="lg-glass lg-press flex items-center gap-1.5 px-2.5 sm:px-3 py-1.5 rounded-full text-sm font-medium text-accent-400 hover:text-accent-300 transition-all"
             >
               <Compass size={15} /> <span className="hidden sm:inline">Find data</span>
               <ExternalLink size={12} className="hidden sm:inline opacity-70" />
@@ -1001,8 +1001,9 @@ export default function Page() {
             onClick={() => setRefineOpen(true)}
             title="Ask the analysis advisor to help sharpen this analysis"
             aria-label="Open the analysis advisor"
-            className="flex items-center gap-2 rounded-full bg-accent-500 text-white pl-4 pr-5 py-3.5 shadow-xl shadow-accent-500/40 animate-breathe hover:scale-105 active:scale-95 transition-transform"
+            className="lg-tint-accent lg-specular lg-press relative overflow-hidden flex items-center gap-2 rounded-full text-white pl-4 pr-5 py-3.5 animate-breathe hover:scale-105 transition-transform"
           >
+            <span className="lg-sheen" aria-hidden="true" />
             <Sparkles size={20} />
             <span className="text-sm font-semibold">Ask the advisor</span>
           </button>
@@ -1012,8 +1013,9 @@ export default function Page() {
             onClick={replayTour}
             title="New here? Take the quick tour"
             aria-label="Take the quick tour"
-            className="lg-glass lg-specular flex items-center gap-2 rounded-full text-text-primary pl-3 pr-4 py-2.5 hover:scale-105 active:scale-95 transition-transform"
+            className="lg-glass lg-refract lg-specular lg-press relative overflow-hidden flex items-center gap-2 rounded-full text-text-primary pl-3 pr-4 py-2.5 hover:scale-105 transition-transform"
           >
+            <span className="lg-sheen" aria-hidden="true" />
             <HelpCircle size={18} className="text-accent-400" />
             <span className="text-sm font-medium hidden sm:inline">Need help?</span>
           </button>

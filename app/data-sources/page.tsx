@@ -101,7 +101,7 @@ export default function DataSourcesPage() {
   const total = GROUPS.reduce((n, g) => n + g.sources.length, 0);
 
   return (
-    <div className="min-h-screen bg-surface text-text-primary">
+    <div className="min-h-screen text-text-primary">
       {/* Hero */}
       <header className="border-b border-border bg-gradient-to-b from-accent-500/10 to-transparent">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 py-8">
@@ -126,7 +126,7 @@ export default function DataSourcesPage() {
       </header>
 
       {/* Controls */}
-      <div className="sticky top-0 z-10 bg-surface/90 backdrop-blur-xl border-b border-border">
+      <div className="sticky top-0 z-10 bg-surface/60 [backdrop-filter:blur(26px)_saturate(180%)] [-webkit-backdrop-filter:blur(26px)_saturate(180%)] border-b border-border/70">
         <div className="max-w-5xl mx-auto px-4 sm:px-6 py-3 flex flex-col sm:flex-row gap-3 sm:items-center">
           <div className="relative flex-1">
             <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-text-secondary" />
@@ -171,7 +171,7 @@ export default function DataSourcesPage() {
                   href={s.url}
                   target="_blank"
                   rel="noreferrer"
-                  className="lift group block p-4 rounded-xl border border-border bg-surface-raised/60 hover:border-accent-500/50"
+                  className="lg-glass lift group block p-4 rounded-xl hover:border-accent-500/50"
                 >
                   <div className="flex items-center gap-2 mb-1">
                     <h3 className="font-semibold text-text-primary group-hover:text-accent-300 transition-colors">{s.name}</h3>

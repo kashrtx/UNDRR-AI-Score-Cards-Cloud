@@ -147,9 +147,15 @@ The AI is always told to treat the scorecard as the truth and to cross-check the
 
 ## The look: Liquid Glass
 
-The navigation borrows Apple's Liquid Glass material from iOS 26, done in plain CSS and SVG rather than any library. The tab bar is a single translucent sheet that blurs and saturates whatever is behind it, with light gathering along its top edge and a small specular highlight that follows your pointer. The active pill slides on a spring, and you can press and drag left or right across the tabs: the pill follows your finger, stretches slightly, and as it nears the next tab a drop swells and the two merge like water touching, which is an SVG blur-and-sharpen filter doing the work.
+The navigation and floating controls borrow Apple's Liquid Glass material from iOS 26, built in plain CSS and SVG with no extra dependencies.
 
-Apple's own guidance shaped the restraint here. There is one glass sheet per area rather than translucent panes stacked on each other, tinting is used only on the primary element (the active pill), and labels are never drawn over the moving highlight. Reduce Transparency turns the glass solid, Increase Contrast adds a hard border, and Reduce Motion drops the elastic behaviour, so the interface stays readable for everyone. If you dislike the effect, those three system settings each tone it down without breaking anything.
+Glass only looks like glass if there is something behind it to bend, so three things work together. A very soft colour field is painted behind the page, low contrast so text stays readable but enough for the material to pick up. The surfaces themselves are genuinely translucent, blurring and saturating whatever they sit over. And the edges behave like glass: light gathers along the top, a specular sheen follows your pointer, and a faint cool and warm fringe at the sides stands in for the way real glass splits light.
+
+Chromium can run an SVG displacement map as a backdrop filter, which gives true refraction, so the content behind a pane actually bends. Safari and Firefox do not support that, so it is layered on as an enhancement and everyone else still gets the full blur build.
+
+The tab bar is where the motion lives. The active pill is tinted glass rather than paint, so the backdrop shows through while the tint stays dark enough for white text to stay legible. Press and drag left or right and the pill follows your finger, stretching as it moves; as it nears another tab a drop swells out and the two fuse like water touching, which is an SVG blur-then-sharpen filter doing the work. Pull past either end and it rubber-bands with damping and springs back rather than escaping. Let go and it settles with a small squash-and-stretch.
+
+Apple's guidance shaped the restraint: one glass sheet per area rather than translucent panes stacked on each other, tint only on primary elements, and labels never drawn over the moving highlight. Reduce Transparency makes every surface solid, Increase Contrast adds a hard border, and Reduce Motion removes the elastic behaviour, so if you find the effect distracting any of those three system settings tones it down without breaking anything.
 
 ---
 

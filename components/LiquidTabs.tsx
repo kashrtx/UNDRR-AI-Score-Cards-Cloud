@@ -3,20 +3,24 @@
 /**
  * A Liquid Glass tab bar, in the spirit of Apple's iOS 26 material.
  *
- * What makes it feel like liquid rather than a row of buttons:
- *  - The whole bar is one glass sheet: translucent, blurred, with light
- *    gathering along its top edge and a specular highlight that follows your
- *    pointer (small amplitude, so it reads as sheen, not motion sickness).
- *  - The active pill slides with a spring, and an SVG "gooey" filter makes it
- *    merge into the next tab like two water drops touching as it gets close.
- *  - You can press and drag left or right across the tabs; the pill follows your
- *    finger, stretches slightly as it moves, and settles on the nearest tab when
- *    you let go.
+ * How it behaves, and why:
+ *  - The bar is one glass sheet: it blurs, saturates and (in Chromium) refracts
+ *    whatever is behind it, with light gathering along the top edge and a
+ *    specular sheen that follows your pointer.
+ *  - The active pill is tinted glass rather than paint, so the backdrop still
+ *    shows through, while the tint stays dark enough for white text to stay
+ *    comfortably legible.
+ *  - Press and drag left or right and the pill follows your finger. It stretches
+ *    as it moves, and as it approaches the next tab a drop swells and the two
+ *    fuse, the way water drops merge when they touch.
+ *  - The pill cannot escape the bar. Past either end it rubber-bands with
+ *    damping and springs back, which is how Apple's scroll and slider physics
+ *    feel.
+ *  - Letting go settles the pill with a small squash-and-stretch, so a selection
+ *    lands rather than snapping.
  *
- * Readability comes first: labels are never drawn on top of the moving
- * highlight, the active label sits on a solid tinted pill, and the whole effect
- * degrades to a plain solid bar under Reduce Transparency, Increase Contrast or
- * Reduce Motion.
+ * Reduce Transparency, Increase Contrast and Reduce Motion each simplify this
+ * automatically, and it stays fully keyboard and screen-reader operable.
  */
 
 import { useCallback, useEffect, useRef, useState } from "react";
@@ -28,6 +32,11 @@ export type LiquidTab<T extends string> = {
   /** Optional short label for narrow screens. */
   shortLabel?: string;
 };
+
+/** Resistance past the ends: the further you pull, the less it gives. */
+function rubberBand(overshoot: number, limit = 26): number {
+  return limit * (1 - 1 / (overshoot / limit + 1));
+}
 
 export function LiquidTabs<T extends string>({
   tabs,
@@ -44,19 +53,23 @@ export function LiquidTabs<T extends string>({
   const btnRefs = useRef<Array<HTMLButtonElement | null>>([]);
   const [box, setBox] = useState<{ left: number; width: number } | null>(null);
   const [centers, setCenters] = useState<number[]>([]);
+  const [inner, setInner] = useState<{ min: number; max: number }>({ min: 0, max: 0 });
   const [dragX, setDragX] = useState<number | null>(null);
   const [dragging, setDragging] = useState(false);
+  const [settling, setSettling] = useState(false);
   const activeIndex = Math.max(0, tabs.findIndex((t) => t.id === value));
 
-  // Measure the active tab so the pill can sit exactly over it. Re-measured on
-  // resize and when the tabs or selection change, so it never drifts.
+  // Measure the active tab (so the pill sits exactly over it), every tab's
+  // centre (for the merge and for snapping), and the travel limits (so the pill
+  // can never leave the bar). Re-measured on resize and layout changes.
   const measure = useCallback(() => {
     const wrap = wrapRef.current;
     const btn = btnRefs.current[activeIndex];
     if (!wrap || !btn) return;
     const w = wrap.getBoundingClientRect();
     const b = btn.getBoundingClientRect();
-    if (b.width > 0) setBox({ left: b.left - w.left, width: b.width });
+    if (b.width <= 0) return;
+    setBox({ left: b.left - w.left, width: b.width });
     setCenters(
       btnRefs.current.map((el) => {
         if (!el) return 0;
@@ -64,14 +77,22 @@ export function LiquidTabs<T extends string>({
         return r.left - w.left + r.width / 2;
       })
     );
-  }, [activeIndex]);
+    const first = btnRefs.current[0]?.getBoundingClientRect();
+    const last = btnRefs.current[tabs.length - 1]?.getBoundingClientRect();
+    if (first && last) {
+      setInner({
+        min: first.left - w.left + b.width / 2,
+        max: last.right - w.left - b.width / 2,
+      });
+    }
+  }, [activeIndex, tabs.length]);
 
   useEffect(() => {
     measure();
-    const t = setTimeout(measure, 60); // after fonts settle
+    const t = setTimeout(measure, 60); // once fonts have settled
     window.addEventListener("resize", measure);
     return () => { clearTimeout(t); window.removeEventListener("resize", measure); };
-  }, [measure, tabs.length]);
+  }, [measure]);
 
   useEffect(() => {
     const wrap = wrapRef.current;
@@ -81,7 +102,7 @@ export function LiquidTabs<T extends string>({
     return () => obs.disconnect();
   }, [measure]);
 
-  /** Which tab is under a given client x position? */
+  /** Nearest tab to a client x position. */
   const tabAt = (clientX: number): number => {
     let best = activeIndex;
     let bestDist = Infinity;
@@ -94,27 +115,40 @@ export function LiquidTabs<T extends string>({
     return best;
   };
 
-  // ── Press and drag across the tabs ──────────────────────────
-  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
-    if (e.pointerType === "mouse" && e.button !== 0) return;
+  /** Pointer x, in bar coordinates, held inside the bar with rubber-banding. */
+  const clampToBar = (clientX: number): number => {
     const wrap = wrapRef.current;
-    if (!wrap) return;
-    setDragging(true);
-    setDragX(e.clientX - wrap.getBoundingClientRect().left);
-    try { (e.currentTarget as HTMLDivElement).setPointerCapture(e.pointerId); } catch { /* ignore */ }
+    if (!wrap) return 0;
+    const x = clientX - wrap.getBoundingClientRect().left;
+    if (x < inner.min) return inner.min - rubberBand(inner.min - x);
+    if (x > inner.max) return inner.max + rubberBand(x - inner.max);
+    return x;
   };
 
-  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+  const sheen = (clientX: number, clientY: number) => {
     const wrap = wrapRef.current;
     if (!wrap) return;
     const r = wrap.getBoundingClientRect();
-    // Specular highlight follows the pointer whether dragging or just hovering.
-    wrap.style.setProperty("--lg-x", `${e.clientX - r.left}px`);
-    wrap.style.setProperty("--lg-y", `${e.clientY - r.top}px`);
+    wrap.style.setProperty("--lg-x", `${clientX - r.left}px`);
+    wrap.style.setProperty("--lg-y", `${clientY - r.top}px`);
     wrap.style.setProperty("--lg-glow", "1");
+  };
+
+  // ── Press and drag ──────────────────────────────────────────
+  const onPointerDown = (e: React.PointerEvent<HTMLDivElement>) => {
+    if (e.pointerType === "mouse" && e.button !== 0) return;
+    setSettling(false);
+    setDragging(true);
+    setDragX(clampToBar(e.clientX));
+    sheen(e.clientX, e.clientY);
+    try { e.currentTarget.setPointerCapture(e.pointerId); } catch { /* ignore */ }
+  };
+
+  const onPointerMove = (e: React.PointerEvent<HTMLDivElement>) => {
+    sheen(e.clientX, e.clientY);
     if (!dragging) return;
-    setDragX(e.clientX - r.left);
-    // Live preview: as you pull across, the section under your finger becomes active.
+    setDragX(clampToBar(e.clientX));
+    // Live preview: whichever section is under your finger becomes active.
     const i = tabAt(e.clientX);
     if (tabs[i] && tabs[i].id !== value) onChange(tabs[i].id);
   };
@@ -123,10 +157,12 @@ export function LiquidTabs<T extends string>({
     if (dragging) {
       const i = tabAt(e.clientX);
       if (tabs[i] && tabs[i].id !== value) onChange(tabs[i].id);
+      setSettling(true);
+      setTimeout(() => setSettling(false), 460);
     }
     setDragging(false);
     setDragX(null);
-    try { (e.currentTarget as HTMLDivElement).releasePointerCapture(e.pointerId); } catch { /* ignore */ }
+    try { e.currentTarget.releasePointerCapture(e.pointerId); } catch { /* ignore */ }
   };
 
   const onPointerLeave = () => {
@@ -142,46 +178,56 @@ export function LiquidTabs<T extends string>({
     if (tabs[next]) { onChange(tabs[next].id); btnRefs.current[next]?.focus(); }
   };
 
-  // While dragging, the pill follows the finger and stretches a little, the way
-  // a drop of water elongates before it settles.
+  // Pill position. While dragging it centres on the (clamped) finger and
+  // stretches slightly; otherwise it rests over the active tab.
   const pillLeft = dragging && dragX != null && box ? dragX - box.width / 2 : box?.left ?? 0;
-  const stretch = dragging ? 1.06 : 1;
+  const stretch = dragging ? 1.07 : 1;
 
   return (
     <div
       ref={wrapRef}
       role="tablist"
       aria-label="Sections"
-      tabIndex={-1}
       onPointerDown={onPointerDown}
       onPointerMove={onPointerMove}
       onPointerUp={endDrag}
       onPointerCancel={endDrag}
       onPointerLeave={onPointerLeave}
       onKeyDown={onKeyDown}
-      className={`lg-glass lg-specular relative flex items-center gap-0.5 p-1 rounded-full select-none touch-none ${className}`}
+      className={`lg-glass lg-refract lg-specular relative flex items-center gap-0.5 p-1 rounded-full select-none touch-none overflow-hidden ${className}`}
     >
-      {/* The gooey layer: the pill plus a small blob under each tab. The SVG
-          filter blurs then re-sharpens the alpha, so shapes that come close
-          bleed into one another and merge like water drops. */}
-      <div className="absolute inset-1 pointer-events-none" style={{ filter: "url(#lg-goo)" }} aria-hidden="true">
+      <span className="lg-sheen" aria-hidden="true" />
+
+      {/* The liquid layer: the pill, plus a drop that swells out of the tab it
+          is approaching. The goo filter fuses them as they meet. */}
+      <div
+        className="absolute inset-1 pointer-events-none"
+        style={{ filter: "url(#lg-goo)" }}
+        aria-hidden="true"
+      >
         {dragging && dragX != null && centers.map((c, i) => {
           const dist = Math.abs(dragX - c);
-          if (dist > 78 || i === activeIndex) return null;
-          // Near = a fat drop that touches the pill; far = a small bead. The
-          // filter re-sharpens the alpha, so we scale size rather than opacity.
-          const size = Math.max(6, 26 - (dist / 78) * 20);
+          if (dist > 84 || i === activeIndex) return null;
+          // Close by: a fat drop that touches the pill. Far: a small bead.
+          const size = Math.max(7, 30 - (dist / 84) * 23);
           return (
             <span
               key={tabs[i].id}
-              className="absolute rounded-full bg-primary-600"
-              style={{ left: c - 4 - size / 2, top: "50%", width: size, height: size, transform: "translateY(-50%)" }}
+              className="absolute rounded-full"
+              style={{
+                left: c - 4 - size / 2,
+                top: "50%",
+                width: size,
+                height: size,
+                transform: "translateY(-50%)",
+                background: "color-mix(in oklch, var(--color-primary-600) 90%, transparent)",
+              }}
             />
           );
         })}
         {box && (
           <span
-            className={`lg-pill absolute top-0 bottom-0 rounded-full ${dragging ? "lg-dragging" : "lg-spring"}`}
+            className={`lg-pill absolute top-0 bottom-0 rounded-full ${dragging ? "lg-dragging" : "lg-spring"} ${settling ? "lg-settle" : ""}`}
             style={{
               left: 0,
               width: box.width,
@@ -201,8 +247,8 @@ export function LiquidTabs<T extends string>({
             aria-selected={selected}
             tabIndex={selected ? 0 : -1}
             onClick={() => onChange(t.id)}
-            className={`relative z-10 flex items-center gap-1.5 px-3.5 sm:px-4 py-2 rounded-full text-sm font-semibold whitespace-nowrap transition-colors ${
-              selected ? "text-white" : "text-text-secondary hover:text-text-primary"
+            className={`lg-press relative z-10 flex items-center gap-1.5 px-3.5 sm:px-4 py-2 rounded-full text-sm font-semibold whitespace-nowrap transition-colors duration-200 ${
+              selected ? "text-white drop-shadow-[0_1px_2px_rgba(0,0,0,0.35)]" : "text-text-secondary hover:text-text-primary"
             }`}
           >
             {t.icon}
@@ -211,22 +257,6 @@ export function LiquidTabs<T extends string>({
           </button>
         );
       })}
-
-      {/* The filter itself. Tiny, inert, and shared by the blobs above. */}
-      <svg width="0" height="0" aria-hidden="true" className="absolute">
-        <defs>
-          <filter id="lg-goo">
-            <feGaussianBlur in="SourceGraphic" stdDeviation="6" result="blur" />
-            <feColorMatrix
-              in="blur"
-              mode="matrix"
-              values="1 0 0 0 0  0 1 0 0 0  0 0 1 0 0  0 0 0 22 -9"
-              result="goo"
-            />
-            <feBlend in="SourceGraphic" in2="goo" />
-          </filter>
-        </defs>
-      </svg>
     </div>
   );
 }

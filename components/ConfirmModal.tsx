@@ -44,7 +44,7 @@ export function ConfirmModal({
       aria-modal="true"
     >
       <div
-        className="w-full sm:max-w-md bg-surface border border-border rounded-t-2xl sm:rounded-2xl p-5 shadow-2xl"
+        className="lg-glass lg-sheet w-full sm:max-w-md rounded-t-2xl sm:rounded-2xl p-5"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start gap-3 mb-3">
