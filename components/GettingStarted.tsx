@@ -21,11 +21,11 @@ export function GettingStarted({
     {
       icon: <Upload size={18} className="text-accent-400" />,
       title: "1. Add your scorecard",
-      body: "Drag a completed UNDRR scorecard onto the box below, or click to pick the file. It's read right here on your device, nothing is uploaded to us.",
+      body: "Upload a completed UNDRR scorecard on the Scorecard tab (its answers fill in automatically), or let the Assistant fill one out for a city or an area you draw. Files are read right here on your device.",
     },
     {
       icon: <Play size={18} className="text-accent-400" />,
-      title: "2. Press Run Analysis",
+      title: "2. Press Run analysis",
       body: "It gathers free public data about your city, then has the AI look for what's working, what's weak, and what to do. You'll watch each step happen.",
     },
     {

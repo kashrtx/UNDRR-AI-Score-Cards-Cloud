@@ -9,7 +9,7 @@
 import { useEffect, useRef, useState } from "react";
 import {
   Compass, Bot, ClipboardCheck, BarChart3, Settings as SettingsIcon, ShieldCheck,
-  ArrowLeft, ArrowRight, X,
+  ArrowLeft, ArrowRight, X, AlertTriangle,
 } from "lucide-react";
 
 interface Step {
@@ -17,6 +17,8 @@ interface Step {
   title: string;
   body: string;
   bullets?: string[];
+  /** A heads-up shown in a warning box under the bullets. */
+  note?: string;
 }
 
 const STEPS: Step[] = [
@@ -30,15 +32,17 @@ const STEPS: Step[] = [
     title: "The Assistant builds a scorecard for you",
     body: "New to the scorecard, or only part way through? Head to the Assistant tab.",
     bullets: [
-      "Type in your city and it will do the research and fill in all 47 questions for you.",
+      "Type in your city or define a polygon region on a map (draw one, or load a GeoJSON, KML, Shapefile or GeoTIFF) and it will do the research and fill in all 47 questions for you.",
+      "Its answers appear on the Scorecard tab as it works. Already have a completed scorecard? Upload it there and the answers fill in automatically.",
       "Prefer to go question by question? Just chat with it and it will help.",
-      "When you're happy, download the real official file or send it straight to the analysis.",
+      "When you're happy, press Run analysis on the Scorecard tab, or download the real official file.",
     ],
+    note: "Heads-up: filling a whole scorecard takes many AI calls. Free models (especially Gemini's free tier) have tight token and rate limits, so a run can pause partway. If it does, wait a minute and press Continue, or pick a model with more headroom (OpenRouter's free models, NVIDIA NIM, or a paid key) in Settings.",
   },
   {
     icon: <BarChart3 size={26} />,
-    title: "The Dashboard analyzes it",
-    body: "On the Dashboard, add a completed scorecard (your own, or one from the Assistant) and press Run Analysis.",
+    title: "The Dashboard shows the analysis",
+    body: "Press Run analysis on the Scorecard tab and the results open on the Dashboard.",
     bullets: [
       "It quietly gathers free public data about your city while it works.",
       "You get a plain language summary, a clear picture of strong and weak areas, an action plan, and where your score could go.",
@@ -122,6 +126,12 @@ export function Onboarding({ open, onClose }: { open: boolean; onClose: () => vo
                 </li>
               ))}
             </ul>
+          )}
+          {step.note && (
+            <p className="mt-3 max-w-sm mx-auto flex items-start gap-2 text-left text-xs leading-relaxed rounded-xl border border-warn-500/30 bg-warn-500/10 px-3 py-2 text-warn-400">
+              <AlertTriangle size={14} className="shrink-0 mt-0.5" />
+              <span>{step.note}</span>
+            </p>
           )}
         </div>
 

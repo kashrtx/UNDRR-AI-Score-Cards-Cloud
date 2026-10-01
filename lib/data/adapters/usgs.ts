@@ -35,7 +35,7 @@ export const usgsSource: DataSource = {
     const prov = provenance(
       "USGS",
       "Earthquake Catalog (FDSN)",
-      `M4+ within 300km of ${loc.name}`,
+      `M4+ within 300km of ${loc.polygon ? "the selected area's centre" : loc.name}`,
       url
     );
 

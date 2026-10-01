@@ -8,6 +8,7 @@
 import type { Draft, CityInfo } from "./draft";
 import type { TranscriptItem } from "./agent";
 import { filledCount } from "./draft";
+import { formatKm2, type AreaSelection } from "@/lib/geo/area";
 
 export type ChatItem =
   | { kind: "user"; text: string }
@@ -26,12 +27,19 @@ export interface AssistantSession {
   title: string;
   city: string;
   country: string;
+  /** ISO alpha-2 behind the Country dropdown (older sessions only have the name). */
+  countryCode?: string;
+  /** State/province name, for countries that have them. */
+  region?: string;
   info: string;
   chat: ChatItem[];
   transcript: TranscriptItem[];
   draft: Draft;
   profile?: CityInfo;
   attachments: Attachment[];
+  /** "area" when the scorecard is for a drawn/loaded area rather than a whole city. */
+  setupMode?: "city" | "area";
+  area?: AreaSelection | null;
   createdAt: number;
   updatedAt: number;
 }
@@ -75,9 +83,12 @@ export function newId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
 }
 
-export function titleFor(s: Pick<AssistantSession, "city" | "country">): string {
+export function titleFor(s: Pick<AssistantSession, "city" | "country" | "region" | "area" | "setupMode">): string {
+  if (s.setupMode === "area" && s.area) {
+    return `Area · ${s.area.label || s.city?.trim() || formatKm2(s.area.areaKm2)}`;
+  }
   const c = s.city?.trim();
-  if (c) return s.country?.trim() ? `${c}, ${s.country.trim()}` : c;
+  if (c) return [c, s.region?.trim(), s.country?.trim()].filter(Boolean).join(", ");
   return "New scorecard";
 }
 

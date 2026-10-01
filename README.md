@@ -14,7 +14,9 @@ It is built to be genuinely useful for a city planner, and genuinely cheap to ru
 
 **Assistant** helps you *create* a scorecard. You give it a city and whatever you know, and an AI agent researches the city, searches the web, and fills in the 47 indicators, building a live draft you can edit. You can watch it think in real time, stop and continue later (even after switching model), attach reference documents for it to learn from, and keep a saved history of scorecards you can switch between. When it looks right, one click loads it into the analyzer, or downloads the **real official .xlsm**. The assistant fills the actual UNDRR template (every sheet, all the formatting, and the macros) by setting the answer cells, so it opens and totals correctly in Excel just like a hand-filled one.
 
-**Dashboard** *analyzes* a scorecard, whether you uploaded a real one or built it in the Assistant. This is the part described in most of this guide.
+**Area mode** (in the Assistant's setup, "Draw an area") lets you assess part of a city, or a region that crosses city lines, instead of a whole city. Draw a rectangle or polygon on the map, or load a GeoJSON, KML/KMZ, zipped Shapefile, or GeoTIFF (only its outline is used). Areas must be between 0.1 and 1,000 km², and you get a warning if much of the area lies outside the city. The open data is then gathered for exactly that shape: OpenStreetMap counts inside the polygon, and an elevation profile sampled across it. Twenty indicators that can really differ by location (hazard exposure, infrastructure, service loss, shelters, local communities) are scored for the area; the other 27 (plans, budgets, institutions) describe the whole city, and the draft labels each one "Area" or "City-wide". The pieces live in `lib/geo/` (geometry, file parsing, place lookup, the indicator split), `components/AreaPicker.tsx` and `components/AreaMap.tsx` (Leaflet + Leaflet-Geoman), `app/api/area` (place search and city-boundary check), and `lib/data/adapters/areaElevation.ts`.
+
+**Dashboard** *shows the analysis* of a scorecard. Upload a completed scorecard on the **Scorecard** tab (the answers and City Information fill in automatically), or let the **Assistant** (the first tab) build one, which fills the Scorecard tab live as it works. Then press **Run analysis** on the Scorecard tab. The draft opens on the Dashboard and the analysis starts right away. This is the part described in most of this guide.
 
 **Analysis advisor** (on the Dashboard, once you have results) helps you *improve* it. It already knows the scores and the analysis, so you can ask what looks thin, question a score, or share real data you found. Anything substantial you share is saved automatically, and one press of Re-run rebuilds the analysis with it, while also showing the model its previous answer so it refines rather than starting over. Conversations are remembered per city, with a History list so you can keep several threads and pick any of them back up. If your model is a thinking model, its internal reasoning stays behind a quiet "Thinking it through" line instead of spilling into the reply.
 
@@ -181,7 +183,9 @@ npm install
 npm run dev
 ```
 
-Now open `http://localhost:3000`. Go to **Settings**, pick a provider, paste a key, and hit **Test connection**. Then go back to **Dashboard**, upload a completed scorecard, and click **Run Analysis**.
+`npm run dev` first stops any dev server of this project left running from an earlier run (only this folder's, on ports 3000-3010), then starts a fresh one and opens it in your browser. Set `NO_OPEN=1` to skip opening the browser, or use `npm run dev:plain` for bare `next dev`.
+
+Go to **Settings**, pick a provider, paste a key, and hit **Test connection**. Then upload a completed scorecard on the **Scorecard** tab (or build one with the **Assistant**) and click **Run analysis**.
 
 That is the entire local setup.
 
@@ -233,10 +237,11 @@ A quick map so you do not have to go hunting:
 ## Handy commands
 
 ```bash
-npm run dev     # run locally with live reload
+npm run dev     # stop old local runs, start with live reload, open the browser
 npm run build   # make a production build
 npm run start   # run that production build
 npm run lint    # check the code style
+npm run build:regions  # regenerate the Country / State-or-Province lists (lib/geo/regions.json)
 ```
 
 ---

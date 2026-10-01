@@ -16,6 +16,8 @@ import type { LLMProvider } from "@/lib/llm";
 import { PRELIMINARY_INDICATORS, TOTAL_INDICATORS } from "@/lib/scorecard/preliminaryTemplate";
 import { ESSENTIAL_NAMES } from "@/lib/scorecard/schema";
 import { applyScores, applyInfo, filledCount, unfilledCodes, type Draft, type CityInfo } from "./draft";
+import { AREA_SPECIFIC_CODES } from "@/lib/geo/indicatorScope";
+import { describeArea, type AreaSelection } from "@/lib/geo/area";
 
 export type TranscriptItem =
   | { role: "user"; content: string }
@@ -42,9 +44,13 @@ export interface AgentContext {
   searchKey?: string | null;
   city?: string;
   country?: string;
+  /** State/province, when the country has them (e.g. "Missouri" for Springfield). */
+  region?: string;
   attachments?: Array<{ name: string; text: string }>;
   mode?: "autonomous" | "assist";
   drainInput?: () => string | null; // pull a queued user message (for mid-run steering)
+  /** Set when the user drew (or loaded) an area instead of scoring a whole city. */
+  area?: AreaSelection | null;
 }
 
 const MAX_STEPS = 16;
@@ -215,14 +221,18 @@ function parseAction(raw: string): AgentAction | null {
 async function researchTool(
   city: string,
   country: string | undefined,
-  searchKey?: string | null
+  searchKey?: string | null,
+  area?: AreaSelection | null
 ): Promise<{ text: string; method: string }> {
   try {
+    const areaBody = area
+      ? { ring: area.ring, label: area.label, countryCode: area.countryCode }
+      : undefined;
     const [dataRes, refRes] = await Promise.allSettled([
       fetch("/api/data/fetch", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ city, country }),
+        body: JSON.stringify({ city, country, area: areaBody }),
       }).then((r) => (r.ok ? r.json() : null)),
       fetch("/api/research", {
         method: "POST",
@@ -236,9 +246,9 @@ async function researchTool(
     if (dataRes.status === "fulfilled" && dataRes.value) {
       const dp = dataRes.value as { data?: Array<{ label: string; value: unknown; unit?: string }> };
       const pts = (dp.data || [])
-        .slice(0, 18)
+        .slice(0, area ? 26 : 18)
         .map((p) => `- ${p.label}: ${p.value}${p.unit ? " " + p.unit : ""}`);
-      if (pts.length) lines.push("Open data:", ...pts);
+      if (pts.length) lines.push(area ? "Open data for the SELECTED AREA:" : "Open data:", ...pts);
     }
     if (refRes.status === "fulfilled" && refRes.value) {
       const rf = refRes.value as { answer?: string; passages?: Array<{ text: string }>; webSearchMethod?: string };
@@ -298,8 +308,13 @@ function buildUser(ctx: AgentContext): string {
     .map((i) => `${i.code}=${ctx.draft[i.code].score}`)
     .join(", ");
 
-  const cityLine = ctx.city && ctx.city.trim()
-    ? `Target city: ${ctx.city}${ctx.country && ctx.country.trim() ? ", " + ctx.country : ""}.`
+  const cityName = ctx.city && ctx.city.trim()
+    ? [ctx.city.trim(), ctx.region?.trim(), ctx.country?.trim()].filter(Boolean).join(", ")
+    : "";
+  const cityLine = ctx.area
+    ? areaBlock(ctx.area, cityName)
+    : cityName
+    ? `Target city: ${cityName}.`
     : "No city has been provided yet, ask the user which city this is for before scoring.";
 
   const atts = ctx.attachments || [];
@@ -336,6 +351,20 @@ CURRENT DRAFT: ${filled}/${TOTAL_INDICATORS} filled.${draftLines ? ` Scores so f
 ${unfilled.length ? `Still unfilled: ${unfilled.join(", ")}.` : "All indicators are filled."}
 
 Output ONLY the next action as a single JSON object (remember the "thought" field).`;
+}
+
+/** Instructions for an area (sub-city or cross-boundary) fill. */
+function areaBlock(area: AreaSelection, cityName: string): string {
+  const areaCodes = PRELIMINARY_INDICATORS.filter((i) => AREA_SPECIFIC_CODES.has(i.code)).map((i) => i.code);
+  const parent = cityName || "the city it sits in";
+  const outside = area.outsideCityFraction != null && area.outsideCityFraction > 0.1
+    ? ` About ${Math.round(area.outsideCityFraction * 100)}% of it lies outside ${parent}'s boundary, so it also covers neighbouring jurisdictions; mention that where it matters.`
+    : "";
+  return `TARGET AREA: this scorecard is for a SPECIFIC AREA, not a whole city: a ${describeArea(area)}, within ${parent}.${outside}
+research_city returns open data measured for exactly this area (infrastructure counts inside it, its elevation profile, climate at its centre), plus general web context about ${parent}.
+- AREA-SPECIFIC indicators, score them from THIS AREA's own situation (its hazards, terrain, infrastructure, services, and communities), and name the area evidence in the note: ${areaCodes.join(", ")}.
+- Every other indicator is CITY-WIDE (governance, plans, budgets, institutions apply to the whole jurisdiction): score it for ${parent} as a whole, and don't pretend the area has its own policy.
+- The City Information page describes ${parent} (the official form is per jurisdiction). When you finish, say plainly that the result covers the selected area.`;
 }
 
 // ── The turn loop ────────────────────────────────────────────
@@ -438,10 +467,14 @@ export async function runAgentTurn(
     switch (action.action) {
       case "research_city": {
         const cityName = action.city || ctx.city || "";
-        onEvent({ type: "tool", label: `Researching ${cityName || "the city"}…` });
-        const { text, method } = await researchTool(cityName, action.country || ctx.country, ctx.searchKey);
-        ctx.transcript.push({ role: "tool", content: `research_city(${cityName}):\n${text}` });
-        onEvent({ type: "tool", label: `Researched ${cityName || "the city"}`, detail: method });
+        // Look the city up with its state so "Springfield" finds the right one.
+        const sameCity = !action.city || action.city.trim().toLowerCase() === (ctx.city || "").trim().toLowerCase();
+        const lookupName = sameCity && ctx.region ? `${cityName}, ${ctx.region}` : cityName;
+        const what = ctx.area ? "the selected area" : cityName || "the city";
+        onEvent({ type: "tool", label: `Researching ${what}…` });
+        const { text, method } = await researchTool(lookupName, action.country || ctx.country, ctx.searchKey, ctx.area);
+        ctx.transcript.push({ role: "tool", content: `research_city(${ctx.area ? "selected area in " : ""}${cityName}):\n${text}` });
+        onEvent({ type: "tool", label: `Researched ${what}`, detail: method });
         stagnantScores = 0; stagnantInfo = 0;
         break;
       }

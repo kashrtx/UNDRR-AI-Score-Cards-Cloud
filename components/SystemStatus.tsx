@@ -121,7 +121,7 @@ export function SystemStatus({
             </>
           ) : (
             <p className="text-sm text-text-secondary">
-              No scorecard attached yet, upload one below to begin.
+              No scorecard loaded yet. Upload or build one in the Assistant, then press Run analysis.
             </p>
           )}
         </div>

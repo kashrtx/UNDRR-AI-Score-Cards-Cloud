@@ -13,7 +13,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Play, Loader2, AlertTriangle, MapPin, Users, Calendar, Zap,
   CheckCircle2, XCircle, Info, Settings as SettingsIcon, LayoutDashboard, RotateCcw,
-  Download, FileJson, Eraser, Bot, HelpCircle, Lightbulb, Compass, ExternalLink, Sparkles,
+  Download, FileJson, Eraser, Bot, HelpCircle, Lightbulb, Compass, ExternalLink, Sparkles, ClipboardCheck,
 } from "lucide-react";
 
 import { Logo } from "@/components/Logo";
@@ -22,7 +22,6 @@ import { RadarChart } from "@/components/RadarChart";
 import { ImpactDifficultyMatrix } from "@/components/ImpactDifficultyMatrix";
 import { ActionPlan } from "@/components/ActionPlan";
 import { ScoreProjection } from "@/components/ScoreProjection";
-import { ScorecardUpload } from "@/components/ScorecardUpload";
 import { ProvenanceBadge } from "@/components/Provenance";
 import { StatusBar } from "@/components/StatusBar";
 import { GettingStarted } from "@/components/GettingStarted";
@@ -50,7 +49,7 @@ import type { AnalysisResult } from "@/lib/analysis/schema";
 import type { DataReport, ProgressEvent } from "@/lib/types";
 
 type AppState = "empty" | "ready" | "analyzing" | "results" | "error";
-type Tab = "dashboard" | "assistant" | "settings";
+type Tab = "dashboard" | "assistant" | "scorecard" | "settings";
 
 const SCORECARD_KEY = "undrr.scorecard";
 const SCORECARD_NAME_KEY = "undrr.scorecard.name";
@@ -91,7 +90,7 @@ function ConfidenceBadge({ level }: { level?: "high" | "medium" | "low" }) {
 }
 
 export default function Page() {
-  const [tab, setTab] = useState<Tab>("dashboard");
+  const [tab, setTab] = useState<Tab>("assistant"); // start where scorecards are built or uploaded
   const [settings, setSettings] = useState<AppSettings | null>(null);
   const [providerReady, setProviderReady] = useState(false);
   const [tavilyActive, setTavilyActive] = useState(false);
@@ -252,24 +251,13 @@ export default function Page() {
     }
   }, [clearAdvisorState]);
 
-  // Called by the upload widget. If results would be lost, ask first.
-  const handleUpload = useCallback(
-    (sc: NormalizedScorecard, name: string) => {
-      // Warn before wiping anything already here: a completed analysis, a loaded
-      // scorecard, or a run in progress.
-      if (scorecard || analysis || state === "analyzing") {
-        setPendingUpload({ sc, name });
-      } else {
-        commitUpload(sc, name);
-      }
-    },
-    [scorecard, analysis, state, commitUpload]
-  );
-
-  // Called by the Assistant tab: load its draft as the active scorecard.
+  // Called by the Assistant tab: load its draft as the active scorecard, then
+  // run the analysis as soon as it's committed (see the effect after handleAnalyze).
+  const autoRunRef = useRef(false);
   const handleLoadFromAssistant = useCallback(
     (sc: NormalizedScorecard) => {
       const name = `${sc.city.name} (assistant draft)`;
+      autoRunRef.current = true;
       if (scorecard || analysis || state === "analyzing") {
         setPendingUpload({ sc, name });
         setTab("dashboard"); // surface the confirmation on the dashboard
@@ -413,6 +401,14 @@ export default function Page() {
     }
   }, [scorecard, settings, state, assistantRunning, analysis, advisorBusy]);
 
+  // One-click "Run analysis" from the Assistant: fire once the new scorecard
+  // has been committed (immediately, or after the replace confirmation).
+  useEffect(() => {
+    if (!autoRunRef.current || state !== "ready" || !scorecard || tab !== "dashboard") return;
+    autoRunRef.current = false;
+    void handleAnalyze();
+  }, [state, scorecard, tab, handleAnalyze]);
+
   // Add a piece of local data the advisor gathered (deduped). The dashboard,
   // the advisor banner, and the next re-run all read from this one list.
   const addRefineFact = useCallback((text: string) => {
@@ -475,8 +471,9 @@ export default function Page() {
               value={tab}
               onChange={setTab}
               tabs={[
-                { id: "dashboard" as const, label: "Dashboard", shortLabel: "Home", icon: <LayoutDashboard size={15} /> },
                 { id: "assistant" as const, label: "Assistant", shortLabel: "Build", icon: <Bot size={15} /> },
+                { id: "scorecard" as const, label: "Scorecard", shortLabel: "Card", icon: <ClipboardCheck size={15} /> },
+                { id: "dashboard" as const, label: "Dashboard", shortLabel: "Results", icon: <LayoutDashboard size={15} /> },
                 { id: "settings" as const, label: "Settings", shortLabel: "Setup", icon: <SettingsIcon size={15} /> },
               ]}
             />
@@ -532,10 +529,13 @@ export default function Page() {
 
       {/* ── Main ───────────────────────────────── */}
       <main className="flex-1 max-w-[1600px] w-full mx-auto px-4 sm:px-6 py-5 sm:py-6">
-        {/* Assistant stays mounted so a run keeps going even if you switch tabs
-            (e.g. to change the model in Settings), just hidden when inactive. */}
-        <div className={tab === "assistant" ? "" : "hidden"}>
+        {/* Assistant + Scorecard stay mounted so a run keeps going even if you
+            switch tabs (e.g. to change the model in Settings), just hidden when
+            inactive. They are one component sharing the live draft. */}
+        <div className={tab === "assistant" || tab === "scorecard" ? "" : "hidden"}>
           <AssistantTab
+            view={tab === "scorecard" ? "scorecard" : "assistant"}
+            onOpenView={setTab}
             settings={settings}
             providerReady={providerReady}
             onLoadIntoAnalyzer={handleLoadFromAssistant}
@@ -592,8 +592,21 @@ export default function Page() {
                 {!tipsDismissed && (
                   <GettingStarted onOpenSettings={() => setTab("settings")} onTakeTour={replayTour} onDismiss={dismissTips} ready={providerReady} />
                 )}
-                <div className="max-w-2xl mx-auto">
-                  <ScorecardUpload onUploaded={handleUpload} />
+                <div className="max-w-2xl mx-auto glass-card p-8 text-center">
+                  <Bot size={32} className="text-accent-400 mx-auto mb-3" />
+                  <h2 className="text-lg font-semibold text-text-primary mb-1">No scorecard to analyze yet</h2>
+                  <p className="text-sm text-text-secondary mb-4">
+                    Upload a completed scorecard on the Scorecard tab, or have the Assistant fill one out for a city or
+                    an area you draw. Then press Run analysis on the Scorecard tab and the results appear here.
+                  </p>
+                  <div className="flex flex-wrap gap-2 justify-center">
+                    <button onClick={() => setTab("scorecard")} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold btn-accent">
+                      <ClipboardCheck size={16} /> Upload a scorecard
+                    </button>
+                    <button onClick={() => setTab("assistant")} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-medium bg-surface-overlay border border-border text-text-primary hover:border-primary-500/40">
+                      <Bot size={16} /> Build one with the Assistant
+                    </button>
+                  </div>
                 </div>
               </div>
             )}
@@ -668,8 +681,14 @@ export default function Page() {
                     )}
                   </div>
 
-                  <div className="lg:col-span-2">
-                    <ScorecardUpload onUploaded={handleUpload} />
+                  <div className="lg:col-span-2 glass-card p-5 flex flex-col justify-center gap-3">
+                    <p className="text-sm text-text-secondary">
+                      To change answers or analyze a different scorecard, edit or upload it on the Scorecard tab, then
+                      press Run analysis there.
+                    </p>
+                    <button onClick={() => setTab("scorecard")} className="self-start inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-medium bg-surface-overlay border border-border text-text-primary hover:border-primary-500/40">
+                      <ClipboardCheck size={15} /> Open the Scorecard
+                    </button>
                   </div>
                 </div>
 
@@ -880,7 +899,7 @@ export default function Page() {
       <ConfirmModal
         open={!!pendingUpload}
         title="Replace what's loaded?"
-        onClose={() => setPendingUpload(null)}
+        onClose={() => { autoRunRef.current = false; setPendingUpload(null); }}
         actions={[
           ...(analysis ? [{
             label: "Download report, then replace",
@@ -900,7 +919,7 @@ export default function Page() {
               setPendingUpload(null);
             },
           },
-          { label: "Cancel", variant: "ghost", onClick: () => setPendingUpload(null) },
+          { label: "Cancel", variant: "ghost", onClick: () => { autoRunRef.current = false; setPendingUpload(null); } },
         ]}
       >
         Loading <strong className="text-text-primary">{pendingUpload?.name}</strong> will replace the

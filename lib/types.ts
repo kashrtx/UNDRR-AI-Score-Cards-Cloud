@@ -140,6 +140,8 @@ export interface DataPack {
   city: string;
   country?: string;
   resolved: { displayName: string; lat: number; lon: number; countryCode: string | null } | null;
+  /** Present when the pack was built for a drawn area rather than a city name. */
+  area?: { areaKm2: number; bbox: [number, number, number, number]; points: number };
   sources: Array<{ id: string; name: string; points: number; error?: string }>;
   dataPoints: number;
   data: NormalizedDatum[];

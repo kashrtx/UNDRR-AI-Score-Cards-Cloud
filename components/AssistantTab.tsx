@@ -1,8 +1,10 @@
 "use client";
 
 /**
- * Assistant tab, an AI agent that helps fill out the UNDRR ARISE Preliminary
- * scorecard. Highlights:
+ * Assistant + Scorecard tabs, an AI agent that helps fill out the UNDRR ARISE
+ * Preliminary scorecard, and the live scorecard it fills. One component renders
+ * both (chosen by `view`) so they share a single draft: a run in the Assistant
+ * keeps filling the Scorecard tab even while you look at it. Highlights:
  *   • Streams the model's output live so you can see it working.
  *   • Stop any time and Continue later (even after switching model, or once a
  *     rate limit clears). Failures explain themselves instead of dying quietly.
@@ -13,9 +15,9 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
-  Bot, Send, Sparkles, Upload, Loader2, Wrench, Download, ArrowRight, RotateCcw,
+  Bot, Send, Sparkles, Upload, Loader2, Wrench, Download, RotateCcw,
   ClipboardCheck, Lightbulb, Plus, Trash2, Paperclip, X, Play, AlertTriangle, History, ChevronDown,
-  Maximize2, Minimize2,
+  Building2, Map as MapIcon,
 } from "lucide-react";
 import type { AppSettings } from "@/lib/settings/store";
 import { getSearchKey, hasSearchKey } from "@/lib/settings/store";
@@ -40,6 +42,11 @@ import {
 import { ConfirmModal } from "@/components/ConfirmModal";
 import { LiveStream } from "@/components/LiveStream";
 import { SessionMenu } from "@/components/SessionMenu";
+import { AreaPicker } from "@/components/AreaPicker";
+import { AreaThumbnail } from "@/components/AreaThumbnail";
+import { validateArea, describeArea, formatKm2, type AreaSelection } from "@/lib/geo/area";
+import { scopeOf, AREA_SPECIFIC_CODES } from "@/lib/geo/indicatorScope";
+import { COUNTRIES, countryByCode, countryCodeFor, regionsOf, findRegion } from "@/lib/geo/countries";
 
 const SCORE_LABELS: Record<string, string> = {
   "0": "0 · None", "1": "1 · Limited", "2": "2 · Substantial", "3": "3 · Comprehensive",
@@ -147,6 +154,8 @@ function ReasoningItem({ summary, detail, seconds }: { summary: string; detail?:
 }
 
 export function AssistantTab({
+  view,
+  onOpenView,
   settings,
   providerReady,
   onLoadIntoAnalyzer,
@@ -154,6 +163,9 @@ export function AssistantTab({
   onRunningChange,
   externalBusy = false,
 }: {
+  /** Which half to show: the chat ("assistant") or the live draft ("scorecard"). */
+  view: "assistant" | "scorecard";
+  onOpenView?: (v: "assistant" | "scorecard") => void;
   settings: AppSettings;
   providerReady: boolean;
   onLoadIntoAnalyzer: (sc: NormalizedScorecard) => void;
@@ -165,12 +177,24 @@ export function AssistantTab({
   const [sessions, setSessions] = useState<SessionMeta[]>([]);
   const [activeId, setActive] = useState<string>("");
   const [city, setCity] = useState("");
-  const [country, setCountry] = useState("");
+  const [country, setCountry] = useState(""); // country name, as shown and sent to research
+  const [countryCode, setCountryCode] = useState(""); // ISO alpha-2 behind the Country dropdown
+  const [region, setRegion] = useState(""); // state/province name, when the country has them
   const [info, setInfo] = useState("");
   const [chat, setChat] = useState<ChatItem[]>([]);
   const [draft, setDraft] = useState<Draft>(() => emptyDraft());
   const [profile, setProfile] = useState<CityInfo>({ name: "", country: "" });
   const [attachments, setAttachments] = useState<Attachment[]>([]);
+  const [setupMode, setSetupMode] = useState<"city" | "area">("city");
+  const [dropHover, setDropHover] = useState(false);
+  // Upload feedback shown on the Scorecard tab (the chat log lives on the other tab).
+  const [uploadNote, setUploadNote] = useState<{ ok: boolean; text: string } | null>(null);
+  // "That place doesn't exist" popup, and the check that runs before a fill.
+  const [placeError, setPlaceError] = useState<string | null>(null);
+  const [checkingPlace, setCheckingPlace] = useState(false);
+  // Bumped by "Clear all Information" so the map picker starts over too.
+  const [pickerKey, setPickerKey] = useState(0);
+  const [area, setArea] = useState<AreaSelection | null>(null);
 
   const [input, setInput] = useState("");
   const [running, setRunning] = useState(false);
@@ -191,7 +215,6 @@ export function AssistantTab({
   const profileRef = useRef<CityInfo>(profile);
   profileRef.current = profile;
   const [setupOpen, setSetupOpen] = useState(true);
-  const [chatExpanded, setChatExpanded] = useState(false);
   const attachRef = useRef<Attachment[]>(attachments);
   attachRef.current = attachments;
   const streamBuf = useRef("");
@@ -201,7 +224,6 @@ export function AssistantTab({
   const lastModeRef = useRef<"autonomous" | "assist">("assist");
   const [building, setBuilding] = useState(false);
   const chatEndRef = useRef<HTMLDivElement | null>(null);
-  const chatScrollRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
 
   // Auto-grow the composer so a long paste is fully visible and easy to edit.
@@ -238,20 +260,50 @@ export function AssistantTab({
 
   const filled = filledCount(draft);
   const pct = Math.round((filled / TOTAL_INDICATORS) * 100);
+  const areaActive = setupMode === "area";
+  const areaProblem = area ? validateArea(area) : "Draw an area on the map or load one from a file.";
+  const canStart = areaActive ? !areaProblem : !!city.trim();
+  // A new area fills in the City/Country boxes; the user can still edit them.
+  const onPlaceResolved = useCallback((p: {
+    city: string; country: string; countryCode?: string | null; regionName?: string | null; regionCode?: string | null;
+  }) => {
+    if (p.city) setCity(p.city);
+    const code = countryCodeFor(p.countryCode || "") || countryCodeFor(p.country);
+    if (code) {
+      setCountryCode(code);
+      setCountry(countryByCode(code)?.name || p.country);
+      setRegion(findRegion(code, p.regionCode || "")?.name || findRegion(code, p.regionName || "")?.name || "");
+    } else if (p.country) {
+      setCountryCode("");
+      setCountry(p.country);
+      setRegion("");
+    }
+  }, []);
+
+  // Country dropdown: keep the name, the code and the (now stale) state in step.
+  const selectCountry = useCallback((code: string) => {
+    setCountryCode(code);
+    setCountry(countryByCode(code)?.name || "");
+    setRegion("");
+  }, []);
+  const regionOptions = regionsOf(countryCode);
+  const regionCode = findRegion(countryCode, region)?.code;
 
   // ── Session load/save ───────────────────────────────
   const buildActiveSession = useCallback((): AssistantSession => ({
     id: activeMetaRef.current.id,
     title: "",
-    city, country, info,
+    city, country, countryCode, region, info,
     chat,
     transcript: transcriptRef.current,
     draft: draftRef.current,
     profile: profileRef.current,
     attachments: attachRef.current,
+    setupMode,
+    area,
     createdAt: activeMetaRef.current.createdAt,
     updatedAt: Date.now(),
-  }), [city, country, info, chat]);
+  }), [city, country, countryCode, region, info, chat, setupMode, area]);
 
   const saveActive = useCallback(() => {
     if (!activeMetaRef.current.id) return;
@@ -267,11 +319,17 @@ export function AssistantTab({
     setActiveId(s.id);
     setCity(s.city || "");
     setCountry(s.country || "");
+    // Sessions saved before the dropdown only have the country's name.
+    setCountryCode(s.countryCode || countryCodeFor(s.country) || "");
+    setRegion(s.region || "");
     setInfo(s.info || "");
     setChat(s.chat || []);
     setDraft(Object.keys(s.draft || {}).length ? s.draft : emptyDraft());
     setProfile(s.profile && s.profile.name != null ? s.profile : { name: s.city || "", country: s.country || "" });
     setAttachments(s.attachments || []);
+    setSetupMode(s.setupMode === "area" ? "area" : "city");
+    setUploadNote(null);
+    setArea(s.area || null);
     setContinuable(false);
     setStream("");
     stuckToBottomRef.current = true;
@@ -303,36 +361,56 @@ export function AssistantTab({
     if (!ready.current || !activeMetaRef.current.id) return;
     const t = setTimeout(saveActive, 500);
     return () => clearTimeout(t);
-  }, [city, country, info, chat, draft, profile, attachments, saveActive]);
+  }, [city, country, countryCode, region, info, chat, draft, profile, attachments, setupMode, area, saveActive]);
+
+  // Which session the rendered state currently reflects. loadIntoState sets the
+  // id ref at once but the state only on the next render, so saving in between
+  // would write a blank session over the stored one.
+  const renderedIdRef = useRef("");
+  useEffect(() => { renderedIdRef.current = activeId; }, [activeId]);
 
   // On unmount (e.g. full page navigation), stop any run and persist.
+  // React Strict Mode (npm run dev) mounts, unmounts and re-mounts every
+  // component once, so this must leave things usable when it mounts again.
   const saveActiveRef = useRef(saveActive);
   saveActiveRef.current = saveActive;
-  useEffect(
-    () => () => {
+  useEffect(() => {
+    mountedRef.current = true;
+    return () => {
       mountedRef.current = false;
       abortRef.current?.abort();
-      try { saveActiveRef.current(); } catch { /* ignore */ }
-    },
-    []
-  );
+      if (renderedIdRef.current && renderedIdRef.current === activeMetaRef.current.id) {
+        try { saveActiveRef.current(); } catch { /* ignore */ }
+      }
+    };
+  }, []);
 
-  // Only pull the view to the newest message if the reader is already near the
+  // The Assistant is a normal, full-height page: the whole window scrolls.
+  // Only pull the page to the newest message if the reader is already near the
   // bottom. If they've scrolled up to read, leave them be (and show a "jump to
   // latest" button instead).
   useEffect(() => {
-    if (stuckToBottomRef.current) {
+    if (view === "assistant" && stuckToBottomRef.current) {
       chatEndRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
     }
-  }, [chat, thinking, stream]);
+  }, [chat, thinking, stream, view]);
 
-  const onChatScroll = useCallback(() => {
-    const el = chatScrollRef.current;
-    if (!el) return;
-    const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 80;
-    stuckToBottomRef.current = atBottom;
-    setShowJump(!atBottom);
-  }, []);
+  useEffect(() => {
+    if (view !== "assistant") return;
+    const onScroll = () => {
+      const doc = document.documentElement;
+      const atBottom = window.innerHeight + window.scrollY >= doc.scrollHeight - 120;
+      stuckToBottomRef.current = atBottom;
+      setShowJump(!atBottom);
+    };
+    onScroll();
+    window.addEventListener("scroll", onScroll, { passive: true });
+    window.addEventListener("resize", onScroll);
+    return () => {
+      window.removeEventListener("scroll", onScroll);
+      window.removeEventListener("resize", onScroll);
+    };
+  }, [view]);
 
   const jumpToLatest = useCallback(() => {
     stuckToBottomRef.current = true;
@@ -432,9 +510,11 @@ export function AssistantTab({
         searchKey,
         city: city.trim(),
         country: country.trim(),
+        region: region.trim() || undefined,
         attachments: attachRef.current,
         mode,
         drainInput: () => queuedInputRef.current.shift() ?? null,
+        area: areaActive ? area : null,
       };
       ctxRef.current = ctx;
       if (userText) transcriptRef.current.push({ role: "user", content: userText } as TranscriptItem);
@@ -473,7 +553,7 @@ export function AssistantTab({
         }
       }
     },
-    [providerReady, settings, city, country, onEvent]
+    [providerReady, settings, city, country, region, onEvent, areaActive, area]
   );
 
   const undoLastRun = useCallback(() => {
@@ -485,9 +565,47 @@ export function AssistantTab({
     setChat((c) => [...c, { kind: "tool", label: "Undid the last run", detail: "scores restored to before it started" }]);
   }, []);
 
-  const handleStartAutonomous = useCallback(() => {
-    if (!city.trim() || running || externalBusy) return;
-    const cityLine = `${city.trim()}${country.trim() ? ", " + country.trim() : ""}`;
+  const handleStartAutonomous = useCallback(async () => {
+    if (!canStart || running || externalBusy || checkingPlace) return;
+    const place = [city.trim(), region.trim(), country.trim()].filter(Boolean).join(", ");
+    // Make sure the typed city (in that state and country) is a real place before
+    // spending any AI calls on it. If the lookup itself fails, don't block the user.
+    if (city.trim()) {
+      setCheckingPlace(true);
+      let found: boolean | null = null;
+      try {
+        const res = await fetch("/api/area", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            action: "checkCity", city: city.trim(), country: country.trim(),
+            countryCode: countryCode || undefined, regionCode: regionCode || undefined,
+          }),
+        });
+        if (res.ok) found = ((await res.json()) as { found: boolean }).found;
+      } catch {
+        found = null;
+      } finally {
+        setCheckingPlace(false);
+      }
+      if (found === false) {
+        setPlaceError(
+          region.trim()
+            ? `The city, state or province, country combination "${place}" does not exist. Check the spelling and try again.`
+            : country.trim()
+            ? `The city, country combination "${place}" does not exist. Check the spelling and try again.`
+            : `The city "${city.trim()}" does not exist. Check the spelling and try again.`
+        );
+        setCity("");
+        setCountry("");
+        setCountryCode("");
+        setRegion("");
+        return;
+      }
+    }
+    const cityLine = areaActive && area
+      ? `the selected area (${describeArea(area)}${place ? `, in ${place}` : ""})`
+      : place;
     const already = filledCount(draftRef.current);
     const scope =
       already > 0
@@ -495,11 +613,11 @@ export function AssistantTab({
         : `Please fill out the whole scorecard for ${cityLine}. `;
     const msg =
       scope +
-      (info.trim() ? `Here is what I know about the city: ${info.trim()}. ` : "") +
-      `Research the city as needed, set every indicator with a short note, and only ask me if something truly cannot be researched.`;
+      (info.trim() ? `Here is what I know about ${areaActive ? "the area" : "the city"}: ${info.trim()}. ` : "") +
+      `Research ${areaActive ? "the area and its city" : "the city"} as needed, set every indicator with a short note, and only ask me if something truly cannot be researched.`;
     setChat((c) => [...c, { kind: "user", text: already > 0 ? `Complete the rest for ${cityLine}.` : `Fill it out for ${cityLine}.` }]);
     void runTurn(msg, { mode: "autonomous" });
-  }, [city, country, info, running, externalBusy, runTurn]);
+  }, [canStart, checkingPlace, city, country, countryCode, region, regionCode, info, running, externalBusy, runTurn, areaActive, area]);
 
   const handleSend = useCallback(() => {
     const text = input.trim();
@@ -525,6 +643,7 @@ export function AssistantTab({
 
   // ── Scorecard upload (start / continue a fill) ──────
   const applyScorecardFile = useCallback(async (file: File, intoNew: boolean) => {
+    setUploadNote({ ok: true, text: `Reading ${file.name}…` });
     setChat((c) => [...c, { kind: "tool", label: "Reading file", detail: file.name }]);
     try {
       templateBufRef.current = await file.arrayBuffer(); // use their file as the fill base when possible
@@ -545,18 +664,45 @@ export function AssistantTab({
       draftRef.current = merged;
       setDraft(merged);
       if (knownCity) setCity(knownCity);
-      if (knownCountry) setCountry(knownCountry);
+      if (knownCountry) {
+        const code = countryCodeFor(knownCountry);
+        setCountry(code ? countryByCode(code)?.name || knownCountry : knownCountry);
+        if (code !== countryCode) setRegion("");
+        setCountryCode(code || "");
+      }
+      // Carry the file's City Information over too (only the fields it has).
+      const pf = sc.profile || {};
+      const fromFile: Partial<CityInfo> = {};
+      if (pf.population != null) fromFile.population = pf.population;
+      if (pf.incomeUsd != null) fromFile.incomeUsd = pf.incomeUsd;
+      if (pf.hazards?.length) fromFile.hazards = pf.hazards;
+      if (pf.mostSevere) fromFile.mostSevere = pf.mostSevere;
+      if (sc.assessedDate) fromFile.assessedDate = sc.assessedDate;
+      setProfile((p) => {
+        const next = { ...(intoNew ? { name: "", country: "" } : p), ...fromFile, name: knownCity || p.name, country: knownCountry || p.country };
+        profileRef.current = next;
+        return next;
+      });
       setChat((c) => [...c, { kind: "tool", label: `Parsed ${file.name}`, detail: `${loaded} of ${TOTAL_INDICATORS} answers found` }]);
-      const guidance = knownCity
+      setUploadNote({
+        ok: true,
+        text: `Loaded ${loaded} of ${TOTAL_INDICATORS} answers from ${file.name}` +
+          (loaded < TOTAL_INDICATORS ? `. The Assistant can fill in the rest.` : "."),
+      });
+      const guidance = knownCity && loaded >= TOTAL_INDICATORS
+        ? `Loaded your completed scorecard for ${knownCity}${knownCountry ? ", " + knownCountry : ""}: all ${TOTAL_INDICATORS} answers are on the Scorecard tab. Press "Run analysis" there to analyze it, or ask me to review any answer first.`
+        : knownCity
         ? `Loaded your file for ${knownCity}${knownCountry ? ", " + knownCountry : ""} with ${loaded} of ${TOTAL_INDICATORS} indicators already answered. Press "Fill it out for me" and I'll complete the rest.`
         : loaded > 0
         ? `Loaded ${loaded} of ${TOTAL_INDICATORS} answers, but I couldn't find the city in the file. Which city is this scorecard for? (You can also type it in the City box above.)`
         : `That file doesn't have any answers in it yet. Type your city above and press "Fill it out for me" and I'll take it from there.`;
       setChat((c) => [...c, { kind: "assistant", text: guidance }]);
     } catch (e) {
-      setChat((c) => [...c, { kind: "assistant", text: `Could not read that file: ${e instanceof Error ? e.message : String(e)}. Make sure it's an official UNDRR Preliminary scorecard (.xlsm/.xlsx).` }]);
+      const msg = `Could not read that file: ${e instanceof Error ? e.message : String(e)}. Make sure it's an official UNDRR Preliminary scorecard (.xlsm/.xlsx).`;
+      setUploadNote({ ok: false, text: msg });
+      setChat((c) => [...c, { kind: "assistant", text: msg }]);
     }
-  }, [saveActive, loadIntoState]);
+  }, [saveActive, loadIntoState, countryCode]);
 
   const onScorecardPicked = useCallback((file: File) => {
     const hasContent = chat.length > 0 || filledCount(draftRef.current) > 0 || running;
@@ -645,6 +791,7 @@ export function AssistantTab({
     saveSession(s);
     setSessions(listSessions());
     loadIntoState(s);
+    setSetupOpen(true); // a fresh scorecard starts with choosing the place
   }, [running, stop, saveActive, loadIntoState]);
 
   const requestDeleteSession = useCallback((id: string) => {
@@ -675,12 +822,83 @@ export function AssistantTab({
     });
   }, [running, stop, loadIntoState]);
 
+  // ── Clearing ────────────────────────────────────────
+  // Only offered while no run is going: a stopping run writes its last draft
+  // back when it ends, which would undo the clear.
+
+  /** Scorecard tab: blank the 47 answers and the City Information; keep the place and the chat. */
+  const clearScorecardNow = useCallback(() => {
+    const blank = emptyDraft();
+    draftRef.current = blank;
+    setDraft(blank);
+    const p: CityInfo = { name: city.trim(), country: country.trim() };
+    profileRef.current = p;
+    setProfile(p);
+    templateBufRef.current = null; // downloads go back to the bundled official template
+    undoSnapshotRef.current = null;
+    setCanUndo(false);
+    setContinuable(false);
+    setUploadNote(null);
+    transcriptRef.current.push({
+      role: "tool",
+      content: "The user cleared the scorecard: every indicator and the City Information page are blank again. Earlier scores no longer apply.",
+    });
+    setChat((c) => [...c, { kind: "tool", label: "Scorecard cleared", detail: "all answers and City Information reset" }]);
+  }, [city, country]);
+
+  /** Assistant tab: start this scorecard over — place, area, notes, answers, chat and attachments. */
+  const clearEverythingNow = useCallback(() => {
+    const blank = emptyDraft();
+    draftRef.current = blank;
+    setDraft(blank);
+    profileRef.current = { name: "", country: "" };
+    setProfile({ name: "", country: "" });
+    setCity("");
+    setCountry("");
+    setCountryCode("");
+    setRegion("");
+    setInfo("");
+    setArea(null);
+    setPickerKey((k) => k + 1);
+    setChat([]);
+    transcriptRef.current = [];
+    attachRef.current = [];
+    setAttachments([]);
+    templateBufRef.current = null;
+    undoSnapshotRef.current = null;
+    queuedInputRef.current = [];
+    setCanUndo(false);
+    setContinuable(false);
+    setUploadNote(null);
+    setSetupOpen(true);
+  }, []);
+
+  const requestClearScorecard = useCallback(() => {
+    setConfirm({
+      title: "Clear the scorecard?",
+      body: "All scorecard information will be reset: every answer and note, and the City Information. The city or area and the chat stay. This can't be undone.",
+      yes: "Proceed",
+      danger: true,
+      onYes: () => { setConfirm(null); clearScorecardNow(); },
+    });
+  }, [clearScorecardNow]);
+
+  const requestClearEverything = useCallback(() => {
+    setConfirm({
+      title: "Clear all information?",
+      body: "All unsaved data for this scorecard will be lost: the city or area, country, state or province, your notes, every scorecard answer, the chat, and any attached documents. This can't be undone.",
+      yes: "Proceed",
+      danger: true,
+      onYes: () => { setConfirm(null); clearEverythingNow(); },
+    });
+  }, [clearEverythingNow]);
+
   // ── Draft edits + handoff ───────────────────────────
   const cityInfo: CityInfo = useMemo(
     () => ({ ...profile, name: city.trim() || profile.name || "Unknown", country: country.trim() || profile.country || "Unknown" }),
     [city, country, profile]
   );
-  const headerTitle = city.trim() ? (country.trim() ? `${city.trim()}, ${country.trim()}` : city.trim()) : "New scorecard";
+  const headerTitle = city.trim() ? [city.trim(), region.trim(), country.trim()].filter(Boolean).join(", ") : "New scorecard";
   const handleLoad = useCallback(() => onLoadIntoAnalyzer(draftToScorecard(draftRef.current, cityInfo)), [cityInfo, onLoadIntoAnalyzer]);
   const handleDownload = useCallback(() => exportScorecardXlsx(draftToScorecard(draftRef.current, cityInfo)), [cityInfo]);
 
@@ -750,11 +968,9 @@ export function AssistantTab({
   const showContinue = !running && continuable && filled < TOTAL_INDICATORS;
 
   return (
-    <div className={chatExpanded
-      ? "grid grid-cols-1 gap-5 lg:h-[calc(100vh-8rem)]"
-      : "grid grid-cols-1 lg:grid-cols-[1.1fr_1fr] gap-5 lg:h-[calc(100vh-11rem)]"}>
-      {/* ── Left: chat ─────────────────────────────── */}
-      <section className={`glass-card p-4 sm:p-5 flex flex-col min-h-0 overflow-hidden ${chatExpanded ? "h-[calc(100vh-8rem)]" : "h-[80vh] lg:h-full"}`}>
+    <div className={view === "scorecard" ? "lg:h-[calc(100vh-11rem)]" : ""}>
+      {/* ── Assistant tab: chat (a full page; the window scrolls) ───── */}
+      <section className={`glass-card p-4 sm:p-5 flex-col min-h-[calc(100vh-11rem)] ${view === "assistant" ? "flex" : "hidden"}`}>
         {/* Session bar */}
         <div className="flex items-center gap-2 mb-3 shrink-0">
           <Bot size={20} className="text-accent-400 shrink-0" />
@@ -768,10 +984,13 @@ export function AssistantTab({
             <span className="truncate">{headerTitle}</span>
             <ChevronDown size={14} className="shrink-0 text-text-secondary" />
           </button>
-          <button onClick={() => setChatExpanded((v) => !v)}
-            title={chatExpanded ? "Exit full-screen chat" : "Expand the chat to full screen"}
-            className="shrink-0 p-1.5 rounded-lg bg-surface-overlay border border-border text-text-secondary hover:text-text-primary">
-            {chatExpanded ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
+          <button onClick={() => onOpenView?.("scorecard")}
+            title="Open the scorecard the Assistant is filling"
+            aria-label={`Scorecard, ${filled} of ${TOTAL_INDICATORS} answered`}
+            className="relative overflow-hidden shrink-0 flex items-center gap-1.5 text-sm rounded-lg px-2.5 py-1.5 bg-surface-overlay border border-border text-text-primary hover:border-primary-500/40">
+            <span aria-hidden className="absolute inset-y-0 left-0 btn-accent opacity-60 transition-[width] duration-500" style={{ width: `${pct}%` }} />
+            <ClipboardCheck size={14} className="relative text-accent-400" />
+            <span className="relative hidden sm:inline">Scorecard</span> <span className="relative">{filled}/{TOTAL_INDICATORS}</span>
           </button>
           <button onClick={newChat} title="New chat" className="shrink-0 p-1.5 rounded-lg bg-surface-overlay border border-border text-text-secondary hover:text-text-primary">
             <Plus size={15} />
@@ -804,7 +1023,11 @@ export function AssistantTab({
             className="w-full flex items-center justify-between gap-2 px-3 py-2 text-left"
           >
             <span className="text-sm font-medium text-text-primary truncate">
-              {setupOpen ? "City & setup" : city.trim() ? headerTitle : "City & setup"}
+              {setupOpen
+                ? areaActive ? "Area & setup" : "City & setup"
+                : areaActive && area
+                ? `Area · ${area.label || headerTitle} · ${formatKm2(area.areaKm2)}`
+                : city.trim() ? headerTitle : "City & setup"}
             </span>
             <span className="flex items-center gap-1 text-xs text-text-secondary shrink-0">
               {setupOpen ? "Hide" : "Show"}
@@ -813,32 +1036,74 @@ export function AssistantTab({
           </button>
           {setupOpen && (
           <div className="space-y-2.5 px-3 pb-3">
+          <div className="flex rounded-lg border border-border overflow-hidden text-xs w-full sm:w-fit" role="tablist" aria-label="How to choose the place">
+            {([
+              ["city", "By city name", <Building2 key="c" size={13} />],
+              ["area", "Draw an area", <MapIcon key="a" size={13} />],
+            ] as const).map(([m, label, icon]) => (
+              <button key={m} role="tab" aria-selected={setupMode === m} disabled={running}
+                onClick={() => setSetupMode(m)}
+                className={`flex-1 sm:flex-none flex items-center justify-center gap-1.5 px-3 py-1.5 disabled:opacity-60 ${setupMode === m ? "bg-accent-500/15 text-text-primary font-medium" : "bg-surface-overlay text-text-secondary hover:text-text-primary"}`}>
+                {icon}{label}
+              </button>
+            ))}
+          </div>
+          {areaActive && (
+            <AreaPicker
+              key={pickerKey}
+              area={area}
+              onAreaChange={setArea}
+              onPlaceResolved={onPlaceResolved}
+              onPlaceNotFound={(q) => setPlaceError(`No place called "${q}" could be found. Check the spelling and try again.`)}
+              disabled={running}
+              initialQuery={[city.trim(), region.trim(), country.trim()].filter(Boolean).join(", ")}
+            />
+          )}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
             <div>
-              <label className="text-[11px] text-text-secondary">City</label>
+              <label className="text-[11px] text-text-secondary">{areaActive ? "City the area is in" : "City"}</label>
               <input value={city} onChange={(e) => setCity(e.target.value)} placeholder="e.g. Toronto"
                 className="w-full mt-0.5 px-2.5 py-1.5 rounded-lg bg-surface-overlay border border-border text-text-primary text-sm" />
             </div>
             <div>
-              <label className="text-[11px] text-text-secondary">Country</label>
-              <input value={country} onChange={(e) => setCountry(e.target.value)} placeholder="e.g. Canada"
-                className="w-full mt-0.5 px-2.5 py-1.5 rounded-lg bg-surface-overlay border border-border text-text-primary text-sm" />
+              <label htmlFor="assistant-country" className="text-[11px] text-text-secondary">Country</label>
+              <select id="assistant-country" value={countryCode || (country ? "__other" : "")}
+                onChange={(e) => { if (e.target.value !== "__other") selectCountry(e.target.value); }}
+                className={`w-full mt-0.5 px-2 py-1.5 rounded-lg bg-surface-overlay border border-border text-sm ${countryCode || country ? "text-text-primary" : "text-text-secondary"}`}>
+                <option value="">Select a country</option>
+                {!countryCode && country && <option value="__other">{country}</option>}
+                {COUNTRIES.map((c) => <option key={c.code} value={c.code}>{c.name}</option>)}
+              </select>
             </div>
+            {regionOptions.length > 0 && (
+              <div className="sm:col-start-1">
+                <label htmlFor="assistant-region" className="text-[11px] text-text-secondary">State or Province</label>
+                <select id="assistant-region" value={regionCode || ""}
+                  onChange={(e) => setRegion(regionOptions.find((r) => r.code === e.target.value)?.name || "")}
+                  className={`w-full mt-0.5 px-2 py-1.5 rounded-lg bg-surface-overlay border border-border text-sm ${regionCode ? "text-text-primary" : "text-text-secondary"}`}>
+                  <option value="">Select a state or province (optional)</option>
+                  {regionOptions.map((r) => <option key={r.code} value={r.code}>{r.name}</option>)}
+                </select>
+              </div>
+            )}
           </div>
           <textarea value={info} onChange={(e) => setInfo(e.target.value)} rows={2}
-            placeholder="Anything you already know (optional): e.g. we have a flood plan but no early-warning system."
+            placeholder={areaActive
+              ? "Anything you already know about this area (optional): e.g. the riverside blocks flood most springs."
+              : "Anything you already know (optional): e.g. we have a flood plan but no early-warning system."}
             className="w-full px-2.5 py-1.5 rounded-lg bg-surface-overlay border border-border text-text-primary text-sm resize-none" />
           <div className="flex flex-wrap gap-2">
-            <button onClick={handleStartAutonomous} disabled={!city.trim() || !providerReady || running || externalBusy}
+            <button onClick={() => void handleStartAutonomous()} disabled={!canStart || !providerReady || running || externalBusy || checkingPlace}
+              title={areaActive && areaProblem ? areaProblem : undefined}
               className="flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-semibold btn-accent disabled:opacity-50 disabled:cursor-not-allowed">
-              <Sparkles size={16} /> Fill it out for me
+              {checkingPlace ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
+              {checkingPlace ? "Checking the place…" : "Fill it out for me"}
             </button>
-            <button onClick={() => fileRef.current?.click()} disabled={running || externalBusy}
-              className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium bg-surface-overlay border border-border text-text-primary disabled:opacity-50">
-              <Upload size={15} /> Continue from a file
+            <button onClick={requestClearEverything} disabled={running || checkingPlace}
+              title={running ? "Stop the Assistant first" : "Reset the place, notes, scorecard and chat for this scorecard"}
+              className="ml-auto flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-semibold border border-danger-500/40 bg-danger-500/10 text-danger-400 hover:bg-danger-500/15 disabled:opacity-50 disabled:cursor-not-allowed">
+              <X size={16} /> Clear all Information
             </button>
-            <input ref={fileRef} type="file" accept=".xlsm,.xlsx,.xls" className="hidden"
-              onChange={(e) => { const f = e.target.files?.[0]; if (f) onScorecardPicked(f); e.currentTarget.value = ""; }} />
           </div>
           {!providerReady && <p className="text-xs text-warn-400">Choose an AI model and add a key in Settings first.</p>}
           </div>
@@ -846,11 +1111,13 @@ export function AssistantTab({
         </div>
 
         {/* Chat log */}
-        <div className="relative flex-1 min-h-0 flex flex-col">
-        <div ref={chatScrollRef} onScroll={onChatScroll} className="flex-1 overflow-y-auto min-h-0 space-y-3 pr-1">
+        <div className="flex-1 min-h-[12rem]">
+        <div className="space-y-3 pr-1">
           {chat.length === 0 && (
             <p className="text-sm text-text-secondary">
-              Fill in your city above and press &ldquo;Fill it out for me,&rdquo; or just type below to work through it together. You can attach reference documents with the paperclip.
+              {areaActive
+                ? <>Draw or load an area above and press &ldquo;Fill it out for me,&rdquo; or just type below to work through it together. You can attach reference documents with the paperclip.</>
+                : <>Fill in your city above and press &ldquo;Fill it out for me,&rdquo; or just type below to work through it together. You can attach reference documents with the paperclip.</>}
             </p>
           )}
           {chat.map((m, i) =>
@@ -923,15 +1190,18 @@ export function AssistantTab({
           )}
           <div ref={chatEndRef} />
         </div>
-          {showJump && (
+        </div>
+
+        {/* Attachments + composer stay pinned to the bottom of the window. */}
+        <div className="sticky bottom-0 z-10 -mx-4 sm:-mx-5 px-4 sm:px-5 pb-4 sm:pb-5 -mb-4 sm:-mb-5 pt-1 rounded-b-2xl bg-surface-raised/95 backdrop-blur-xl">
+          {showJump && chat.length > 0 && (
             <button
               onClick={jumpToLatest}
-              className="absolute bottom-2 left-1/2 -translate-x-1/2 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-surface border border-border shadow-lg text-text-primary hover:border-accent-500/50 transition-colors"
+              className="absolute -top-10 left-1/2 -translate-x-1/2 flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium bg-surface border border-border shadow-lg text-text-primary hover:border-accent-500/50 transition-colors"
             >
               <ChevronDown size={14} /> Jump to latest
             </button>
           )}
-        </div>
 
         {/* Attachment chips */}
         {attachments.length > 0 && (
@@ -978,22 +1248,84 @@ export function AssistantTab({
             </button>
           )}
         </div>
+        </div>
       </section>
 
-      {/* ── Right: live draft ──────────────────────── */}
-      <section className={`glass-card p-4 sm:p-5 flex-col h-[80vh] lg:h-full min-h-0 overflow-hidden ${chatExpanded ? "hidden" : "flex"}`}>
-        <div className="flex items-center justify-between mb-1 shrink-0">
-          <div className="flex items-center gap-2">
-            <ClipboardCheck size={20} className="text-accent-400" />
-            <h2 className="text-lg font-semibold text-text-primary">Draft scorecard</h2>
+      {/* ── Scorecard tab: live draft ──────────────── */}
+      <section className={`glass-card p-4 sm:p-5 flex-col h-[80vh] lg:h-full min-h-0 overflow-hidden max-w-5xl mx-auto ${view === "scorecard" ? "flex" : "hidden"}`}>
+        <div className="flex items-center justify-between gap-2 mb-1 shrink-0">
+          <div className="flex items-center gap-2 min-w-0">
+            <ClipboardCheck size={20} className="text-accent-400 shrink-0" />
+            <h2 className="text-lg font-semibold text-text-primary shrink-0">Scorecard</h2>
+            <span className="text-sm text-text-secondary truncate">· {areaActive && area ? `Area · ${area.label || headerTitle}` : headerTitle}</span>
+            {running && (
+              <button onClick={() => onOpenView?.("assistant")} title="The Assistant is filling this in; open it to watch"
+                className="shrink-0 inline-flex items-center gap-1 text-xs text-accent-400 hover:underline">
+                <Loader2 size={12} className="animate-spin" /> Assistant is filling this in
+              </button>
+            )}
           </div>
-          <span className="text-sm font-medium text-text-secondary">{filled}/{TOTAL_INDICATORS}</span>
+          <div className="flex items-center gap-2 shrink-0">
+            <button onClick={() => fileRef.current?.click()} disabled={running || externalBusy}
+              title="Upload a completed (or partly completed) UNDRR scorecard; its answers fill in below"
+              className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg text-xs font-medium bg-surface-overlay border border-border text-text-primary hover:border-primary-500/40 disabled:opacity-50">
+              <Upload size={13} /> Upload scorecard
+            </button>
+            <input ref={fileRef} type="file" accept=".xlsm,.xlsx,.xls" className="hidden"
+              onChange={(e) => { const f = e.target.files?.[0]; if (f) onScorecardPicked(f); e.currentTarget.value = ""; }} />
+            <span className="text-sm font-medium text-text-secondary">{filled}/{TOTAL_INDICATORS}</span>
+          </div>
         </div>
-        <div className="h-2 rounded-full bg-surface-overlay overflow-hidden mb-4 shrink-0">
+        <div className="h-2 rounded-full bg-surface-overlay overflow-hidden mb-3 shrink-0">
           <div className="h-full btn-accent transition-all" style={{ width: `${pct}%` }} />
         </div>
+        {uploadNote && (
+          <p className={`mb-3 shrink-0 flex items-start gap-1.5 text-xs ${uploadNote.ok ? "text-text-secondary" : "text-danger-400"}`}>
+            {uploadNote.ok ? <ClipboardCheck size={13} className="shrink-0 mt-0.5 text-accent-400" /> : <AlertTriangle size={13} className="shrink-0 mt-0.5" />}
+            <span className="flex-1">{uploadNote.text}</span>
+            <button onClick={() => setUploadNote(null)} aria-label="Dismiss" className="shrink-0 hover:text-text-primary"><X size={12} /></button>
+          </p>
+        )}
 
         <div className="flex-1 overflow-y-auto min-h-0 pr-1 space-y-4">
+          {filled === 0 && !running && (
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={() => fileRef.current?.click()}
+              onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); fileRef.current?.click(); } }}
+              onDragOver={(e) => { e.preventDefault(); setDropHover(true); }}
+              onDragLeave={() => setDropHover(false)}
+              onDrop={(e) => { e.preventDefault(); setDropHover(false); const f = e.dataTransfer.files?.[0]; if (f) onScorecardPicked(f); }}
+              className={`rounded-xl border-2 border-dashed p-4 text-center cursor-pointer transition-colors ${dropHover ? "border-accent-400 bg-accent-500/10" : "border-border hover:border-primary-500/50 hover:bg-surface-overlay/30"}`}
+            >
+              <Upload size={20} className="mx-auto mb-1.5 text-primary-300" />
+              <p className="text-sm font-medium text-text-primary">Have a completed scorecard?</p>
+              <p className="text-xs text-text-secondary">
+                Drop the .xlsm here or click to upload. Its answers fill in below, ready to review or analyze.
+                Or let the{" "}
+                <button onClick={(e) => { e.stopPropagation(); onOpenView?.("assistant"); }} className="underline text-accent-400">Assistant</button>{" "}
+                fill it out for you.
+              </p>
+            </div>
+          )}
+          {areaActive && area && (
+            <div className="rounded-xl border border-accent-500/30 bg-accent-500/5 p-3 flex items-start gap-3">
+              <AreaThumbnail area={area} />
+              <div className="min-w-0 text-xs leading-relaxed">
+                <h3 className="text-sm font-semibold text-text-primary">Selected area · {formatKm2(area.areaKm2)}</h3>
+                <p className="text-text-secondary truncate">
+                  {area.label || headerTitle}{area.fileName ? ` · from ${area.fileName}` : ""}
+                </p>
+                <p className="text-text-secondary mt-1">
+                  <span className="inline-block px-1.5 rounded bg-accent-500/15 text-accent-400 font-medium">Area</span>{" "}
+                  {AREA_SPECIFIC_CODES.size} indicators are scored for this area.{" "}
+                  <span className="inline-block px-1.5 rounded bg-surface-overlay border border-border font-medium">City-wide</span>{" "}
+                  {TOTAL_INDICATORS - AREA_SPECIFIC_CODES.size} describe the whole city (plans, budgets, institutions).
+                </p>
+              </div>
+            </div>
+          )}
           {(() => {
             const p = profile;
             const bits: string[] = [];
@@ -1036,7 +1368,14 @@ export function AssistantTab({
                       <div key={ind.code} className="rounded-lg border border-border bg-surface-overlay/30 p-2.5">
                         <div className="flex items-start gap-2">
                           <span className="text-xs font-mono text-primary-300 mt-0.5 shrink-0 w-11">{ind.code}</span>
-                          <p className="text-xs text-text-secondary flex-1 leading-snug">{ind.text}</p>
+                          <p className="text-xs text-text-secondary flex-1 leading-snug">
+                            {areaActive && area && (
+                              scopeOf(ind.code) === "area"
+                                ? <span title="Scored from the selected area's own evidence" className="mr-1 inline-block px-1.5 rounded text-[10px] bg-accent-500/15 text-accent-400 font-medium">Area</span>
+                                : <span title="Applies to the whole city (governance, plans, budgets)" className="mr-1 inline-block px-1.5 rounded text-[10px] bg-surface-overlay border border-border font-medium">City-wide</span>
+                            )}
+                            {ind.text}
+                          </p>
                           <select value={entry?.score == null ? "" : String(entry.score)}
                             onChange={(ev) => setScore(ind.code, ev.target.value === "" ? null : (Number(ev.target.value) as Score))}
                             className={`shrink-0 text-xs rounded-lg px-2 py-1 border bg-surface-overlay text-text-primary ${entry?.score == null ? "border-border" : "border-accent-500/40"}`}>
@@ -1062,8 +1401,10 @@ export function AssistantTab({
         </div>
 
         <div className="shrink-0 mt-3 flex flex-wrap gap-2 border-t border-border pt-3 items-center">
-          <button onClick={handleLoad} className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold btn-accent">
-            <ArrowRight size={16} /> Load into analyzer
+          <button onClick={handleLoad} disabled={filled === 0 || running || externalBusy}
+            title="Open this scorecard on the Dashboard and run the analysis"
+            className="flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold btn-accent disabled:opacity-50 disabled:cursor-not-allowed">
+            <Play size={16} /> Run analysis
           </button>
           <button onClick={handleDownloadOfficial} disabled={building}
             title="The finished scorecard written into the real UNDRR .xlsm: City Information filled, the matching radio button selected in every question, and totals recalculated."
@@ -1075,6 +1416,11 @@ export function AssistantTab({
               ? "Download completed scorecard (.xlsm)"
               : "Download scorecard so far (.xlsm)"}
           </button>
+          <button onClick={requestClearScorecard} disabled={running}
+            title={running ? "Stop the Assistant first" : "Reset every answer, note and the City Information"}
+            className="flex items-center gap-2 px-3 py-2 rounded-xl text-sm font-medium border border-danger-500/40 bg-danger-500/10 text-danger-400 hover:bg-danger-500/15 disabled:opacity-50 disabled:cursor-not-allowed">
+            <X size={15} /> Clear Scorecard
+          </button>
           <button onClick={handleDownload}
             title="A plain spreadsheet where every answer is a simple 0-3 number and totals are formulas, no form controls at all. Handy if you'd rather not use the official template."
             className="flex items-center gap-1.5 text-xs text-text-secondary hover:text-text-primary ml-auto">
@@ -1082,7 +1428,7 @@ export function AssistantTab({
           </button>
         </div>
         {filled < TOTAL_INDICATORS && (
-          <p className="text-xs text-text-secondary mt-2 shrink-0">Unfilled indicators count as 0 if you load now. Keep chatting to finish them.</p>
+          <p className="text-xs text-text-secondary mt-2 shrink-0">Unfilled indicators count as 0 if you analyze now. Keep chatting to finish them.</p>
         )}
       </section>
 
@@ -1095,6 +1441,15 @@ export function AssistantTab({
         onDelete={(id) => requestDeleteSession(id)}
         onClose={() => setMenuOpen(false)}
       />
+
+      <ConfirmModal
+        open={!!placeError}
+        title="Place not found"
+        onClose={() => setPlaceError(null)}
+        actions={[{ label: "OK", variant: "primary", onClick: () => setPlaceError(null) }]}
+      >
+        <p className="text-sm text-text-secondary">{placeError}</p>
+      </ConfirmModal>
 
       <ConfirmModal
         open={!!confirm}

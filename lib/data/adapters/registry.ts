@@ -9,7 +9,8 @@
  *
  * `buildDataPack(city, country)` geocodes the city once, then runs every
  * enabled source and tags each value with where it came from. One bad source
- * never stops the rest.
+ * never stops the rest. Pass a drawn `area` polygon instead and the name lookup
+ * is skipped: every source gets the area's centre, bounding box and outline.
  */
 
 import { geocode } from "./geocode";
@@ -19,8 +20,11 @@ import { usgsSource } from "./usgs";
 import { worldBankSource } from "./worldBank";
 import { resolveIso2 } from "./countries";
 import { loadConfigSources } from "./configSources";
+import { areaElevationSource } from "./areaElevation";
+import { makeArea, simplifyRing, validateArea, formatKm2, type LonLat } from "@/lib/geo/area";
 import type { DataSource, LocationContext } from "./types";
 import type { DataPack, NormalizedDatum } from "@/lib/types";
+import { provenance } from "../http";
 
 // Coastal/elevation exposure now rides along with the climate call (Open-Meteo
 // returns elevation in the same response), which is far more reliable than a
@@ -31,6 +35,7 @@ const CODE_SOURCES: DataSource[] = [
   overpassOsmSource,
   usgsSource,
   worldBankSource,
+  areaElevationSource, // only returns data when an area polygon is given
 ];
 
 export function allSources(): DataSource[] {
@@ -57,10 +62,19 @@ export function listSources(): Array<{ id: string; name: string; requiresKey: bo
   return out;
 }
 
+/** A drawn area as sent by the browser: just its outline, everything else is recomputed here. */
+export interface AreaInput {
+  ring: LonLat[];
+  label?: string;
+  countryCode?: string | null;
+}
+
 export async function buildDataPack(
   city: string,
-  country?: string
+  country?: string,
+  areaIn?: AreaInput
 ): Promise<DataPack> {
+  if (areaIn?.ring?.length) return buildAreaPack(city, country, areaIn);
   let location;
   try {
     location = await geocode(city, country);
@@ -102,13 +116,78 @@ export async function buildDataPack(
     bbox: location.bbox,
   };
 
+  const { data, sources, warnings } = await runSources(loc);
+  return {
+    city,
+    country: loc.country,
+    resolved: {
+      displayName: location.display_name,
+      lat: loc.lat,
+      lon: loc.lon,
+      countryCode: loc.country_code ?? null,
+    },
+    sources,
+    dataPoints: data.length,
+    data,
+    warnings,
+  };
+}
+
+/** Same as the city path, but the location comes from the drawn polygon. */
+async function buildAreaPack(city: string, country: string | undefined, areaIn: AreaInput): Promise<DataPack> {
+  const area = makeArea(simplifyRing(areaIn.ring), "polygon");
+  const problem = validateArea(area);
+  if (problem) {
+    return {
+      city, country, resolved: null, sources: [], dataPoints: 0, data: [],
+      warnings: [`The selected area can't be used: ${problem}`],
+    };
+  }
+  const loc: LocationContext = {
+    name: areaIn.label || city || "the selected area",
+    country,
+    country_code: resolveIso2(country, areaIn.countryCode ?? null),
+    lat: area.centroid.lat,
+    lon: area.centroid.lon,
+    bbox: area.bbox,
+    polygon: area.ring,
+    areaKm2: area.areaKm2,
+  };
+  const { data, sources, warnings } = await runSources(loc);
+  data.unshift({
+    key: "area_size",
+    label: "Size of the selected area",
+    value: Math.round(area.areaKm2 * 100) / 100,
+    unit: "km²",
+    provenance: provenance("User selection", "Area drawn or loaded in the Assistant", loc.name, ""),
+  });
+  return {
+    city,
+    country,
+    resolved: {
+      displayName: `${formatKm2(area.areaKm2)} selected area${areaIn.label ? ` around ${areaIn.label}` : ""}`,
+      lat: loc.lat,
+      lon: loc.lon,
+      countryCode: loc.country_code ?? null,
+    },
+    area: { areaKm2: area.areaKm2, bbox: area.bbox, points: area.ring.length },
+    sources,
+    dataPoints: data.length,
+    data,
+    warnings,
+  };
+}
+
+async function runSources(
+  loc: LocationContext
+): Promise<{ data: NormalizedDatum[]; sources: DataPack["sources"]; warnings: string[] }> {
   const allData: NormalizedDatum[] = [];
   const sourceReport: DataPack["sources"] = [];
   const warnings: string[] = [];
 
   // Run sources in parallel; each is independently guarded.
   await Promise.all(
-    allSources().map(async (source) => {
+    allSources().filter((s) => !s.appliesTo || s.appliesTo(loc)).map(async (source) => {
       try {
         const items = await withTimeout(source.fetch(loc), 24000, source.name);
         for (const it of items) (it as { sourceId?: string }).sourceId = source.id;
@@ -129,19 +208,5 @@ export async function buildDataPack(
 
   // Stable order for display.
   sourceReport.sort((a, b) => a.name.localeCompare(b.name));
-
-  return {
-    city,
-    country: loc.country,
-    resolved: {
-      displayName: location.display_name,
-      lat: loc.lat,
-      lon: loc.lon,
-      countryCode: loc.country_code ?? null,
-    },
-    sources: sourceReport,
-    dataPoints: allData.length,
-    data: allData,
-    warnings,
-  };
+  return { data: allData, sources: sourceReport, warnings };
 }
