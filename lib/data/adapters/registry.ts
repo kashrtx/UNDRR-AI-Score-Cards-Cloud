@@ -67,6 +67,8 @@ export interface AreaInput {
   ring: LonLat[];
   label?: string;
   countryCode?: string | null;
+  /** "city" for a clicked city boundary (allowed to be larger than a drawn area). */
+  source?: string;
 }
 
 export async function buildDataPack(
@@ -135,7 +137,7 @@ export async function buildDataPack(
 
 /** Same as the city path, but the location comes from the drawn polygon. */
 async function buildAreaPack(city: string, country: string | undefined, areaIn: AreaInput): Promise<DataPack> {
-  const area = makeArea(simplifyRing(areaIn.ring), "polygon");
+  const area = makeArea(simplifyRing(areaIn.ring), areaIn.source === "city" ? "city" : "polygon");
   const problem = validateArea(area);
   if (problem) {
     return {

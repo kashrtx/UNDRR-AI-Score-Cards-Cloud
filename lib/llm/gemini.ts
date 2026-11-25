@@ -58,6 +58,8 @@ export class GeminiProvider implements LLMProvider {
     let sawThinking = false;
     let finishReason: string | undefined;
     let blockReason: string | undefined;
+    // Each chunk repeats the running totals; the last one is final.
+    let usage: { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number } | undefined;
 
     await readSSE(res, (data) => {
       if (!data || data === "[DONE]") return;
@@ -65,8 +67,10 @@ export class GeminiProvider implements LLMProvider {
         candidates?: Array<{
           content?: { parts?: Array<{ text?: string; thought?: boolean }> };
           finishReason?: string;
+          groundingMetadata?: { groundingChunks?: Array<{ web?: { uri?: string; title?: string } }> };
         }>;
         promptFeedback?: { blockReason?: string };
+        usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; thoughtsTokenCount?: number };
         error?: { message?: string };
       };
       try {
@@ -76,9 +80,15 @@ export class GeminiProvider implements LLMProvider {
       }
       if (evt.error) throw new Error(`Gemini error: ${evt.error.message ?? "unknown"}`);
       if (evt.promptFeedback?.blockReason) blockReason = evt.promptFeedback.blockReason;
+      if (evt.usageMetadata) usage = evt.usageMetadata;
 
       const cand = evt.candidates?.[0];
       if (cand?.finishReason) finishReason = cand.finishReason;
+      const pages = (cand?.groundingMetadata?.groundingChunks ?? [])
+        .map((g) => g.web)
+        .filter((w): w is { uri: string; title?: string } => !!w?.uri)
+        .map((w) => ({ url: w.uri, title: w.title || w.uri }));
+      if (pages.length) handlers?.onCitations?.(pages);
       for (const p of cand?.content?.parts ?? []) {
         if (!p.text) continue;
         if (p.thought) {
@@ -91,6 +101,13 @@ export class GeminiProvider implements LLMProvider {
         }
       }
     });
+
+    if (usage) {
+      handlers?.onUsage?.({
+        inputTokens: usage.promptTokenCount ?? 0,
+        outputTokens: (usage.candidatesTokenCount ?? 0) + (usage.thoughtsTokenCount ?? 0),
+      });
+    }
 
     if (!full.trim()) {
       if (blockReason) {

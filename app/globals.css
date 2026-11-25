@@ -142,6 +142,30 @@ a, button, input, textarea, select, [role="button"] {
 ::-webkit-scrollbar-track { @apply bg-transparent; }
 ::-webkit-scrollbar-thumb { @apply bg-border rounded-full; }
 
+/* The PAGE's own scrollbar (right edge of the window) is wide and always
+   visible, with a visible track, so it reads clearly as "scroll the page", not
+   to be confused with scrolling inside the map or a panel. Styling it also
+   makes macOS show it permanently instead of only while scrolling. */
+html { scrollbar-width: auto; scrollbar-color: var(--color-text-secondary) var(--color-surface-overlay); }
+html::-webkit-scrollbar { width: 14px; }
+html::-webkit-scrollbar-track {
+  background: var(--color-surface-overlay);
+  border-left: 1px solid var(--color-border);
+}
+html::-webkit-scrollbar-thumb {
+  background-color: var(--color-text-secondary);
+  border: 3px solid var(--color-surface-overlay); /* inset look */
+  border-radius: 9999px;
+  min-height: 48px;
+}
+html::-webkit-scrollbar-thumb:hover { background-color: var(--color-accent-500); }
+
+/* Map tiles: Leaflet draws them with mix-blend-mode: plus-lighter, which ADDS
+   overlapping pixels together, so the 1px overlap AreaMap gives each tile (to
+   hide seams) turned every tile edge into a bright white line. Normal blending
+   lets the overlap simply cover the seam. */
+html .leaflet-container .leaflet-tile-pane img.leaflet-tile { mix-blend-mode: normal; }
+
 /* ── Rendered chat markdown ───────────────────────────────── */
 .msg-md > :first-child { margin-top: 0; }
 .msg-md > :last-child { margin-bottom: 0; }
@@ -316,3 +340,40 @@ a, button, input, textarea, select, [role="button"] {
   .glass-spring { transition: transform 0.1s linear, width 0.1s linear; }
   .press:active { transform: none; }
 }
+
+/* ── Area map: clickable city names (components/AreaMap.tsx) ───────────
+   The basemaps are label-free; these are the map's own city names. Fixed
+   map-like colours (the tiles are light in both themes); satellite gets
+   light text on a dark halo. */
+.city-label-icon { background: none; border: none; }
+.city-label-icon:not(.leaflet-interactive) { pointer-events: none; }
+.city-label {
+  position: absolute;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transform: translate(-4px, -50%);
+  white-space: nowrap;
+  font-family: inherit;
+  line-height: 1;
+  color: #1f2937;
+  text-shadow: 0 0 2px #fff, 0 0 2px #fff, 0 0 3px #fff, 0 0 4px #fff;
+}
+.city-dot {
+  width: 6px; height: 6px; flex: none;
+  border-radius: 50%;
+  background: #374151;
+  box-shadow: 0 0 0 1.5px #fff;
+}
+.city-name { display: inline-block; transform-origin: left center; transition: transform 120ms ease, color 120ms ease; }
+/* Size and weight are set per label from how far out the city first appears. */
+.leaflet-interactive .city-label { cursor: pointer; }
+.leaflet-interactive .city-label:hover .city-name { transform: scale(1.25); color: #047857; }
+.leaflet-interactive .city-label:hover .city-dot { background: #047857; }
+.city-label.selected .city-name { color: #047857; font-weight: 700 !important; }
+.city-label.selected .city-dot { background: #10b981; }
+.basemap-satellite .city-label { color: #fff; text-shadow: 0 0 2px #000, 0 0 3px #000, 0 0 4px #000; }
+.basemap-satellite .city-dot { background: #fff; box-shadow: 0 0 0 1.5px #000; }
+.basemap-satellite .leaflet-interactive .city-label:hover .city-name,
+.basemap-satellite .city-label.selected .city-name { color: #6ee7b7; }
+@media (prefers-reduced-motion: reduce) { .city-name { transition: none; } }

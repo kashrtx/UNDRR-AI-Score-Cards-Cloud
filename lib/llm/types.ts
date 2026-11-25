@@ -18,6 +18,65 @@ export interface LLMStreamHandlers {
    * analysis narration still shows life while a reasoning model works.
    */
   onReasoning?: (delta: string) => void;
+  /**
+   * Called once per completed request with the token counts the provider
+   * reported (and, where the provider bills it directly, e.g. OpenRouter, the
+   * exact cost). Used for the cost comparison of AI helpers.
+   */
+  onUsage?: (usage: LLMUsage) => void;
+  /**
+   * Called with the web pages the provider's own web search used (Gemini
+   * grounding, Claude web search, OpenRouter ":online", Perplexity), when the
+   * provider reports them. May be called several times per request.
+   */
+  onCitations?: (pages: Array<{ title: string; url: string }>) => void;
+  /**
+   * Called with the model that actually answered, when the provider reports it
+   * (OpenRouter, ASU CreateAI, LM Studio and the other OpenAI-style APIs). It can
+   * differ from the model asked for: CreateAI may use the project's own model.
+   */
+  onModel?: (model: string) => void;
+}
+
+/** The `usage` block OpenAI-style APIs send at the end of a stream. */
+export interface OpenAIStyleUsage {
+  prompt_tokens?: number;
+  completion_tokens?: number;
+  /** OpenRouter only: what the request actually cost, in US dollars. */
+  cost?: number;
+}
+
+export function fromOpenAIUsage(u: OpenAIStyleUsage): LLMUsage {
+  return {
+    inputTokens: u.prompt_tokens ?? 0,
+    outputTokens: u.completion_tokens ?? 0,
+    ...(typeof u.cost === "number" ? { costUsd: u.cost } : {}),
+  };
+}
+
+/** An OpenAI-style "url_citation" annotation (OpenRouter ":online", OpenAI web search). */
+export interface UrlAnnotation {
+  type?: string;
+  url_citation?: { url?: string; title?: string };
+}
+
+export function citationsFrom(annotations: UrlAnnotation[]): Array<{ title: string; url: string }> {
+  return annotations
+    .filter((a) => a.type === "url_citation" && a.url_citation?.url)
+    .map((a) => ({ url: a.url_citation!.url!, title: a.url_citation!.title || a.url_citation!.url! }));
+}
+
+/** One request's usage, as reported by the provider. */
+export interface LLMUsage {
+  inputTokens: number;
+  /** Output tokens, including any "thinking" tokens the provider bills as output. */
+  outputTokens: number;
+  /** The exact amount charged, in US dollars, when the provider reports it. */
+  costUsd?: number;
+  /** Provider-side web searches billed per search (Claude). */
+  webSearches?: number;
+  /** The provider didn't report usage for this request (counted, but not priced). */
+  unreported?: boolean;
 }
 
 export interface LLMProvider {

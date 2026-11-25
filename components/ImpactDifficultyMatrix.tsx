@@ -20,12 +20,15 @@ import {
   Label,
   ZAxis,
   Cell,
+  LabelList,
 } from "recharts";
 import type { Action, CostTier } from "@/lib/types";
 import { useTheme } from "@/lib/theme";
 
 interface MatrixProps {
   actions: Action[];
+  /** The actions' impact/difficulty are the app's rough estimates (the AI's plan wasn't usable). */
+  estimated?: boolean;
 }
 
 const COST_SIZE: Record<CostTier, number> = {
@@ -36,8 +39,9 @@ const COST_SIZE: Record<CostTier, number> = {
   ">$10M": 620,
 };
 
-type QuadKey = "quick" | "major" | "fill" | "slog";
+export type QuadKey = "quick" | "major" | "fill" | "slog";
 
+/** The quadrant a point is drawn in (above / right of the dividers at 3 = high / hard). */
 function quadOf(impact: number, difficulty: number): QuadKey {
   const hiImpact = impact > 3;
   const hiDiff = difficulty > 3;
@@ -52,14 +56,47 @@ const QUAD_NAME: Record<QuadKey, string> = {
   slog: "Hard Slog",
 };
 
-export function ImpactDifficultyMatrix({ actions }: MatrixProps) {
+// Quadrant hues (dot = strong, zone = faint), matching the legend chips.
+const HUE: Record<QuadKey, number> = { quick: 160, major: 70, fill: 255, slog: 25 };
+/** The colour of a dot in quadrant q (also used for the action's number elsewhere). */
+export function quadColor(q: QuadKey, dark: boolean): string {
+  return dark ? `oklch(0.75 0.17 ${HUE[q]})` : `oklch(0.55 0.17 ${HUE[q]})`;
+}
+
+/**
+ * Where each action is drawn and which zone (so which colour) that puts it in.
+ * Actions rated alike would sit exactly on top of each other and look like one
+ * dot, so each group is spread in a small ring around their shared point. A
+ * rating of exactly 3 sits on a dashed divider; it belongs to the lower /
+ * easier half, so its dot (or its whole ring) is drawn just inside that half,
+ * keeping same-rated actions in one zone and colour.
+ */
+export function placeActions(actions: Action[]): Array<{ x: number; y: number; q: QuadKey }> {
+  const groups = new Map<string, number>();
+  for (const a of actions) groups.set(`${a.impact}|${a.difficulty}`, (groups.get(`${a.impact}|${a.difficulty}`) ?? 0) + 1);
+  const seen = new Map<string, number>();
+  return actions.map((a) => {
+    const key = `${a.impact}|${a.difficulty}`;
+    const count = groups.get(key) ?? 1;
+    const i = seen.get(key) ?? 0;
+    seen.set(key, i + 1);
+    const r = count > 1 ? 0.3 : 0;
+    // Start the ring a little off the axes so no dot lands exactly on a divider.
+    const angle = (2 * Math.PI * i) / count + Math.PI / 4;
+    const inside = r + 0.18;
+    const cx = a.difficulty === 3 ? 3 - inside : a.difficulty;
+    const cy = a.impact === 3 ? 3 - inside : a.impact;
+    const x = cx + r * Math.cos(angle);
+    const y = cy + r * Math.sin(angle);
+    return { x, y, q: quadOf(y, x) };
+  });
+}
+
+export function ImpactDifficultyMatrix({ actions, estimated = false }: MatrixProps) {
   const { theme } = useTheme();
   const dark = theme === "dark";
 
-  // Quadrant colours (dot = strong, zone = faint), matching the legend chips.
-  const HUE = { quick: 160, major: 70, fill: 255, slog: 25 };
-  const dot = (q: QuadKey) =>
-    dark ? `oklch(0.75 0.17 ${HUE[q]})` : `oklch(0.55 0.17 ${HUE[q]})`;
+  const dot = (q: QuadKey) => quadColor(q, dark);
   const zone = (q: QuadKey) =>
     dark ? `oklch(0.70 0.15 ${HUE[q]})` : `oklch(0.62 0.14 ${HUE[q]})`;
 
@@ -70,18 +107,35 @@ export function ImpactDifficultyMatrix({ actions }: MatrixProps) {
     dotStroke: dark ? "oklch(0.20 0.01 260)" : "oklch(1 0 0)",
   };
 
-  const data = actions.map((a) => {
-    const q = quadOf(a.impact, a.difficulty);
-    return { ...a, size: COST_SIZE[a.costTier] ?? 170, fill: dot(q), quad: QUAD_NAME[q] };
+  // Colour and quadrant come from where the dot is drawn, matching the zones.
+  const placed = placeActions(actions);
+  const data = actions.map((a, i) => {
+    const { x, y, q } = placed[i];
+    return { ...a, x, y, size: COST_SIZE[a.costTier] ?? 170, fill: dot(q), quad: QUAD_NAME[q] };
   });
 
   return (
     <div className="glass-card p-6">
       <h2 className="text-xl font-bold text-text-primary mb-1">Impact vs Difficulty</h2>
       <p className="text-base text-text-secondary mb-4">
-        Every dot is one action. Its colour is the quadrant it lands in, and its size is the cost.
+        Every dot is one action, numbered as in the Action Plan. Its colour is the zone it sits in, and its size is the cost.
+        A rating of exactly 3 counts as the lower, easier half.
         The green top-left corner is where the easy, high-impact wins live.
       </p>
+      {estimated && actions.length > 0 && (
+        <p className="text-sm text-warn-400 bg-warn-500/10 border border-warn-500/25 rounded-lg p-2.5 mb-3">
+          These positions are rough estimates: the AI&apos;s action plan couldn&apos;t be read, so the app built these actions
+          from the weakest indicators and placed them by how weak each is and how hard that kind of work usually is.
+          Re-run the analysis (or try a stronger model) for the AI&apos;s own ratings.
+        </p>
+      )}
+
+      {actions.length === 0 && (
+        <p className="text-sm text-warn-400 bg-warn-500/10 border border-warn-500/25 rounded-lg p-2.5 mb-3">
+          This analysis has no recommended actions to plot. That usually means the AI&apos;s reply couldn&apos;t be read.
+          Re-run the analysis, or try a stronger model in Settings.
+        </p>
+      )}
 
       <ResponsiveContainer width="100%" height={400}>
         <ScatterChart margin={{ top: 10, right: 20, bottom: 34, left: 12 }}>
@@ -95,7 +149,7 @@ export function ImpactDifficultyMatrix({ actions }: MatrixProps) {
 
           <XAxis
             type="number"
-            dataKey="difficulty"
+            dataKey="x"
             domain={[0.5, 5.5]}
             ticks={[1, 2, 3, 4, 5]}
             tick={{ fill: c.axis, fontSize: 13, fontWeight: 600 }}
@@ -104,14 +158,14 @@ export function ImpactDifficultyMatrix({ actions }: MatrixProps) {
           </XAxis>
           <YAxis
             type="number"
-            dataKey="impact"
+            dataKey="y"
             domain={[0.5, 5.5]}
             ticks={[1, 2, 3, 4, 5]}
             tick={{ fill: c.axis, fontSize: 13, fontWeight: 600 }}
           >
             <Label value="More impact →" angle={-90} position="insideLeft" offset={10} style={{ fill: c.axis, fontSize: 13, fontWeight: 600, textAnchor: "middle" }} />
           </YAxis>
-          <ZAxis type="number" dataKey="size" range={[80, 620]} />
+          <ZAxis type="number" dataKey="size" range={[260, 760]} />
 
           <ReferenceLine x={3} stroke={c.divider} strokeDasharray="6 6" />
           <ReferenceLine y={3} stroke={c.divider} strokeDasharray="6 6" />
@@ -120,17 +174,18 @@ export function ImpactDifficultyMatrix({ actions }: MatrixProps) {
             {data.map((entry, index) => (
               <Cell key={index} fill={entry.fill} />
             ))}
+            <LabelList dataKey="n" position="center" fill="#fff" fontSize={11} fontWeight={700} pointerEvents="none" />
           </Scatter>
 
           <Tooltip
             content={({ payload }) => {
               if (!payload?.length) return null;
-              const d = payload[0]?.payload as Action & { quad: string };
+              const d = payload[0]?.payload as Action & { quad: string; fill: string };
               if (!d) return null;
               return (
                 <div className="glass-card p-3 text-sm max-w-64">
-                  <p className="font-semibold text-text-primary">{d.title}</p>
-                  <p className="text-accent-400 font-semibold mt-0.5">{d.quad}</p>
+                  <p className="font-semibold text-text-primary"><span style={{ color: d.fill }}>#{d.n}</span> {d.title}</p>
+                  <p className="font-semibold mt-0.5" style={{ color: d.fill }}>{d.quad}</p>
                   <div className="grid grid-cols-2 gap-x-3 mt-1 text-text-secondary">
                     <span>Impact: {d.impact}/5</span>
                     <span>Difficulty: {d.difficulty}/5</span>

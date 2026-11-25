@@ -2,15 +2,15 @@
 
 /**
  * System status, an at-a-glance panel of everything the tool needs and whether
- * it's healthy: the attached scorecard (with filename + a Remove button), the AI
+ * it's healthy: the scorecard being analyzed (with a picker of the finished ones), the AI
  * provider (with a one-click Test), and the open-data service. Surfaces parse
  * warnings so you can see exactly what was read and flag anything off.
  */
 
 import { useState } from "react";
 import {
-  FileSpreadsheet, X, CheckCircle2, AlertTriangle, Cloud, Cpu, Sparkles,
-  Boxes, MonitorSmartphone, Plug, Loader2, ShieldCheck, KeyRound, XCircle,
+  FileSpreadsheet, CheckCircle2, AlertTriangle, Cloud, Cpu, Sparkles,
+  Boxes, MonitorSmartphone, Plug, Loader2, ShieldCheck, KeyRound, XCircle, GraduationCap,
 } from "lucide-react";
 import type { NormalizedScorecard } from "@/lib/scorecard/schema";
 import { createProvider } from "@/lib/llm";
@@ -18,7 +18,7 @@ import type { AppSettings, ProviderId } from "@/lib/settings/store";
 
 const LABEL: Record<ProviderId, string> = {
   claude: "Claude", gemini: "Gemini", openrouter: "OpenRouter",
-  openai: "OpenAI", xai: "xAI Grok", zai: "z.AI GLM", nvidia: "NVIDIA NIM", meta: "Meta Llama", azure: "Microsoft Azure", perplexity: "Perplexity",
+  openai: "OpenAI", xai: "xAI Grok", zai: "z.AI GLM", nvidia: "NVIDIA NIM", meta: "Meta Llama", azure: "Microsoft Azure", perplexity: "Perplexity", createai: "ASU CreateAI",
   ollama: "Local (Ollama)", lmstudio: "Local (LM Studio)",
 };
 function icon(p: ProviderId, cls: string) {
@@ -31,6 +31,7 @@ function icon(p: ProviderId, cls: string) {
     case "zai": return <Boxes size={15} className={cls} />;
     case "nvidia": return <Cpu size={15} className={cls} />;
     case "meta": return <Cloud size={15} className={cls} />;
+    case "createai": return <GraduationCap size={15} className={cls} />;
     case "ollama": return <Cpu size={15} className={cls} />;
     case "lmstudio": return <MonitorSmartphone size={15} className={cls} />;
   }
@@ -53,14 +54,22 @@ function parseChecks(sc: NormalizedScorecard): { warnings: string[]; essentialsW
 export function SystemStatus({
   scorecard,
   fileName,
-  onRemove,
+  sources,
+  selectedSource,
+  onSelectSource,
+  sourceDisabled = false,
   settings,
   providerReady,
   modelName,
 }: {
   scorecard: NormalizedScorecard | null;
   fileName: string | null;
-  onRemove: () => void;
+  /** Finished scorecards that can be analyzed here ("Gemini: Tempe, …"). */
+  sources: Array<{ id: string; label: string }>;
+  selectedSource: string | null;
+  onSelectSource: (id: string) => void;
+  /** An analysis is running: the scorecard can't be swapped mid-run. */
+  sourceDisabled?: boolean;
   settings: AppSettings;
   providerReady: boolean;
   modelName: string;
@@ -125,15 +134,25 @@ export function SystemStatus({
             </p>
           )}
         </div>
-        {scorecard && (
-          <button
-            onClick={onRemove}
-            title="Remove this scorecard"
-            className="flex items-center gap-1 text-xs text-danger-400 hover:text-danger-500 border border-danger-500/30 hover:bg-danger-500/10 rounded-lg px-2 py-1 transition-all shrink-0"
+        <label className="shrink-0 flex flex-col items-end gap-0.5">
+          <span className="sr-only">Scorecard to analyze</span>
+          <select
+            value={selectedSource ?? ""}
+            onChange={(e) => { if (e.target.value) onSelectSource(e.target.value); }}
+            disabled={sourceDisabled || sources.length === 0}
+            title={
+              sourceDisabled ? "Wait for the analysis to finish (or cancel it) to switch scorecards"
+              : sources.length === 0 ? "No helper has finished a scorecard for this city yet"
+              : "Choose which finished scorecard to analyze"
+            }
+            className="text-xs rounded-lg px-2 py-1.5 max-w-[16rem] border border-border bg-surface-overlay text-text-primary disabled:opacity-60 disabled:cursor-not-allowed"
           >
-            <X size={13} /> Remove
-          </button>
-        )}
+            <option value="" disabled>
+              {sources.length ? "Choose a scorecard…" : "No finished scorecard yet"}
+            </option>
+            {sources.map((s) => <option key={s.id} value={s.id}>{s.label}</option>)}
+          </select>
+        </label>
       </div>
 
       <div className="h-px bg-border/60" />

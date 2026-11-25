@@ -10,7 +10,7 @@
  * embedded in the content are stripped by the analysis layer before parsing.
  */
 
-import { LLMProvider, LLMStreamHandlers, readSSE } from "./types";
+import { LLMProvider, LLMStreamHandlers, readSSE, fromOpenAIUsage, type OpenAIStyleUsage } from "./types";
 
 export class LMStudioProvider implements LLMProvider {
   readonly name = "lmstudio";
@@ -42,6 +42,7 @@ export class LMStudioProvider implements LLMProvider {
           temperature: 0.3,
           max_tokens: -1, // let the loaded model use its full context
           stream: true,
+          stream_options: { include_usage: true },
           messages: [
             { role: "system", content: system },
             { role: "user", content: user },
@@ -63,7 +64,9 @@ export class LMStudioProvider implements LLMProvider {
 
     let full = "";
     let sawReasoning = false;
+    let answeredBy: string | undefined;
     let finishReason: string | undefined;
+    let usage: OpenAIStyleUsage | undefined;
 
     await readSSE(res, (data) => {
       if (data === "[DONE]") return;
@@ -72,7 +75,9 @@ export class LMStudioProvider implements LLMProvider {
           delta?: { content?: string; reasoning?: string; reasoning_content?: string };
           finish_reason?: string;
         }>;
+        usage?: OpenAIStyleUsage;
         error?: { message?: string } | string;
+        model?: string;
       };
       try {
         evt = JSON.parse(data);
@@ -83,6 +88,8 @@ export class LMStudioProvider implements LLMProvider {
         const msg = typeof evt.error === "string" ? evt.error : evt.error.message;
         throw new Error(`LM Studio error: ${msg ?? "unknown"}`);
       }
+      if (evt.usage) usage = evt.usage;
+      if (evt.model) answeredBy = evt.model;
       const choice = evt.choices?.[0];
       if (choice?.finish_reason) finishReason = choice.finish_reason;
       const reasoning = choice?.delta?.reasoning ?? choice?.delta?.reasoning_content;
@@ -95,6 +102,10 @@ export class LMStudioProvider implements LLMProvider {
         handlers?.onToken?.(choice.delta.content);
       }
     });
+
+    // Runs on this computer: no charge, but the token counts still compare models.
+    if (usage) handlers?.onUsage?.({ ...fromOpenAIUsage(usage), costUsd: 0 });
+    if (answeredBy) handlers?.onModel?.(answeredBy);
 
     if (!full.trim()) {
       throw new Error(

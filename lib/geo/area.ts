@@ -14,7 +14,9 @@ export interface AreaSelection {
   /** Outer boundary, [lon, lat], open ring. */
   ring: LonLat[];
   /** How the area was made. */
-  source: "rectangle" | "polygon" | "file";
+  /** "city" = a city's boundary picked by clicking its name on the map;
+   *  "circle" = drawn with the Circle tool or entered as Lat/Lon + radius. */
+  source: "rectangle" | "polygon" | "file" | "city" | "circle";
   /** Original file name, when loaded from a file. */
   fileName?: string;
   areaKm2: number;
@@ -29,12 +31,29 @@ export interface AreaSelection {
   cityAreaKm2?: number;
   /** ISO-2 country code from reverse geocoding, when known. */
   countryCode?: string;
+  /** For a clicked city with no mapped boundary: a circle sized by population. */
+  approximate?: boolean;
+  /** For a clicked city: which map label it was ("name|lat|lon"), to highlight it. */
+  cityRef?: string;
+  /** For a circle: its centre and radius (the ring is a 64-point approximation). */
+  circle?: { lat: number; lon: number; radiusKm: number };
 }
 
 /** Hard cap: bigger areas make Overpass and the other free APIs time out. */
 export const MAX_AREA_KM2 = 1000;
+/** Clicked city boundaries may be much bigger: some cities are whole
+ *  provinces (Kinshasa ~10,800 km², Istanbul ~11,300 km² including its
+ *  waters). The infrastructure counts still answer for these, if more slowly. */
+export const MAX_CITY_AREA_KM2 = 12000;
+
+export function maxAreaFor(source?: AreaSelection["source"]): number {
+  return source === "city" ? MAX_CITY_AREA_KM2 : MAX_AREA_KM2;
+}
 /** Floor: tiny slivers return no useful data. */
 export const MIN_AREA_KM2 = 0.1;
+/** Circles follow the drawn-area limits: radius ≈17.8 km for 1,000 km². */
+export const MAX_CIRCLE_RADIUS_KM = Math.floor(Math.sqrt(MAX_AREA_KM2 / Math.PI) * 10) / 10;
+export const MIN_CIRCLE_RADIUS_KM = Math.ceil(Math.sqrt(MIN_AREA_KM2 / Math.PI) * 100) / 100;
 /** Vertices kept when sending a polygon to the data APIs. */
 export const MAX_RING_POINTS = 200;
 
@@ -163,12 +182,15 @@ function round6(n: number): number {
 }
 
 /** Returns a human-readable problem with the area, or null when it is usable. */
-export function validateArea(a: Pick<AreaSelection, "ring" | "areaKm2" | "bbox">): string | null {
+export function validateArea(a: Pick<AreaSelection, "ring" | "areaKm2" | "bbox"> & { source?: AreaSelection["source"] }): string | null {
   if (!a.ring || a.ring.length < 3) return "An area needs at least three corners.";
   const [s, n, w, e] = a.bbox;
   if (s < -90 || n > 90 || w < -180 || e > 180) return "The area's coordinates are outside the valid latitude/longitude range.";
-  if (a.areaKm2 > MAX_AREA_KM2) {
-    return `This area is ${formatKm2(a.areaKm2)}. The limit is ${formatKm2(MAX_AREA_KM2)}, so the free data services can answer in time. Try a smaller area.`;
+  const max = maxAreaFor(a.source);
+  if (a.areaKm2 > max) {
+    return a.source === "city"
+      ? `This city's boundary is ${formatKm2(a.areaKm2)}, more than the ${formatKm2(max)} the free data services can handle. Draw a smaller area inside it, or use "By city name".`
+      : `This area is ${formatKm2(a.areaKm2)}. The limit is ${formatKm2(max)}, so the free data services can answer in time. Try a smaller area.`;
   }
   if (a.areaKm2 < MIN_AREA_KM2) {
     return `This area is only ${formatKm2(a.areaKm2)}. Please make it at least ${formatKm2(MIN_AREA_KM2)} so there is data to find.`;
@@ -184,6 +206,27 @@ export function formatKm2(km2: number): string {
 
 /** A one-line description for prompts, chat, and headers. */
 export function describeArea(a: AreaSelection): string {
+  if (a.source === "city") {
+    return `${formatKm2(a.areaKm2)} ${a.approximate ? "approximate boundary" : "city boundary"} of ${a.label || "the city"}`;
+  }
   const where = a.label ? ` around ${a.label}` : "";
+  if (a.source === "circle" && a.circle) {
+    return `${formatKm2(a.areaKm2)} circle of radius ${a.circle.radiusKm.toFixed(2)} km${where}`;
+  }
   return `${formatKm2(a.areaKm2)} ${a.source === "file" ? "area loaded from a file" : "area drawn on the map"}${where}`;
+}
+
+/** A circle area (Circle tool or Lat/Lon), with its centre and radius kept. */
+export function makeCircleArea(lat: number, lon: number, radiusKm: number): AreaSelection {
+  return { ...makeArea(circleRing(lat, lon, radiusKm, 64), "circle"), circle: { lat, lon, radiusKm } };
+}
+
+/** A circle as a ring (also stands in for cities with no mapped boundary). */
+export function circleRing(lat: number, lon: number, radiusKm: number, points = 48): LonLat[] {
+  const dLat = radiusKm / 111.32;
+  const dLon = radiusKm / (111.32 * Math.max(0.05, Math.cos(rad(lat))));
+  return Array.from({ length: points }, (_, i) => {
+    const t = (i / points) * 2 * Math.PI;
+    return [lon + dLon * Math.cos(t), lat + dLat * Math.sin(t)] as LonLat;
+  });
 }

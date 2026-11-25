@@ -43,7 +43,9 @@ export class OllamaProvider implements LLMProvider {
           model: this.model,
           stream: true,
           // -1 = no cap, so a thinking model can reason AND finish the answer.
-          options: { temperature: 0.3, num_predict: -1 },
+          // num_ctx: Ollama's default context window (~2k tokens) silently cuts
+          // off the Assistant's ~5k-token prompt; 16k fits it with room to spare.
+          options: { temperature: 0.3, num_predict: -1, num_ctx: 16384 },
           messages: [
             { role: "system", content: system },
             { role: "user", content: user },
@@ -60,20 +62,33 @@ export class OllamaProvider implements LLMProvider {
 
     if (!res.ok) {
       const detail = await res.text().catch(() => "");
-      throw new Error(
-        `Ollama error ${res.status}: ${detail || "no detail"}. ` +
-          `Have you run: ollama pull ${this.model}?`
-      );
+      // A missing model: name the ones that are installed, so the fix is obvious.
+      if (res.status === 404 && /not found/i.test(detail)) {
+        const installed = await this.installedModels();
+        throw new Error(
+          `Ollama doesn't have the model "${this.model}". ` +
+            (installed.length
+              ? `Installed models: ${installed.join(", ")}. Pick one in Settings → Ollama → Model, or run: ollama pull ${this.model}`
+              : `No models are installed yet. Run: ollama pull ${this.model} (or a smaller one such as qwen2.5:3b)`)
+        );
+      }
+      throw new Error(`Ollama error ${res.status}: ${detail || "no detail"}.`);
     }
 
     let full = "";
     let sawThinking = false;
+    let inTok = 0, outTok = 0;
     await readNdjson(res, (obj) => {
       const o = obj as {
         message?: { content?: string; thinking?: string };
         error?: string;
+        // Token counts, on the final ("done") object.
+        prompt_eval_count?: number;
+        eval_count?: number;
       };
       if (o.error) throw new Error(`Ollama error: ${o.error}`);
+      if (o.prompt_eval_count != null) inTok = o.prompt_eval_count;
+      if (o.eval_count != null) outTok = o.eval_count;
       if (o.message?.thinking) {
         sawThinking = true;
         if (handlers?.onReasoning) handlers.onReasoning(o.message.thinking); else handlers?.onToken?.(o.message.thinking);
@@ -84,6 +99,9 @@ export class OllamaProvider implements LLMProvider {
       }
     });
 
+    // Runs on this computer: no charge, but the token counts still compare models.
+    handlers?.onUsage?.({ inputTokens: inTok, outputTokens: outTok, costUsd: 0 });
+
     if (!full.trim()) {
       throw new Error(
         "Ollama returned no answer text" +
@@ -91,6 +109,18 @@ export class OllamaProvider implements LLMProvider {
       );
     }
     return full;
+  }
+
+  /** Names of the models pulled into this Ollama ("qwen2.5:3b", …); empty if unknown. */
+  private async installedModels(): Promise<string[]> {
+    try {
+      const res = await fetch(`${this.base()}/api/tags`);
+      if (!res.ok) return [];
+      const j = (await res.json()) as { models?: Array<{ name?: string }> };
+      return (j.models || []).map((m) => m.name || "").filter(Boolean);
+    } catch {
+      return [];
+    }
   }
 
   async test(signal?: AbortSignal) {

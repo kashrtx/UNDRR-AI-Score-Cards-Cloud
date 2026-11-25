@@ -2,7 +2,7 @@
 const nextConfig = {
   // The migrated prototype has a few loose types; don't let them block a deploy.
   typescript: { ignoreBuildErrors: true },
-  eslint: { ignoreDuringBuilds: true },
+  // (Next.js 16 removed the eslint option and no longer lints during builds.)
   images: { unoptimized: true },
 };
 

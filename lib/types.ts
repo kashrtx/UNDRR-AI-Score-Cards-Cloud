@@ -69,8 +69,9 @@ export interface Action {
   title: string;
   essential: number;
   gap: string;
-  impact: 1 | 2 | 3 | 4 | 5;
-  difficulty: 1 | 2 | 3 | 4 | 5;
+  /** 1–5; ActionSchema (lib/analysis/schema.ts) only lets whole numbers 1–5 through. */
+  impact: number;
+  difficulty: number;
   costTier: CostTier;
   phase: Phase;
   scoreDelta: number;
@@ -112,6 +113,11 @@ export interface ReferenceFact {
 export interface ReferenceFacts {
   title: string;
   summary: string;
+  /**
+   * The county and state/province the place lies in (from OpenStreetMap), so
+   * plans that cover it at those levels can be found and cited.
+   */
+  jurisdictions?: { county?: string; state?: string };
   /** Synthesized answer from the web-search provider (Tavily), if available. */
   answer?: string;
   /** Retrieved excerpts (web + encyclopedia) — cited evidence, not gospel. */

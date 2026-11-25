@@ -83,12 +83,44 @@ function looseParse(raw: string): unknown | null {
   }
 }
 
+/** How hard work under each Essential usually is (1-5), for the backup action plan's placement. */
+const ESSENTIAL_DIFFICULTY: Record<number, number> = { 1: 2, 2: 2, 3: 3, 4: 4, 5: 4, 6: 2, 7: 2, 8: 4, 9: 3, 10: 3 };
+
 const COST_TIERS = ["$0–100k", "$100k–500k", "$500k–1M", "$1M–10M", ">$10M"];
 const PHASES = ["Now", "Next", "Later"];
 const clampInt = (v: unknown, lo: number, hi: number, dflt: number): number => {
-  const n = typeof v === "number" ? v : parseInt(String(v), 10);
+  // The first number in it: 4, "4", "4/5", "E3", "Essential 3".
+  const n = typeof v === "number" ? v : parseInt(String(v ?? "").match(/-?\d+/)?.[0] ?? "", 10);
   if (!Number.isFinite(n)) return dflt;
   return Math.max(lo, Math.min(hi, Math.round(n)));
+};
+
+// Impact / difficulty written as words, which smaller models often do.
+const RATING_WORDS: Array<[RegExp, number]> = [
+  [/\b(very|extremely)\s*(high|hard|difficult|complex)|transformative|critical|severe\b/i, 5],
+  [/\b(very|extremely)\s*(low|easy|simple)|minimal|trivial|negligible\b/i, 1],
+  [/\b(medium|moderate|mid|average)\b/i, 3],
+  [/\b(high|hard|difficult|complex|major|significant|large|strong)\b/i, 4],
+  [/\b(low|easy|simple|minor|small|limited)\b/i, 2],
+];
+
+/** A 1-5 rating from a number, "4/5", "8/10", or words like "High" (null if none). */
+function rating(v: unknown): number | null {
+  if (typeof v === "number" && Number.isFinite(v)) return Math.max(1, Math.min(5, Math.round(v)));
+  const s = String(v ?? "").trim();
+  if (!s) return null;
+  const frac = /(\d+(?:\.\d+)?)\s*(?:\/|out of)\s*(\d+)/i.exec(s);
+  if (frac && Number(frac[2]) > 0) return Math.max(1, Math.min(5, Math.round((Number(frac[1]) / Number(frac[2])) * 5)));
+  const num = /-?\d+(?:\.\d+)?/.exec(s);
+  if (num) return Math.max(1, Math.min(5, Math.round(Number(num[0]))));
+  for (const [re, n] of RATING_WORDS) if (re.test(s)) return n;
+  return null;
+}
+
+/** The first of these fields that has a value. */
+const pick = (o: Record<string, unknown>, ...keys: string[]): unknown => {
+  for (const k of keys) if (o[k] != null && o[k] !== "") return o[k];
+  return undefined;
 };
 
 /**
@@ -137,7 +169,8 @@ function coerceResult(parsed: unknown, scorecard: NormalizedScorecard): Analysis
       .map((it, idx): AnalysisResult["actions"][number] | null => {
         if (!it || typeof it !== "object") return null;
         const o = it as Record<string, unknown>;
-        const title = typeof o.title === "string" ? o.title.trim() : "";
+        const t = pick(o, "title", "action", "name", "label", "recommendation", "description");
+        const title = typeof t === "string" ? t.trim() : "";
         if (!title) return null;
         const costTier = COST_TIERS.includes(String(o.costTier)) ? (o.costTier as AnalysisResult["actions"][number]["costTier"]) : "$100k–500k";
         const phase = PHASES.includes(String(o.phase)) ? (o.phase as AnalysisResult["actions"][number]["phase"]) : "Next";
@@ -146,8 +179,8 @@ function coerceResult(parsed: unknown, scorecard: NormalizedScorecard): Analysis
           title,
           essential: clampInt(o.essential, 1, 10, 1),
           gap: typeof o.gap === "string" ? o.gap : "",
-          impact: clampInt(o.impact, 1, 5, 3) as AnalysisResult["actions"][number]["impact"],
-          difficulty: clampInt(o.difficulty, 1, 5, 3) as AnalysisResult["actions"][number]["difficulty"],
+          impact: (rating(pick(o, "impact", "impactScore", "impact_score", "benefit")) ?? 3) as AnalysisResult["actions"][number]["impact"],
+          difficulty: (rating(pick(o, "difficulty", "difficultyScore", "difficulty_score", "effort", "complexity")) ?? 3) as AnalysisResult["actions"][number]["difficulty"],
           costTier,
           phase,
           scoreDelta: clampInt(o.scoreDelta, 0, 100, 1),
@@ -166,7 +199,7 @@ function coerceResult(parsed: unknown, scorecard: NormalizedScorecard): Analysis
     projection = { current: cur, potential: Math.max(cur, Math.min(scorecard.totalMax, pot)) };
   }
 
-  return { summary, riskProfile, strengths, weaknesses, actions, projection };
+  return { summary, riskProfile, strengths, weaknesses, actions, actionsEstimated: actions === base.actions, projection };
 }
 
 export async function runAnalysis(
@@ -236,7 +269,7 @@ export async function runAnalysis(
 
   // ── 2. Build prompts ──────────────────────────────────────
   const system = buildSystemPrompt();
-  const user = buildUserPrompt(scorecard, enrichment, reference, handlers.extraContext, handlers.priorSummary);
+  const user = buildUserPrompt(scorecard, enrichment, reference, handlers.extraContext, handlers.priorSummary, settings.dataSources);
 
   // ── 3. Stream from the provider ───────────────────────────
   const provider = await createProvider(settings);
@@ -355,6 +388,13 @@ export function buildFallbackResult(scorecard: NormalizedScorecard): AnalysisRes
     .sort((a, b) => b.score / b.max - a.score / a.max)
     .slice(0, 2);
   const zero = scorecard.indicators.filter((i) => i.score === 0);
+  const essentialPct = new Map(scorecard.essentials.map((e) => [e.num, e.max ? e.score / e.max : 1]));
+  const weakEssential = (num: number) => (essentialPct.get(num) ?? 1) < 0.4;
+  // The five weakest answered indicators (0s first), so there are always actions to plan and plot.
+  const weakestIndicators = [...scorecard.indicators]
+    .filter((i) => i.answered !== false && i.score < 3)
+    .sort((a, b) => a.score - b.score)
+    .slice(0, 5);
 
   return {
     summary:
@@ -380,18 +420,22 @@ export function buildFallbackResult(scorecard: NormalizedScorecard): AnalysisRes
         sourceRefs: [i.code],
       })),
     ],
-    actions: zero.slice(0, 5).map((ind, idx) => ({
+    actions: weakestIndicators.map((ind, idx) => ({
       n: idx + 1,
-      title: `Address critical gap: ${ind.text}`,
+      title: `${ind.score === 0 ? "Address critical gap" : "Strengthen"}: ${ind.text}`,
       essential: ind.essential,
-      gap: `${ind.code} scored 0/3`,
-      impact: 4,
-      difficulty: 3,
+      gap: `${ind.code} scored ${ind.score}/3`,
+      // A rough placement (shown as an estimate): fixing a missing capability in
+      // a weak Essential helps most; physical works (urban development, natural
+      // buffers, infrastructure) are harder than plans, institutions or drills.
+      impact: Math.min(5, (ind.score === 0 ? 4 : ind.score === 1 ? 3 : 2) + (weakEssential(ind.essential) ? 1 : 0)) as AnalysisResult["actions"][number]["impact"],
+      difficulty: Math.min(5, (ESSENTIAL_DIFFICULTY[ind.essential] ?? 3) + (ind.score === 0 ? 1 : 0)) as AnalysisResult["actions"][number]["difficulty"],
       costTier: "$100k–500k" as const,
       phase: idx < 2 ? ("Now" as const) : idx < 4 ? ("Next" as const) : ("Later" as const),
-      scoreDelta: 2,
+      scoreDelta: 3 - ind.score,
       sourceRefs: [ind.code],
     })),
+    actionsEstimated: true,
     projection: {
       current: scorecard.total,
       potential: Math.min(scorecard.totalMax, scorecard.total + zero.length * 2),

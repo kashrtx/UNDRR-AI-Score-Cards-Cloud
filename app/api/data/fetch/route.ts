@@ -26,7 +26,10 @@ export async function POST(req: NextRequest) {
   const city = (body.city ?? "").trim();
   const country = (body.country ?? "").trim() || undefined;
   const area = body.area && Array.isArray(body.area.ring) && body.area.ring.length >= 3
-    ? { ring: body.area.ring.slice(0, 5000), label: body.area.label, countryCode: body.area.countryCode }
+    ? {
+        ring: body.area.ring.slice(0, 5000), label: body.area.label, countryCode: body.area.countryCode,
+        source: body.area.source === "city" ? "city" : undefined,
+      }
     : undefined;
   if (!city && !area) {
     return NextResponse.json(

@@ -2,14 +2,14 @@
 
 /**
  * Status bar, a live, plain-language read-out of what's ready: which AI
- * provider is active, whether it has what it needs (an API key, or Ollama for
- * local), and whether a scorecard is loaded. Everything is client-side, so
+ * helpers are picked, whether each has what it needs (an API key, or a local
+ * server), and whether a scorecard is loaded. Everything is client-side, so
  * there's no backend to be "down".
  */
 
-import { CheckCircle2, AlertCircle, Cpu, Cloud, Sparkles, Boxes, MonitorSmartphone, FileSpreadsheet, ShieldCheck, Globe } from "lucide-react";
+import { CheckCircle2, AlertCircle, Cpu, Cloud, Sparkles, Boxes, MonitorSmartphone, FileSpreadsheet, ShieldCheck, Globe, GraduationCap } from "lucide-react";
 import type { AppSettings, ProviderId } from "@/lib/settings/store";
-import { modelForSettings } from "@/lib/settings/store";
+import { modelForSettings, selectedProviders, settingsFor, providerIsReady } from "@/lib/settings/store";
 
 const LABEL: Record<ProviderId, string> = {
   claude: "Claude",
@@ -22,6 +22,7 @@ const LABEL: Record<ProviderId, string> = {
   meta: "Meta Llama",
   azure: "Microsoft Azure",
   perplexity: "Perplexity",
+  createai: "ASU CreateAI",
   ollama: "Local (Ollama)",
   lmstudio: "Local (LM Studio)",
 };
@@ -43,6 +44,8 @@ function providerIcon(p: ProviderId, ready: boolean) {
       return <Cpu size={14} className={cls} />;
     case "meta":
       return <Cloud size={14} className={cls} />;
+    case "createai":
+      return <GraduationCap size={14} className={cls} />;
     case "ollama":
       return <Cpu size={14} className={cls} />;
     case "lmstudio":
@@ -52,45 +55,35 @@ function providerIcon(p: ProviderId, ready: boolean) {
 
 export function StatusBar({
   settings,
-  providerReady,
   city,
   tavilyOn = false,
 }: {
   settings: AppSettings;
-  providerReady: boolean;
   city: string | null;
   tavilyOn?: boolean;
 }) {
-  const model = modelForSettings(settings);
-
-  const isLocal = settings.provider === "ollama" || settings.provider === "lmstudio";
-  const readyDetail = providerReady
-    ? isLocal
-      ? "Local model selected"
-      : "API key saved"
-    : isLocal
-    ? "Local model selected, make sure the local server is running"
-    : "No API key yet, add one in Settings";
-
   return (
     <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-sm">
-      <div className="flex items-center gap-1.5 text-text-secondary" title={readyDetail}>
-        {providerIcon(settings.provider, providerReady)}
-        <span>
-          {LABEL[settings.provider]} · <span className="font-mono">{model}</span>
-        </span>
-      </div>
-
-      <div className="flex items-center gap-1.5" title={readyDetail}>
-        {providerReady ? (
-          <CheckCircle2 size={14} className="text-accent-400" />
-        ) : (
-          <AlertCircle size={14} className="text-warn-400" />
-        )}
-        <span className={providerReady ? "text-text-secondary" : "text-warn-400"}>
-          {providerReady ? "Ready" : "Needs a key"}
-        </span>
-      </div>
+      {selectedProviders(settings).map((p) => {
+        const ready = providerIsReady(p);
+        const isLocal = p === "ollama" || p === "lmstudio";
+        const readyDetail = ready
+          ? isLocal ? "Local model selected" : "API key saved"
+          : isLocal ? "Local model selected, make sure the local server is running" : "No API key yet, add one in Settings";
+        return (
+          <div key={p} className="flex items-center gap-1.5 text-text-secondary" title={readyDetail}>
+            {providerIcon(p, ready)}
+            <span>
+              {LABEL[p]} · <span className="font-mono">{modelForSettings(settingsFor(settings, p))}</span>
+            </span>
+            {ready ? (
+              <CheckCircle2 size={14} className="text-accent-400" aria-label="Ready" />
+            ) : (
+              <span className="flex items-center gap-1 text-warn-400"><AlertCircle size={14} /> Needs a key</span>
+            )}
+          </div>
+        );
+      })}
 
       <div className="flex items-center gap-1.5 text-text-secondary" title="Public data is fetched for you, nothing to set up">
         <ShieldCheck size={14} className="text-accent-400" />

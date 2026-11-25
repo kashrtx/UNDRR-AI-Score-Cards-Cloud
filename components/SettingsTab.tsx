@@ -10,14 +10,18 @@
 import { useEffect, useState, useRef, type ReactNode } from "react";
 import {
   Cloud, Cpu, Sparkles, Boxes, MonitorSmartphone, Save, Loader2,
-  CheckCircle2, XCircle, KeyRound, Trash2, Plug, Globe, Search, Compass, BookCheck,
+  CheckCircle2, XCircle, KeyRound, Trash2, Plug, Globe, Search, Compass, BookCheck, GraduationCap, RefreshCw, Database, ChevronDown,
+  Lightbulb,
 } from "lucide-react";
 import {
-  type AppSettings, type ProviderId, type CloudProviderId,
+  type AppSettings, type ProviderId, type CloudProviderId, selectedProviders, PROVIDER_LABEL,
   setApiKey, hasApiKey, clearApiKey, isCloudProvider,
   setSearchKey, hasSearchKey, clearSearchKey,
 } from "@/lib/settings/store";
 import { createProvider } from "@/lib/llm";
+import { listCreateAIModels, type CreateAIModel } from "@/lib/llm/openaiCompatible";
+import { getApiKey } from "@/lib/settings/store";
+import { DATA_SOURCES, DATA_SOURCE_CATEGORIES, HAZARD_ORDER, type DataSourceInfo } from "@/lib/data/catalog";
 
 const MODELS: Record<ProviderId, string[]> = {
   gemini: ["gemini-3.6-flash", "gemini-3.5-flash", "gemini-3.1-flash-lite", "gemini-3.1-pro-preview", "gemini-2.5-pro"],
@@ -36,8 +40,13 @@ const MODELS: Record<ProviderId, string[]> = {
   meta: ["Llama-4-Maverick-17B-128E-Instruct-FP8", "Llama-4-Scout-17B-16E-Instruct-FP8"],
   azure: [],
   perplexity: ["sonar", "sonar-pro", "sonar-reasoning-pro", "sonar-deep-research"],
+  // A starting list; "Load my models" replaces it with what the key can actually use.
+  createai: [
+    "openai/gpt4_1-mini", "openai/gpt5_mini", "openai/gpt5_4_mini", "aws/claude5_5_haiku",
+    "gcp-deepmind/geminiflash3", "gcp-deepmind/geminiflash3_7", "asu-air/gemma4_31b_it", "asu-air/llama4_scout-17b",
+  ],
   lmstudio: ["local-model", "qwen2.5-7b-instruct", "llama-3.2-3b-instruct"],
-  ollama: ["llama3.1:8b", "llama3.2", "qwen2.5", "mistral"],
+  ollama: ["qwen2.5:3b", "llama3.2:3b", "qwen2.5:7b", "llama3.1:8b", "mistral"],
 };
 
 // The single model we recommend per provider (shown as "recommended").
@@ -46,6 +55,7 @@ const RECOMMENDED_MODEL: Partial<Record<ProviderId, string>> = {
   nvidia: "z-ai/glm-5.2",
   openrouter: "nvidia/nemotron-3-ultra-550b-a55b:free",
   perplexity: "sonar",
+  createai: "openai/gpt4_1-mini",
 };
 
 // How each provider actually reaches its API. "direct" = straight from the
@@ -54,13 +64,13 @@ const RECOMMENDED_MODEL: Partial<Record<ProviderId, string>> = {
 // time out. "local" = runs on the visitor's own machine.
 const TRANSPORT: Record<ProviderId, "direct" | "proxy" | "local"> = {
   gemini: "direct", openrouter: "direct", claude: "direct",
-  openai: "proxy", xai: "proxy", zai: "proxy", nvidia: "proxy", meta: "proxy", azure: "proxy", perplexity: "proxy",
+  openai: "proxy", xai: "proxy", zai: "proxy", nvidia: "proxy", meta: "proxy", azure: "proxy", perplexity: "proxy", createai: "proxy",
   lmstudio: "local", ollama: "local",
 };
 
 // Short "what's this good for" tags shown on the provider tiles.
 const BEST_FOR: Partial<Record<ProviderId, string>> = {
-  gemini: "Best for the Dashboard analysis",
+  gemini: "Best for the Analysis tab",
   openrouter: "Best for the Assistant",
 };
 
@@ -115,6 +125,11 @@ const PROVIDER_META: Record<ProviderId, { title: string; subtitle: string; icon:
     subtitle: "Search-grounded models with built-in web results and citations. Good for the Assistant's research. Needs a Perplexity key.",
     icon: <Search size={18} className="text-accent-400" />,
   },
+  createai: {
+    title: "ASU CreateAI",
+    subtitle: "Arizona State University's AI platform: Claude, Gemini, GPT, Gemma and Llama with one project API key from platform.aiml.asu.edu. Usage counts against your project's monthly budget.",
+    icon: <GraduationCap size={18} className="text-accent-400" />,
+  },
   lmstudio: {
     title: "Local (LM Studio)",
     subtitle: "Free & private. OpenAI-compatible; usually works with no extra setup.",
@@ -128,7 +143,94 @@ const PROVIDER_META: Record<ProviderId, { title: string; subtitle: string; icon:
 };
 
 // Display order, cloud first (the friction-free path), then local.
-const ORDER: ProviderId[] = ["gemini", "openrouter", "nvidia", "perplexity", "zai", "claude", "openai", "xai", "meta", "azure", "lmstudio", "ollama"];
+const ORDER: ProviderId[] = ["gemini", "openrouter", "createai", "nvidia", "perplexity", "zai", "claude", "openai", "xai", "meta", "azure", "lmstudio", "ollama"];
+
+/** Step 3: optional data sources, grouped as in the source catalogue, all off by default. */
+function DataSourcePicker({ selected, onChange }: { selected: string[]; onChange: (ids: string[]) => void }) {
+  const on = new Set(selected);
+  const [open, setOpen] = useState<Record<string, boolean>>({});
+  const toggle = (id: string) => onChange(on.has(id) ? selected.filter((x) => x !== id) : [...selected, id]);
+  const setGroup = (ids: string[], value: boolean) =>
+    onChange(value ? Array.from(new Set([...selected, ...ids])) : selected.filter((x) => !ids.includes(x)));
+
+  const row = (d: DataSourceInfo) => (
+    <label key={d.id} className="flex items-start gap-2.5 py-1.5 cursor-pointer">
+      <input type="checkbox" checked={on.has(d.id)} onChange={() => toggle(d.id)}
+        className="mt-1 h-4 w-4 shrink-0 accent-[var(--color-accent-500,#10b981)]" />
+      <span className="min-w-0 text-sm">
+        <span className="text-text-primary font-medium">{d.name}</span>
+        <span className="text-text-secondary"> · {d.provider}</span>
+        <span className="block text-xs text-text-secondary">
+          {d.provides} {d.coverage}{" "}
+          <span className="text-warn-400">{d.caveat}</span>{" "}
+          <a href={d.url} target="_blank" rel="noreferrer" className="underline text-primary-300" onClick={(e) => e.stopPropagation()}>link</a>
+        </span>
+      </span>
+    </label>
+  );
+
+  return (
+    <div id="settings-sources" className="glass-card p-5 space-y-4 scroll-mt-24">
+      <div>
+        <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
+          <span className="text-accent-400">Step 3.</span> <Database size={17} className="text-accent-400" /> Choose data sources <span className="text-xs font-normal text-text-secondary">(optional)</span>
+        </h2>
+        <p className="text-sm text-text-secondary mt-1">
+          Tick the free global datasets you want the AI helpers to look for and cite when they fill out a scorecard
+          (&quot;Fill it out for me&quot;) and when they write an analysis (&quot;Run analysis&quot;). The app always gathers its own
+          open data (climate, elevation, OpenStreetMap, earthquakes, World Bank); these are extra. The AI looks them up
+          and names them where they support an answer. The app doesn&apos;t download the files themselves.
+        </p>
+        <p className="text-xs text-text-secondary mt-1.5">
+          {selected.length ? `${selected.length} of ${DATA_SOURCES.length} selected.` : "None selected."}{" "}
+          {selected.length > 0 && <button type="button" onClick={() => onChange([])} className="underline text-primary-300">Clear all</button>}
+        </p>
+      </div>
+      {DATA_SOURCE_CATEGORIES.map((cat) => {
+        const items = DATA_SOURCES.filter((d) => d.category === cat.id);
+        if (!items.length) return null;
+        const ids = items.map((d) => d.id);
+        const count = ids.filter((id) => on.has(id)).length;
+        const isOpen = open[cat.id] ?? count > 0;
+        const groups = cat.id === "hazard"
+          ? HAZARD_ORDER.map((h) => [h, items.filter((d) => d.hazard === h)] as const).filter(([, list]) => list.length)
+          : [["", items] as const];
+        return (
+          <div key={cat.id} className="rounded-xl border border-border">
+            <div className="flex items-center gap-2 px-3 py-2">
+              <button type="button" onClick={() => setOpen((o) => ({ ...o, [cat.id]: !isOpen }))} aria-expanded={isOpen}
+                className="flex-1 min-w-0 flex items-center gap-2 text-left">
+                <ChevronDown size={15} className={`shrink-0 text-text-secondary transition-transform ${isOpen ? "" : "-rotate-90"}`} />
+                <span className="min-w-0">
+                  <span className="text-sm font-medium text-text-primary">{cat.title}</span>
+                  <span className="text-xs text-text-secondary"> · {count}/{items.length} selected</span>
+                  <span className="block text-xs text-text-secondary truncate">{cat.blurb}</span>
+                </span>
+              </button>
+              <button type="button" onClick={() => setGroup(ids, count < items.length)}
+                className="shrink-0 text-xs px-2 py-1 rounded-lg border border-border text-text-secondary hover:text-text-primary">
+                {count < items.length ? "Select all" : "Clear"}
+              </button>
+            </div>
+            {isOpen && (
+              <div className="px-3 pb-2 border-t border-border">
+                {groups.map(([h, list]) => (
+                  <div key={h || cat.id} className="pt-2">
+                    {h && <p className="text-xs font-semibold uppercase tracking-wide text-text-secondary">{h}</p>}
+                    {list.map(row)}
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        );
+      })}
+      <p className="text-xs text-text-secondary">
+        Several of these are free for non-commercial use only (GEM, EM-DAT). Check each dataset&apos;s licence before reusing its data elsewhere.
+      </p>
+    </div>
+  );
+}
 
 const inputCls =
   "mt-1 w-full px-3 py-2 rounded-lg bg-surface border border-border text-sm text-text-primary focus:border-accent-500/60 outline-none";
@@ -137,10 +239,13 @@ export function SettingsTab({
   settings,
   onChange,
   onReplayTutorial,
+  lockReason = null,
 }: {
   settings: AppSettings;
   onChange: (s: AppSettings) => void;
   onReplayTutorial?: () => void;
+  /** Set while helpers are filling or analysing: the helper choice can't change then. */
+  lockReason?: string | null;
 }) {
   const [draft, setDraft] = useState<AppSettings>(settings);
   const [keyInput, setKeyInput] = useState("");
@@ -166,13 +271,33 @@ export function SettingsTab({
       meta: hasApiKey("meta"),
       azure: hasApiKey("azure"),
       perplexity: hasApiKey("perplexity"),
+      createai: hasApiKey("createai"),
     });
   };
   useEffect(() => { refreshKeyPresence(); setSearchKeyPresent(hasSearchKey()); }, []);
   useEffect(() => { setKeyInput(""); setTestMsg(null); }, [draft.provider]);
 
-  const provider = draft.provider;
+  const provider = draft.provider; // the helper being set up in Step 2
+  const picked = selectedProviders(draft);
   const isCloud = isCloudProvider(provider);
+
+  // Step 1 is a multi-select: each picked helper fills its own copy of the scorecard.
+  const [pickNote, setPickNote] = useState<string | null>(null);
+  const togglePick = (id: ProviderId) => {
+    if (lockReason) return;
+    setPickNote(null);
+    if (picked.includes(id)) {
+      if (picked.length === 1) {
+        setPickNote("Keep at least one AI helper selected.");
+        return;
+      }
+      const rest = picked.filter((p) => p !== id);
+      setDraft({ ...draft, providers: rest, provider: provider === id ? rest[0] : provider });
+    } else {
+      // Newly picked: open its setup below so the key can be added straight away.
+      setDraft({ ...draft, providers: ORDER.filter((p) => p === id || picked.includes(p)), provider: id });
+    }
+  };
   const isLocal = !isCloud;
 
   const modelField =
@@ -186,9 +311,29 @@ export function SettingsTab({
     : provider === "meta" ? "metaModel"
     : provider === "azure" ? "azureDeployment"
     : provider === "perplexity" ? "perplexityModel"
+    : provider === "createai" ? "createaiModel"
     : provider === "lmstudio" ? "lmstudioModel"
     : "ollamaModel";
   const currentModel = draft[modelField] as string;
+
+  // ASU CreateAI: the models this key can use, with prices (loaded on request).
+  const [caiModels, setCaiModels] = useState<CreateAIModel[] | null>(null);
+  const [caiLoading, setCaiLoading] = useState(false);
+  const [caiError, setCaiError] = useState<string | null>(null);
+  const loadCreateAIModels = async () => {
+    setCaiLoading(true);
+    setCaiError(null);
+    try {
+      const key = keyInput.trim() || (await getApiKey("createai")) || "";
+      if (!key) throw new Error("Add your CreateAI key below first.");
+      setCaiModels(await listCreateAIModels(key));
+    } catch (e) {
+      setCaiError(e instanceof Error ? e.message : String(e));
+    } finally {
+      setCaiLoading(false);
+    }
+  };
+  const presets = provider === "createai" && caiModels?.length ? caiModels.map((m) => m.id) : MODELS[provider];
   const setModel = (value: string) => setDraft({ ...draft, [modelField]: value } as AppSettings);
 
   const baseField = provider === "lmstudio" ? "lmstudioBaseUrl" : "ollamaBaseUrl";
@@ -262,7 +407,8 @@ export function SettingsTab({
         {[
           { id: "settings-provider", label: "1. Choose an AI" },
           { id: "settings-setup", label: "2. Add your key" },
-          { id: "settings-search", label: "3. Web search" },
+          { id: "settings-sources", label: "3. Data sources" },
+          { id: "settings-search", label: "4. Web search" },
           { id: "settings-data", label: "Find data" },
         ].map((x) => (
           <button
@@ -304,26 +450,38 @@ export function SettingsTab({
 
       <div id="settings-provider" className="scroll-mt-24">
         <h2 className="text-lg font-semibold text-text-primary mb-1">
-          <span className="text-accent-400">Step 1.</span> Choose your AI helper
+          <span className="text-accent-400">Step 1.</span> Choose your AI helpers
         </h2>
         <p className="text-sm text-text-secondary">
-          This is who writes the analysis. All AI calls run in your browser, your key is sent
-          only to the provider you pick, never to this site.
+          Pick one or more. Each helper fills out its own copy of the scorecard, in parallel, and
+          writes its own analysis, so you can compare them side by side. All AI calls run in your
+          browser, and each key is sent only to its own provider, never to this site.
         </p>
+        {lockReason && (
+          <p role="status" className="mt-2 flex items-start gap-2 text-sm rounded-lg border border-warn-500/30 bg-warn-500/10 text-warn-400 px-3 py-2">
+            <Loader2 size={15} className="animate-spin shrink-0 mt-0.5" />
+            <span>{lockReason}</span>
+          </p>
+        )}
+        {pickNote && !lockReason && <p className="mt-2 text-sm text-warn-400">{pickNote}</p>}
       </div>
 
       {/* Provider selection */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
         {ORDER.map((id) => {
           const meta = PROVIDER_META[id];
-          const active = provider === id;
+          const active = picked.includes(id);
           const cloud = isCloudProvider(id);
           const keyed = cloud ? keyPresence[id] : true;
           return (
             <button
               key={id}
-              onClick={() => setDraft({ ...draft, provider: id })}
-              className={`text-left p-4 rounded-xl border transition-all lift ${
+              role="checkbox"
+              aria-checked={active}
+              onClick={() => togglePick(id)}
+              disabled={!!lockReason}
+              title={lockReason || (active ? "Selected. Click to remove this helper." : "Click to add this helper.")}
+              className={`text-left p-4 rounded-xl border transition-all ${lockReason ? "opacity-50 cursor-not-allowed" : "lift"} ${
                 active
                   ? "border-accent-500/60 bg-accent-500/10"
                   : "border-border bg-surface-overlay/30 hover:border-primary-500/40"
@@ -332,7 +490,9 @@ export function SettingsTab({
               <div className="flex items-center gap-2 mb-1">
                 {meta.icon}
                 <span className="font-semibold text-text-primary">{meta.title}</span>
-                {active && <CheckCircle2 size={15} className="text-accent-400 ml-auto" />}
+                <span aria-hidden className={`ml-auto shrink-0 w-4 h-4 rounded border grid place-items-center ${active ? "bg-accent-500 border-accent-500 text-white" : "border-border"}`}>
+                  {active && <CheckCircle2 size={12} />}
+                </span>
               </div>
               <div className="flex flex-wrap gap-1 mb-1.5">
                 {BEST_FOR[id] && (
@@ -364,6 +524,18 @@ export function SettingsTab({
         <h2 className="text-lg font-semibold text-text-primary">
           <span className="text-accent-400">Step 2.</span> Set up {PROVIDER_META[provider].title}
         </h2>
+        {picked.length > 1 && (
+          <div className="flex flex-wrap items-center gap-1.5" role="tablist" aria-label="Helper to set up">
+            <span className="text-xs text-text-secondary mr-1">Set up:</span>
+            {picked.map((p) => (
+              <button key={p} type="button" role="tab" aria-selected={p === provider} onClick={() => setDraft({ ...draft, provider: p })}
+                className={`text-xs px-2.5 py-1 rounded-full border ${p === provider ? "border-accent-500/60 bg-accent-500/15 text-text-primary font-medium" : "border-border text-text-secondary hover:text-text-primary"}`}>
+                {PROVIDER_LABEL[p]}
+                {isCloudProvider(p) && !keyPresence[p] && <span className="text-warn-400"> · no key</span>}
+              </button>
+            ))}
+          </div>
+        )}
         {TRANSPORT[provider] === "proxy" && (
           <div className="text-xs bg-warn-500/10 border border-warn-500/30 text-warn-400 rounded-lg p-2.5">
             Heads up: this provider is reached through the app&apos;s proxy, which on the free hosting plan is cut off after 120 seconds. Fast models are fine, but slow or heavy &quot;reasoning&quot; models (and long Assistant runs) can time out. If you hit timeouts, Gemini and OpenRouter run straight from your browser with no such limit.
@@ -385,8 +557,31 @@ export function SettingsTab({
             placeholder={provider === "azure" ? "e.g. gpt-4o (the name you gave your deployment)" : MODELS[provider][0]}
           />
           <datalist id="model-presets">
-            {MODELS[provider].map((m) => <option key={m} value={m} />)}
+            {presets.map((m) => <option key={m} value={m} />)}
           </datalist>
+          {provider === "createai" && (
+            <span className="mt-1.5 block">
+              <button type="button" onClick={() => void loadCreateAIModels()} disabled={caiLoading}
+                className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1 rounded-lg border border-border text-text-primary hover:border-accent-500/50 disabled:opacity-50">
+                {caiLoading ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                {caiModels ? "Reload my models" : "Load my models"}
+              </button>
+              {caiError && <span className="ml-2 text-xs text-danger-400">{caiError}</span>}
+              {caiModels && (
+                <span className="mt-2 block max-h-56 overflow-y-auto rounded-lg border border-border divide-y divide-border">
+                  {caiModels.map((m) => (
+                    <button key={m.id} type="button" onClick={() => setModel(m.id)}
+                      className={`w-full flex items-center justify-between gap-3 px-2.5 py-1.5 text-left text-xs ${m.id === currentModel ? "bg-accent-500/15 text-text-primary" : "text-text-secondary hover:bg-surface-overlay/60"}`}>
+                      <span className="min-w-0 truncate"><span className="text-text-primary">{m.name}</span> <code className="font-mono">{m.id}</code></span>
+                      <span className="shrink-0 tabular-nums">
+                        {Number.isFinite(m.inPerM) ? `$${m.inPerM.toFixed(2)} in · $${m.outPerM.toFixed(2)} out per 1M tokens` : "price not listed"}
+                      </span>
+                    </button>
+                  ))}
+                </span>
+              )}
+            </span>
+          )}
           <span className="text-xs text-text-secondary">
             {provider === "lmstudio"
               ? "Should match a model loaded in LM Studio (it also uses the loaded model if unsure)."
@@ -431,7 +626,7 @@ export function SettingsTab({
             <span className="text-xs mt-1.5 block bg-warn-500/10 border border-warn-500/30 text-warn-400 rounded-lg p-2.5">
               Heads up: Gemini&apos;s free tier is tightly rate-limited, so the Assistant&apos;s
               &quot;Fill it out for me&quot; (which makes many calls in a row) often stops partway.
-              It&apos;s fine for the Dashboard analysis. For filling out a whole scorecard,
+              It&apos;s fine for the Analysis tab. For filling out a whole scorecard,
               OpenRouter or NVIDIA NIM (both free) tend to work more reliably.
             </span>
           )}
@@ -459,11 +654,12 @@ export function SettingsTab({
                   : provider === "zai" ? "your z.AI key"
                   : provider === "meta" ? "LLM|… (Meta API key)"
                   : provider === "azure" ? "your Azure OpenAI key (Key 1 or Key 2)"
+                  : provider === "createai" ? "your CreateAI project API key"
                   : "AIza…"
               }
             />
             <span className="text-xs text-text-secondary">
-              Encrypted in this browser (AES-GCM). Get a free key at{" "}
+              Encrypted in this browser (AES-GCM). {provider === "createai" ? "Request a project key at" : "Get a free key at"}{" "}
               {provider === "gemini" && (
                 <a className="text-primary-300 underline" href="https://aistudio.google.com/apikey" target="_blank" rel="noreferrer">aistudio.google.com/apikey</a>
               )}
@@ -494,6 +690,9 @@ export function SettingsTab({
               {provider === "perplexity" && (
                 <a className="text-primary-300 underline" href="https://www.perplexity.ai/account/api/keys" target="_blank" rel="noreferrer">perplexity.ai/account/api/keys</a>
               )}
+              {provider === "createai" && (
+                <a className="text-primary-300 underline" href="https://platform.aiml.asu.edu" target="_blank" rel="noreferrer">platform.aiml.asu.edu</a>
+              )}
               .
             </span>
             {provider === "nvidia" && (
@@ -510,6 +709,22 @@ export function SettingsTab({
             {provider === "perplexity" && (
               <span className="text-xs text-text-secondary block mt-1.5 bg-surface-overlay/40 border border-border rounded-lg p-2.5">
                 Perplexity&apos;s Sonar models search the web as they answer and return citations, which makes them a strong fit for the Assistant&apos;s research. Sign in at perplexity.ai, open Settings, go to the API tab, add a little credit, and generate a key (starts with <code className="font-mono">pplx-</code>). &quot;sonar&quot; is a good default; &quot;sonar-pro&quot; is deeper.
+              </span>
+            )}
+            {provider === "createai" && (
+              <span className="text-xs text-text-secondary block mt-1.5 bg-surface-overlay/40 border border-border rounded-lg p-2.5 space-y-1">
+                <span className="block">
+                  Use the key from your CreateAI project (platform.aiml.asu.edu → your project → Behaviors → Project API Keys).
+                  It only works here, under ASU CreateAI, not under Claude, Gemini or OpenAI, even for their models.
+                </span>
+                <span className="block">
+                  A project &quot;Service&quot; key may answer with the model set on your project&apos;s Basic tab whatever model you pick here;
+                  Test connection tells you which model actually answered. Every call counts against your project&apos;s monthly budget
+                  (shown by Test connection), and filling a whole scorecard makes many calls, so a cheap, fast model is a good choice.
+                </span>
+                <span className="block text-warn-400">
+                  ASU advises keeping Service keys out of apps that run in a browser. Here it&apos;s stored encrypted on this computer and sent only through this app&apos;s own server, which is fine for local development; don&apos;t enter it on a shared or public deployment.
+                </span>
               </span>
             )}
             {provider === "azure" && (
@@ -565,7 +780,7 @@ export function SettingsTab({
             ) : (
               <div className="text-xs text-text-secondary bg-surface-overlay/40 border border-border rounded-lg p-3 space-y-1">
                 <p className="text-text-primary font-medium">Ollama setup (one-time)</p>
-                <p>1. Pull a model: <code className="text-primary-300">ollama pull {draft.ollamaModel || "llama3.1:8b"}</code></p>
+                <p>1. Pull a model: <code className="text-primary-300">ollama pull {draft.ollamaModel || "qwen2.5:3b"}</code></p>
                 <p>2. Allow this site to reach it:</p>
                 <p><code className="text-primary-300">OLLAMA_ORIGINS=&quot;{origin}&quot; ollama serve</code></p>
                 <p className="text-warn-400">Note: on newer Chrome, a hosted (https) site reaching localhost may need the Local Network Access permission prompt to be allowed. LM Studio is often smoother.</p>
@@ -601,6 +816,47 @@ export function SettingsTab({
                   ? "Separate from the research step below: the model itself runs live web searches via its provider (Gemini, Claude, OpenRouter) to verify facts and cite sources, then still receives the research context. If a search-enabled run fails, it automatically retries without it."
                   : "Local models can't browse the web, this applies to cloud providers. Either way, every analysis gets the server-side research context (Wikipedia + web search) below."}
               </span>
+              {provider === "openrouter" && (
+                <span className="text-xs text-warn-400 block mt-1">
+                  {/:free$/.test(draft.openrouterModel)
+                    ? "OpenRouter charges for its web search even on free models, so it's skipped for this :free model to keep it free. The app's own free research still runs."
+                    : "OpenRouter charges about $0.007 per request for its web search, on top of the model's own price."}
+                </span>
+              )}
+            </span>
+          </button>
+        </div>
+
+        {/* Educated guesses (applies to every helper) */}
+        <div className="pt-1">
+          <button
+            type="button"
+            role="switch"
+            aria-checked={draft.allowGuesses}
+            onClick={() => setDraft({ ...draft, allowGuesses: !draft.allowGuesses })}
+            className="w-full flex items-start gap-3 text-left"
+          >
+            <span
+              className={`mt-0.5 shrink-0 w-9 h-5 rounded-full transition-colors relative ${
+                draft.allowGuesses ? "bg-warn-500" : "bg-surface-overlay border border-border"
+              }`}
+            >
+              <span
+                className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${
+                  draft.allowGuesses ? "left-[18px]" : "left-0.5"
+                }`}
+              />
+            </span>
+            <span>
+              <span className="text-sm text-text-primary flex items-center gap-1.5">
+                <Lightbulb size={14} className="text-warn-400" /> Let the AI make educated guesses
+              </span>
+              <span className="text-xs text-text-secondary block mt-0.5">
+                {draft.allowGuesses
+                  ? "On: when nothing supports an answer (no source, none of your data sources, and nothing the AI knows), the AI may make an educated guess. Those answers are labelled \"AI's educated guess\" on the Scorecard so you can check them."
+                  : "Off: every answer must rest on a source, one of your data sources, or the AI's general knowledge. When none of these supports an answer, it is left blank with the reason, instead of guessed."}
+                {" "}Applies to every AI helper.
+              </span>
             </span>
           </button>
         </div>
@@ -624,11 +880,17 @@ export function SettingsTab({
         </div>
       </div>
 
+      {/* Optional data sources for the AI to prefer */}
+      <DataSourcePicker
+        selected={draft.dataSources || []}
+        onChange={(ids) => setDraft({ ...draft, dataSources: ids })}
+      />
+
       {/* Web search (optional Tavily, keyless by default) */}
       <div id="settings-search" className="glass-card p-5 space-y-4 scroll-mt-24">
         <div>
           <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
-            <span className="text-accent-400">Step 3.</span> <Search size={17} className="text-accent-400" /> Web search <span className="text-xs font-normal text-text-secondary">(optional)</span>
+            <span className="text-accent-400">Step 4.</span> <Search size={17} className="text-accent-400" /> Web search <span className="text-xs font-normal text-text-secondary">(optional)</span>
           </h2>
           <p className="text-sm text-text-secondary mt-1">
             The tool always checks your city against Wikipedia for free, so the AI works from real

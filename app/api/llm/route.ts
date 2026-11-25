@@ -1,6 +1,8 @@
 /**
  * LLM proxy — a thin, streaming pass-through for OpenAI-compatible providers
- * that don't allow direct browser calls (OpenAI, xAI, z.AI, NVIDIA NIM, Meta).
+ * that don't allow direct browser calls (OpenAI, xAI, z.AI, NVIDIA NIM, Meta,
+ * Perplexity, and ASU CreateAI). For CreateAI it can also list the models a key
+ * may use (`list: true`).
  *
  * Why this exists: the app calls LLMs from the browser to avoid serverless
  * timeouts on long streams and to keep keys off any shared server. Providers
@@ -31,13 +33,20 @@ const BASE: Record<string, string> = {
   nvidia: "https://integrate.api.nvidia.com/v1",
   meta: "https://api.llama.com/compat/v1",
   perplexity: "https://api.perplexity.ai",
+  // ASU CreateAI's OpenAI-compatible API (https://docs.aiml.asu.edu/openai-compatible).
+  createai: "https://api-main.aiml.asu.edu/v1",
 };
+
+/** Providers whose model list the Settings tab may fetch through here. */
+const LISTABLE = new Set(["createai"]);
 
 export async function POST(req: NextRequest) {
   let payload: {
     provider?: string;
     apiKey?: string;
     body?: unknown;
+    /** List the models this key can use instead of generating text. */
+    list?: boolean;
     azure?: { endpoint?: string; deployment?: string; apiVersion?: string };
   };
   try {
@@ -47,6 +56,28 @@ export async function POST(req: NextRequest) {
       status: 400,
       headers: { "content-type": "application/json" },
     });
+  }
+
+  if (payload.list) {
+    const base = payload.provider && LISTABLE.has(payload.provider) ? BASE[payload.provider] : undefined;
+    if (!base || !payload.apiKey) {
+      return new Response(JSON.stringify({ error: { message: "Model lists are only available for ASU CreateAI, with a key." } }), {
+        status: 400,
+        headers: { "content-type": "application/json" },
+      });
+    }
+    try {
+      const upstream = await fetch(`${base}/models`, { headers: { authorization: `Bearer ${payload.apiKey}` }, signal: req.signal });
+      return new Response(upstream.body, {
+        status: upstream.status,
+        headers: { "content-type": upstream.headers.get("content-type") ?? "application/json", "cache-control": "no-store" },
+      });
+    } catch (err) {
+      return new Response(JSON.stringify({ error: { message: `Could not reach the provider: ${err instanceof Error ? err.message : String(err)}` } }), {
+        status: 502,
+        headers: { "content-type": "application/json" },
+      });
+    }
   }
 
   if (!payload.apiKey || !payload.body) {

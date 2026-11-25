@@ -251,6 +251,24 @@ async function tavily(key: string, query: string): Promise<{ answer?: string; re
   };
 }
 
+/**
+ * The county and state/province a place lies in. Small cities often have no
+ * plans of their own: hazard mitigation, emergency management and building
+ * codes are frequently county- or state-level, so research looks there too.
+ */
+async function jurisdictionsOf(query: string): Promise<{ county?: string; state?: string }> {
+  try {
+    const url = `https://nominatim.openstreetmap.org/search?${new URLSearchParams({ q: query, format: "json", addressdetails: "1", limit: "1" })}`;
+    const hits = await getJson<Array<{ address?: Record<string, string> }>>(url, { headers: { "user-agent": UA, "Accept-Language": "en" } }, 8000);
+    const a = hits?.[0]?.address || {};
+    const county = a.county || a.state_district || undefined;
+    const state = a.state || a.province || a.region || undefined;
+    return { county: county && county !== a.city ? county : undefined, state };
+  } catch {
+    return {};
+  }
+}
+
 export async function researchCity(
   city: string,
   country?: string,
@@ -272,6 +290,27 @@ export async function researchCity(
     `${query} climate resilience adaptation project initiative recent success`,
     `${query} current challenges infrastructure water waste problems`,
   ];
+  // Plans that cover the place at county / state level (labelled by level).
+  const jur = await jurisdictionsOf(query);
+  const levelTopics: Array<{ q: string; level: string }> = [];
+  if (jur.county) {
+    levelTopics.push({ q: `${jur.county}${jur.state ? `, ${jur.state}` : ""} multi-jurisdictional hazard mitigation plan`, level: `${jur.county} (county level)` });
+    levelTopics.push({ q: `${jur.county}${jur.state ? `, ${jur.state}` : ""} emergency management plan early warning`, level: `${jur.county} (county level)` });
+  }
+  if (jur.state) levelTopics.push({ q: `${jur.state} state hazard mitigation plan`, level: `${jur.state} (state level)` });
+  /** Web results for the county/state searches, labelled with their level. */
+  const addLevelResults = (results: Array<Array<{ title: string; url: string; content: string }> | null>) => {
+    const seen = new Set(passages.map((p) => p.url));
+    results.forEach((batch, i) => {
+      for (const r of (batch || []).slice(0, 2)) {
+        if (!r.url || seen.has(r.url)) continue;
+        seen.add(r.url);
+        passages.push({ source: `${levelTopics[i].level}: ${r.title}`, url: r.url, text: r.content || r.title });
+        sources.push({ name: `${levelTopics[i].level}: ${r.title}`, url: r.url });
+      }
+    });
+  };
+  const settledResults = <T,>(settled: PromiseSettledResult<T>[]) => settled.map((s) => (s.status === "fulfilled" ? s.value : null));
   const userKey = searchApiKey && searchApiKey.trim();
   const envKey = process.env.TAVILY_API_KEY;
   const searxUrl = process.env.SEARXNG_URL;
@@ -317,6 +356,8 @@ export async function researchCity(
         passages.push({ source: r.title, url: r.url, text: r.content || r.title });
         sources.push({ name: r.title, url: r.url });
       }
+      const lvl = await Promise.allSettled(levelTopics.map((t) => tavily(key, t.q)));
+      addLevelResults(settledResults(lvl).map((r) => r?.results ?? null));
     } else if (method === "SearXNG") {
       const settled = await Promise.allSettled(topics.slice(0, 3).map((q) => searxng(searxUrl!, q)));
       const web = merge(
@@ -326,6 +367,8 @@ export async function researchCity(
         passages.push({ source: r.title, url: r.url, text: r.content || r.title });
         sources.push({ name: r.title, url: r.url });
       }
+      const lvl = await Promise.allSettled(levelTopics.map((t) => searxng(searxUrl!, t.q)));
+      addLevelResults(settledResults(lvl));
     } else {
       // ── Keyless core: Wikipedia (+ Wikidata) + DuckDuckGo ──
       const titles = await wikiSearchTitles(query);
@@ -353,6 +396,9 @@ export async function researchCity(
         passages.push({ source: r.title, url: r.url, text: r.content || r.title });
         sources.push({ name: r.title, url: r.url });
       }
+      // Keyless: just the first county/state search, to stay light on DuckDuckGo.
+      const lvl = await Promise.allSettled(levelTopics.slice(0, 1).map((t) => duckduckgo(t.q)));
+      addLevelResults(settledResults(lvl));
     }
   } catch {
     /* best-effort */
@@ -365,7 +411,10 @@ export async function researchCity(
   }
 
   if (!answer && passages.length === 0 && facts.length === 0) return null;
-  return { title, summary, answer, passages, facts, sources, webSearchMethod: method };
+  return {
+    title, summary, answer, passages, facts, sources, webSearchMethod: method,
+    ...(jur.county || jur.state ? { jurisdictions: jur } : {}),
+  };
 }
 
 /**

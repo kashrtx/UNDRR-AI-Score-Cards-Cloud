@@ -7,6 +7,8 @@
 
 import { useState, type ReactNode } from "react";
 import { Info } from "lucide-react";
+import { citedSources } from "@/lib/data/catalog";
+import { DataSourceChips } from "./DataSourceChips";
 
 interface ProvenanceProps {
   sourceRefs: string[];
@@ -17,9 +19,12 @@ export function ProvenanceBadge({ sourceRefs }: { sourceRefs: string[] }) {
   const [open, setOpen] = useState(false);
 
   if (!sourceRefs.length) return null;
+  // Refs naming a dataset from the Settings catalogue get a linked chip too.
+  const datasets = citedSources(sourceRefs);
 
   return (
-    <span className="relative inline-flex items-center">
+    <span className="relative inline-flex flex-wrap items-center justify-end gap-1">
+      <DataSourceChips sources={datasets} size="xs" />
       <button
         onClick={() => setOpen(!open)}
         onMouseEnter={() => setOpen(true)}

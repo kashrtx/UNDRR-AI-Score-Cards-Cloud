@@ -9,6 +9,8 @@ import { useState } from "react";
 import { ChevronDown, ChevronRight, Target, Clock, Calendar } from "lucide-react";
 import type { Action, Phase } from "@/lib/types";
 import { ProvenanceBadge } from "./Provenance";
+import { placeActions, quadColor } from "./ImpactDifficultyMatrix";
+import { useTheme } from "@/lib/theme";
 
 interface ActionPlanProps {
   actions: Action[];
@@ -43,7 +45,7 @@ function ImpactBar({ value, max = 5 }: { value: number; max?: number }) {
   );
 }
 
-function ActionRow({ action }: { action: Action }) {
+function ActionRow({ action, color }: { action: Action; color?: string }) {
   const [expanded, setExpanded] = useState(false);
   const Icon = expanded ? ChevronDown : ChevronRight;
 
@@ -56,7 +58,8 @@ function ActionRow({ action }: { action: Action }) {
         <td className="py-3 px-3">
           <Icon size={14} className="text-text-secondary" />
         </td>
-        <td className="py-3 px-2 font-mono text-xs text-primary-300">
+        <td className="py-3 px-2 font-mono text-xs font-bold" style={{ color }}
+          title="Same colour as this action's dot on the Impact vs Difficulty chart">
           #{action.n}
         </td>
         <td className="py-3 px-2">
@@ -100,6 +103,10 @@ function ActionRow({ action }: { action: Action }) {
 
 export function ActionPlan({ actions }: ActionPlanProps) {
   const [activePhase, setActivePhase] = useState<Phase | "all">("all");
+  const { theme } = useTheme();
+  // Each action's number takes its dot's colour on the Impact vs Difficulty chart.
+  const placed = placeActions(actions);
+  const colorOf = new Map(actions.map((a, i) => [a.n, quadColor(placed[i].q, theme === "dark")]));
 
   const filtered =
     activePhase === "all"
@@ -160,7 +167,7 @@ export function ActionPlan({ actions }: ActionPlanProps) {
           </thead>
           <tbody>
             {filtered.map((action) => (
-              <ActionRow key={action.n} action={action} />
+              <ActionRow key={action.n} action={action} color={colorOf.get(action.n)} />
             ))}
           </tbody>
         </table>

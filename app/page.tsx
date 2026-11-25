@@ -13,7 +13,7 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import {
   Play, Loader2, AlertTriangle, MapPin, Users, Calendar, Zap,
   CheckCircle2, XCircle, Info, Settings as SettingsIcon, LayoutDashboard, RotateCcw,
-  Download, FileJson, Eraser, Bot, HelpCircle, Lightbulb, Compass, ExternalLink, Sparkles, ClipboardCheck,
+  Download, FileJson, Eraser, Bot, HelpCircle, Lightbulb, Compass, ExternalLink, Sparkles, ClipboardCheck, Library, ArrowLeft,
 } from "lucide-react";
 
 import { Logo } from "@/components/Logo";
@@ -23,6 +23,7 @@ import { ImpactDifficultyMatrix } from "@/components/ImpactDifficultyMatrix";
 import { ActionPlan } from "@/components/ActionPlan";
 import { ScoreProjection } from "@/components/ScoreProjection";
 import { ProvenanceBadge } from "@/components/Provenance";
+import { AnalysisSourceUse } from "@/components/DataSourceChips";
 import { StatusBar } from "@/components/StatusBar";
 import { GettingStarted } from "@/components/GettingStarted";
 import { ModelSuggestion } from "@/components/ModelSuggestion";
@@ -32,7 +33,12 @@ import { renderInline } from "@/lib/ui/markdown";
 import { AnalysisProgress } from "@/components/AnalysisProgress";
 import { DataSourcesPanel } from "@/components/DataSourcesPanel";
 import { SettingsTab } from "@/components/SettingsTab";
-import { AssistantTab } from "@/components/AssistantTab";
+import { AssistantTab, type LaneSummary } from "@/components/AssistantTab";
+import { AnalysisLibrary } from "@/components/AnalysisLibrary";
+import {
+  loadLibrary, storeLibrary, addToLibrary, otherShapes, newLibraryId,
+  type SavedAnalysis, type SavedShape,
+} from "@/lib/analysis/library";
 import { LiveStream } from "@/components/LiveStream";
 import { Onboarding } from "@/components/Onboarding";
 import { SystemStatus } from "@/components/SystemStatus";
@@ -42,6 +48,7 @@ import { runAnalysis } from "@/lib/analysis/analyze";
 import { downloadReport, downloadJson, type ExportMeta, type ExportPayload } from "@/lib/export/report";
 import {
   loadSettings, saveSettings as persistSettings, hasApiKey, isCloudProvider, hasSearchKey, modelForSettings,
+  selectedProviders, settingsFor, providerIsReady, PROVIDER_LABEL,
   type AppSettings, type ProviderId,
 } from "@/lib/settings/store";
 import type { NormalizedScorecard } from "@/lib/scorecard/schema";
@@ -55,18 +62,11 @@ const SCORECARD_KEY = "undrr.scorecard";
 const SCORECARD_NAME_KEY = "undrr.scorecard.name";
 const ANALYSIS_KEY = "undrr.analysis";
 const REFINE_KEY = "undrr.refinefacts";
+// Older single-analysis keys above are read once and moved here, per scorecard.
+const ANALYSES_PREFIX = "undrr.analyses.";
 const ONBOARDED_KEY = "undrr.onboarded.v1";
 const TIPS_KEY = "undrr.tips.dismissed";
 
-const PROVIDER_LABEL: Record<ProviderId, string> = {
-  claude: "Claude", gemini: "Gemini", openrouter: "OpenRouter",
-  openai: "OpenAI", xai: "xAI Grok", zai: "z.AI GLM", nvidia: "NVIDIA NIM", meta: "Meta Llama", azure: "Microsoft Azure", perplexity: "Perplexity",
-  ollama: "Ollama (local)", lmstudio: "LM Studio (local)",
-};
-
-function computeReady(s: AppSettings): boolean {
-  return isCloudProvider(s.provider) ? hasApiKey(s.provider) : true;
-}
 function modelOf(s: AppSettings): string {
   return modelForSettings(s);
 }
@@ -89,52 +89,218 @@ function ConfidenceBadge({ level }: { level?: "high" | "medium" | "low" }) {
   );
 }
 
+/** One AI helper's analysis on the Analysis tab. */
+interface LaneAnalysis {
+  scorecard: NormalizedScorecard | null;
+  fileName: string | null;
+  analysis: AnalysisResult | null;
+  meta: ExportMeta | null;
+  dataReport: DataReport | null;
+  state: AppState;
+  progress: ProgressEvent | null;
+  narration: string;
+  error: string | null;
+  /** Local facts the user shared with the advisor, folded into re-runs. */
+  refineFacts: string[];
+  /** The place it was made for (an analysis of another place is stale) and whose scorecard it read. */
+  placeKey: string | null;
+  source: ProviderId | null;
+  /** The city (whatever its outline), how it was shown, and its outline: kept with the saved analysis. */
+  cityKey: string | null;
+  place: string | null;
+  shape: SavedShape | null;
+}
+const blankLane = (): LaneAnalysis => ({
+  scorecard: null, fileName: null, analysis: null, meta: null, dataReport: null,
+  state: "empty", progress: null, narration: "", error: null, refineFacts: [], placeKey: null, source: null,
+  cityKey: null, place: null, shape: null,
+});
+
+/** What's kept per helper in the browser (the finished parts, not a run in progress). */
+interface SavedLane {
+  scorecard: NormalizedScorecard;
+  fileName: string | null;
+  result: AnalysisResult | null;
+  dataReport: DataReport | null;
+  meta: ExportMeta | null;
+  refineFacts?: string[];
+  placeKey?: string | null;
+  source?: ProviderId | null;
+  cityKey?: string | null;
+  place?: string | null;
+  shape?: SavedShape | null;
+}
+
+/** The analyses belong to the scorecard (Assistant session) they were made for. */
+const analysesKey = (sessionId: string) => `${ANALYSES_PREFIX}${sessionId}`;
+
+function loadAnalyses(sessionId: string, primary: ProviderId): Record<string, LaneAnalysis> {
+  const out: Record<string, LaneAnalysis> = {};
+  try {
+    let saved = JSON.parse(localStorage.getItem(analysesKey(sessionId)) || "null") as Record<string, SavedLane> | null;
+    // Once: carry the single analysis saved before helpers had their own tabs
+    // over to the primary helper of the scorecard that's open.
+    const oldSc = localStorage.getItem(SCORECARD_KEY);
+    if (!saved && oldSc) {
+      const oldA = JSON.parse(localStorage.getItem(ANALYSIS_KEY) || "null") as { result: AnalysisResult; dataReport: DataReport | null; meta: ExportMeta } | null;
+      saved = {
+        [primary]: {
+          scorecard: JSON.parse(oldSc), fileName: localStorage.getItem(SCORECARD_NAME_KEY),
+          result: oldA?.result ?? null, dataReport: oldA?.dataReport ?? null, meta: oldA?.meta ?? null,
+          refineFacts: JSON.parse(localStorage.getItem(REFINE_KEY) || "[]"),
+        },
+      };
+      localStorage.setItem(analysesKey(sessionId), JSON.stringify(saved));
+      [SCORECARD_KEY, SCORECARD_NAME_KEY, ANALYSIS_KEY, REFINE_KEY].forEach((k) => localStorage.removeItem(k));
+    }
+    for (const [p, l] of Object.entries(saved || {})) {
+      if (!l?.scorecard) continue;
+      out[p] = {
+        ...blankLane(),
+        scorecard: l.scorecard, fileName: l.fileName, analysis: l.result, dataReport: l.dataReport, meta: l.meta,
+        refineFacts: Array.isArray(l.refineFacts) ? l.refineFacts : [],
+        placeKey: l.placeKey ?? null,
+        source: l.source ?? (p as ProviderId),
+        cityKey: l.cityKey ?? null,
+        place: l.place ?? null,
+        shape: l.shape ?? null,
+        state: l.result ? "results" : "ready",
+      };
+    }
+  } catch {
+    /* ignore corrupt cache */
+  }
+  return out;
+}
+
+function saveAnalyses(sessionId: string, all: Record<string, LaneAnalysis>) {
+  const out: Record<string, SavedLane> = {};
+  for (const [p, l] of Object.entries(all)) {
+    if (!l.scorecard) continue;
+    out[p] = { scorecard: l.scorecard, fileName: l.fileName, result: l.analysis, dataReport: l.dataReport, meta: l.meta, refineFacts: l.refineFacts, placeKey: l.placeKey, source: l.source, cityKey: l.cityKey, place: l.place, shape: l.shape };
+  }
+  try {
+    if (Object.keys(out).length) localStorage.setItem(analysesKey(sessionId), JSON.stringify(out));
+    else localStorage.removeItem(analysesKey(sessionId));
+  } catch {
+    /* quota, non-fatal */
+  }
+}
+
+/** Where an analysis is aimed, from the Assistant's current place. */
+const targetOf = (s: LaneSummary | null): Pick<LaneAnalysis, "placeKey" | "cityKey" | "place" | "shape"> => ({
+  placeKey: s?.placeKey ?? null,
+  cityKey: s?.cityKey ?? null,
+  place: s?.place ?? null,
+  shape: s?.shape ?? null,
+});
+
+const listLabels = (ps: ProviderId[]) => {
+  const names = ps.map((p) => PROVIDER_LABEL[p]);
+  return names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+};
+
 export default function Page() {
   const [tab, setTab] = useState<Tab>("assistant"); // start where scorecards are built or uploaded
   const [settings, setSettings] = useState<AppSettings | null>(null);
-  const [providerReady, setProviderReady] = useState(false);
   const [tavilyActive, setTavilyActive] = useState(false);
 
-  const [scorecard, setScorecard] = useState<NormalizedScorecard | null>(null);
-  const [scFileName, setScFileName] = useState<string | null>(null);
-  const [analysis, setAnalysis] = useState<AnalysisResult | null>(null);
-  const [analysisMeta, setAnalysisMeta] = useState<ExportMeta | null>(null);
-  const [state, setState] = useState<AppState>("empty");
+  // Each helper's analysis of its own scorecard, for the scorecard (session) that's open.
+  const [sessionId, setSessionId] = useState("");
+  const sessionIdRef = useRef("");
+  const [analyses, setAnalyses] = useState<Record<string, LaneAnalysis>>({});
+  const analysesRef = useRef(analyses);
+  analysesRef.current = analyses;
+  const [activeLane, setActiveLane] = useState<ProviderId>("gemini");
+  // The Assistant's current place and finished scorecards (what the Analysis tab offers).
+  const [summary, setSummary] = useState<LaneSummary | null>(null);
+  const summaryRef = useRef<LaneSummary | null>(null);
+  summaryRef.current = summary;
+  const scorecardSource = useRef<((p: ProviderId) => NormalizedScorecard | null) | null>(null);
 
-  const [progress, setProgress] = useState<ProgressEvent | null>(null);
-  const [dataReport, setDataReport] = useState<DataReport | null>(null);
-  const [narration, setNarration] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  // ── Saved analyses library ──────────────────────────
+  const [library, setLibrary] = useState<SavedAnalysis[]>([]);
+  const [libraryOpen, setLibraryOpen] = useState(false);
+  const [libraryError, setLibraryError] = useState<string | null>(null);
+  // A saved analysis being looked at (read-only) instead of the live one.
+  const [viewing, setViewing] = useState<SavedAnalysis | null>(null);
+  // Analyses of a city that was saved before with another outline, waiting for "replace or keep both".
+  const [pendingSaves, setPendingSaves] = useState<Array<{ entry: SavedAnalysis; others: SavedAnalysis[] }>>([]);
+  // The answer for a city + outline applies to every helper's analysis of it.
+  const saveDecisions = useRef<Map<string, "replace" | "keep">>(new Map());
+  useEffect(() => { setLibrary(loadLibrary()); }, []);
 
-  // Pending upload awaiting confirmation (because it would clear results)
-  const [pendingUpload, setPendingUpload] = useState<{ sc: NormalizedScorecard; name: string } | null>(null);
-  const [confirmRemove, setConfirmRemove] = useState(false);
+  const writeLibrary = useCallback((entry: SavedAnalysis, replaceOtherShapes: boolean) => {
+    const next = addToLibrary(loadLibrary(), entry, replaceOtherShapes);
+    if (storeLibrary(next)) {
+      setLibrary(next);
+      setLibraryError(null);
+    } else {
+      setLibraryError("This analysis couldn't be saved to the library because the browser's storage is full. Download the report to keep it, or delete some saved analyses.");
+    }
+  }, []);
+
+  /** File a finished analysis, asking first if it would sit beside the same city with another outline. */
+  const saveToLibrary = useCallback((entry: SavedAnalysis) => {
+    const decision = saveDecisions.current.get(`${entry.cityKey}::${entry.placeKey}`);
+    const others = otherShapes(loadLibrary(), entry);
+    if (others.length && !decision) setPendingSaves((q) => [...q, { entry, others }]);
+    else writeLibrary(entry, decision === "replace");
+  }, [writeLibrary]);
+
+  const resolvePendingSave = useCallback((choice: "replace" | "keep") => {
+    setPendingSaves((q) => {
+      if (!q.length) return q;
+      const key = `${q[0].entry.cityKey}::${q[0].entry.placeKey}`;
+      saveDecisions.current.set(key, choice);
+      // Everything queued for the same city and outline follows the same answer.
+      const now = q.filter((x) => `${x.entry.cityKey}::${x.entry.placeKey}` === key);
+      for (const x of now) writeLibrary(x.entry, choice === "replace");
+      return q.filter((x) => !now.includes(x));
+    });
+  }, [writeLibrary]);
+
+  const deleteFromLibrary = useCallback((e: SavedAnalysis) => {
+    const next = loadLibrary().filter((x) => x.id !== e.id);
+    storeLibrary(next);
+    setLibrary(next);
+    setViewing((v) => (v?.id === e.id ? null : v));
+  }, []);
+
+  // Pending load awaiting confirmation (because it would replace that helper's results)
+  const [pendingUpload, setPendingUpload] = useState<{ p: ProviderId; sc: NormalizedScorecard; name: string; source: ProviderId } | null>(null);
   const [confirmClear, setConfirmClear] = useState(false);
   const [showTour, setShowTour] = useState(false);
   const [refineOpen, setRefineOpen] = useState(false);
-  const [assistantRunning, setAssistantRunning] = useState(false);
+  const [assistantRunning, setAssistantRunning] = useState<ProviderId[]>([]);
   const [advisorBusy, setAdvisorBusy] = useState(false);
-  // Local facts the user shared with the advisor (pasted data / notes), folded into
-  // re-runs. Kept as a list so we can count them, show them, and persist them.
-  const [refineFacts, setRefineFacts] = useState<string[]>([]);
-  const refineFactsRef = useRef<string[]>([]);
-  useEffect(() => {
-    refineFactsRef.current = refineFacts;
-    try {
-      if (refineFacts.length) localStorage.setItem(REFINE_KEY, JSON.stringify(refineFacts));
-      else localStorage.removeItem(REFINE_KEY);
-    } catch { /* ignore */ }
-  }, [refineFacts]);
-  const refineContext = refineFacts.join("\n\n---\n\n");
   const [tipsDismissed, setTipsDismissed] = useState(true); // assume seen until mount says otherwise
 
-  const abortRef = useRef<AbortController | null>(null);
+  const abortRefs = useRef<Partial<Record<ProviderId, AbortController>>>({});
+
+  const selected = settings ? selectedProviders(settings) : [];
+  const lane: ProviderId = selected.includes(activeLane) ? activeLane : selected[0] ?? "gemini";
+  const live = analyses[lane] ?? blankLane();
+  // Looking at a saved analysis shows it in place of the live one (read-only).
+  const cur: LaneAnalysis = viewing
+    ? { ...blankLane(), scorecard: viewing.scorecard, analysis: viewing.result, dataReport: viewing.dataReport, meta: viewing.meta, state: "results", source: viewing.source }
+    : live;
+  // The selected helper's analysis, under the names the results view uses.
+  const { scorecard, fileName: scFileName, analysis, meta: analysisMeta, dataReport, state, progress, narration, error, refineFacts } = cur;
+  const refineContext = refineFacts.join("\n\n---\n\n");
+  const laneSettings = settings ? settingsFor(settings, lane) : null;
+  const providerReady = providerIsReady(lane);
+  const analyzingLanes = selected.filter((p) => analyses[p]?.state === "analyzing");
+
+  const patchLane = useCallback((p: ProviderId, patch: Partial<LaneAnalysis>) => {
+    setAnalyses((all) => ({ ...all, [p]: { ...(all[p] ?? blankLane()), ...patch } }));
+  }, []);
 
   // ── Load persisted state on mount ─────────────────────────
   useEffect(() => {
     const s = loadSettings();
     setSettings(s);
-    setProviderReady(computeReady(s));
+    setActiveLane(s.provider);
     setTavilyActive(!!s.useTavily && hasSearchKey());
     try {
       const onboarded = !!localStorage.getItem(ONBOARDED_KEY);
@@ -143,43 +309,27 @@ export default function Page() {
     } catch {
       /* ignore */
     }
-    try {
-      const raw = localStorage.getItem(SCORECARD_KEY);
-      if (raw) {
-        const sc = JSON.parse(raw) as NormalizedScorecard;
-        setScorecard(sc);
-        setScFileName(localStorage.getItem(SCORECARD_NAME_KEY));
-        // Restore a saved analysis if present.
-        const rawA = localStorage.getItem(ANALYSIS_KEY);
-        if (rawA) {
-          const saved = JSON.parse(rawA) as {
-            result: AnalysisResult; dataReport: DataReport | null; meta: ExportMeta;
-          };
-          if (saved?.result) {
-            setAnalysis(saved.result);
-            setDataReport(saved.dataReport ?? null);
-            setAnalysisMeta(saved.meta ?? null);
-            setState("results");
-          } else {
-            setState("ready");
-          }
-        } else {
-          setState("ready");
-        }
-        // Restore any local facts the user added for this city.
-        try {
-          const rawF = localStorage.getItem(REFINE_KEY);
-          if (rawF) {
-            const facts = JSON.parse(rawF);
-            if (Array.isArray(facts)) { setRefineFacts(facts); refineFactsRef.current = facts; }
-          }
-        } catch { /* ignore */ }
-      }
-    } catch {
-      /* ignore corrupt cache */
-    }
-    return () => abortRef.current?.abort();
+    return () => { for (const c of Object.values(abortRefs.current)) c?.abort(); };
   }, []);
+
+  // The Assistant picked a scorecard: show that scorecard's analyses (and stop
+  // any still running for the previous one).
+  const handleSessionChange = useCallback((id: string) => {
+    if (id === sessionIdRef.current || !settings) return;
+    for (const c of Object.values(abortRefs.current)) c?.abort();
+    abortRefs.current = {};
+    sessionIdRef.current = id;
+    setSessionId(id);
+    setAnalyses(loadAnalyses(id, selectedProviders(settings)[0]));
+    setPendingUpload(null);
+    setRefineOpen(false);
+    setViewing(null);
+  }, [settings]);
+
+  // Keep the finished parts of every helper's analysis for this scorecard.
+  useEffect(() => {
+    if (sessionId && sessionId === sessionIdRef.current) saveAnalyses(sessionId, analyses);
+  }, [analyses, sessionId]);
 
   // Recharts' ResponsiveContainer occasionally measures 0/stale size on first
   // paint (especially right after a tab switch or when results first appear),
@@ -197,76 +347,53 @@ export default function Page() {
       })
     );
     return () => cancelAnimationFrame(id);
-  }, [tab, state, analysis]);
+  }, [tab, state, analysis, lane]);
 
   const handleSettingsChange = useCallback((s: AppSettings) => {
     persistSettings(s);
     setSettings(s);
-    setProviderReady(computeReady(s));
     setTavilyActive(!!s.useTavily && hasSearchKey());
   }, []);
 
-  // One-tap provider switch used by the suggestion bars. If there's no key for
-  // the target provider yet, send them to Settings to add one.
+  // One-tap provider switch used by the suggestion bars: use just that helper.
+  // If there's no key for it yet, send them to Settings to add one.
   const useProvider = useCallback((p: AppSettings["provider"]) => {
-    setSettings((cur) => {
-      if (!cur) return cur;
-      const next = { ...cur, provider: p };
+    setSettings((s) => {
+      if (!s) return s;
+      const next = { ...s, provider: p, providers: [p] };
       persistSettings(next);
-      setProviderReady(computeReady(next));
       return next;
     });
+    setActiveLane(p);
     if (isCloudProvider(p) && !hasApiKey(p)) setTab("settings");
   }, []);
 
-  // Commit a scorecard (replaces any current one + clears results).
-  // Wipe both the shared facts and the saved advisor conversation. Used when the
-  // analysis is cleared or a different scorecard is loaded, so nothing stale
-  // carries over to a new city.
+  // Wipe the saved advisor conversations, so nothing stale carries over.
   const clearAdvisorState = useCallback(() => {
-    setRefineFacts([]);
-    try {
-      localStorage.removeItem(REFINE_KEY);
-      localStorage.removeItem("undrr.advisor.threads");
-    } catch { /* ignore */ }
+    try { localStorage.removeItem("undrr.advisor.threads"); } catch { /* ignore */ }
   }, []);
 
-  const commitUpload = useCallback((sc: NormalizedScorecard, name: string) => {
-    abortRef.current?.abort(); // stop any analysis in progress before swapping
-    setScorecard(sc);
-    setScFileName(name);
-    setAnalysis(null);
-    setAnalysisMeta(null);
-    setDataReport(null);
-    setNarration("");
-    setError(null);
-    clearAdvisorState(); // fresh scorecard, drop prior advisor data and chat
-    setState("ready");
-    try {
-      localStorage.setItem(SCORECARD_KEY, JSON.stringify(sc));
-      localStorage.setItem(SCORECARD_NAME_KEY, name);
-      localStorage.removeItem(ANALYSIS_KEY);
-    } catch {
-      /* quota, non-fatal */
-    }
-  }, [clearAdvisorState]);
+  // Give a helper a new scorecard to analyze (replaces its results).
+  const commitUpload = useCallback((p: ProviderId, sc: NormalizedScorecard, name: string, source: ProviderId) => {
+    abortRefs.current[p]?.abort(); // stop that helper's analysis in progress before swapping
+    patchLane(p, { ...blankLane(), scorecard: sc, fileName: name, state: "ready", source, ...targetOf(summaryRef.current) });
+    clearAdvisorState();
+  }, [patchLane, clearAdvisorState]);
 
-  // Called by the Assistant tab: load its draft as the active scorecard, then
-  // run the analysis as soon as it's committed (see the effect after handleAnalyze).
-  const autoRunRef = useRef(false);
+  // Called by a helper's Scorecard tab: load its draft on its Analysis sub-tab,
+  // then run the analysis as soon as it's committed (see the effect after handleAnalyze).
+  const autoRunRef = useRef<ProviderId | null>(null);
   const handleLoadFromAssistant = useCallback(
-    (sc: NormalizedScorecard) => {
-      const name = `${sc.city.name} (assistant draft)`;
-      autoRunRef.current = true;
-      if (scorecard || analysis || state === "analyzing") {
-        setPendingUpload({ sc, name });
-        setTab("dashboard"); // surface the confirmation on the dashboard
-      } else {
-        commitUpload(sc, name);
-        setTab("dashboard");
-      }
+    (p: ProviderId, sc: NormalizedScorecard) => {
+      const name = `${sc.city.name} (${PROVIDER_LABEL[p]} draft)`;
+      const l = analysesRef.current[p];
+      autoRunRef.current = p;
+      setActiveLane(p);
+      if (l?.analysis || l?.state === "analyzing") setPendingUpload({ p, sc, name, source: p });
+      else commitUpload(p, sc, name, p);
+      setTab("dashboard");
     },
-    [scorecard, analysis, state, commitUpload]
+    [commitUpload]
   );
 
   const closeTour = useCallback(() => {
@@ -293,9 +420,9 @@ export default function Page() {
     if (!scorecard || !analysis) return null;
     const meta: ExportMeta =
       analysisMeta ??
-      { provider: settings ? PROVIDER_LABEL[settings.provider] : "AI", model: settings ? modelOf(settings) : "", generatedAt: new Date().toISOString() };
+      { provider: PROVIDER_LABEL[lane], model: laneSettings ? modelOf(laneSettings) : "", generatedAt: new Date().toISOString() };
     return { scorecard, analysis, dataReport, meta };
-  }, [scorecard, analysis, dataReport, analysisMeta, settings]);
+  }, [scorecard, analysis, dataReport, analysisMeta, lane, laneSettings]);
 
   const handleExportReport = useCallback(() => {
     const p = buildPayload();
@@ -307,136 +434,163 @@ export default function Page() {
   }, [buildPayload]);
 
   const handleClearResults = useCallback(() => {
-    setAnalysis(null);
-    setAnalysisMeta(null);
-    setDataReport(null);
-    setNarration("");
+    patchLane(lane, { analysis: null, meta: null, dataReport: null, narration: "", refineFacts: [], state: scorecard ? "ready" : "empty" });
     clearAdvisorState();
-    setState(scorecard ? "ready" : "empty");
-    try {
-      localStorage.removeItem(ANALYSIS_KEY);
-    } catch {
-      /* ignore */
-    }
-  }, [scorecard, clearAdvisorState]);
+  }, [lane, scorecard, patchLane, clearAdvisorState]);
 
-  const handleRemove = useCallback(() => {
-    abortRef.current?.abort();
-    setScorecard(null);
-    setScFileName(null);
-    setAnalysis(null);
-    setAnalysisMeta(null);
-    setProgress(null);
-    setDataReport(null);
-    setNarration("");
-    setError(null);
-    setState("empty");
-    try {
-      localStorage.removeItem(SCORECARD_KEY);
-      localStorage.removeItem(SCORECARD_NAME_KEY);
-      localStorage.removeItem(ANALYSIS_KEY);
-    } catch {
-      /* ignore */
-    }
+  // "Clear all Information" on the Assistant: this scorecard's analyses go too.
+  const handleClearAll = useCallback(() => {
+    for (const c of Object.values(abortRefs.current)) c?.abort();
+    abortRefs.current = {};
+    setAnalyses({});
+    setPendingUpload(null);
+    setRefineOpen(false);
+    clearAdvisorState();
+  }, [clearAdvisorState]);
+  const handleSessionDeleted = useCallback((id: string) => {
+    try { localStorage.removeItem(analysesKey(id)); } catch { /* ignore */ }
   }, []);
 
-  // Removing while results exist should warn first (and offer a download).
-  const requestRemove = useCallback(() => {
-    if (analysis) setConfirmRemove(true);
-    else handleRemove();
-  }, [analysis, handleRemove]);
+  // The dropdown on the Analysis tab: analyze another helper's finished scorecard.
+  const selectSource = useCallback((src: ProviderId) => {
+    const sc = scorecardSource.current?.(src);
+    if (!sc) return;
+    const name = `${sc.city.name} (${PROVIDER_LABEL[src]} scorecard)`;
+    if (analysesRef.current[lane]?.analysis || analysesRef.current[lane]?.state === "analyzing") setPendingUpload({ p: lane, sc, name, source: src });
+    else commitUpload(lane, sc, name, src);
+  }, [lane, commitUpload]);
 
-  const handleAnalyze = useCallback(async () => {
-    if (!scorecard || !settings) return;
-    if (state === "analyzing") return; // don't stack a second run on a live one
-    if (assistantRunning) return; // the Assistant is mid-task; don't run both at once
+  // Opening the Analysis tab shows the Assistant's current place: analyses made
+  // for another place are cleared, and each helper whose scorecard is finished
+  // has it loaded, ready to analyze.
+  useEffect(() => {
+    if (tab !== "dashboard" || !summary || !settings) return;
+    const fresh: Partial<Record<ProviderId, LaneAnalysis>> = {};
+    for (const p of selectedProviders(settings)) {
+      const l = analysesRef.current[p];
+      const stale = !!l && l.placeKey !== summary.placeKey;
+      if (stale) abortRefs.current[p]?.abort();
+      if ((!l?.scorecard || stale) && summary.complete.includes(p)) {
+        const sc = scorecardSource.current?.(p);
+        if (sc) {
+          fresh[p] = { ...blankLane(), scorecard: sc, fileName: `${sc.city.name} (${PROVIDER_LABEL[p]} scorecard)`, state: "ready", source: p, ...targetOf(summary) };
+          continue;
+        }
+      }
+      if (stale) fresh[p] = blankLane();
+    }
+    if (Object.keys(fresh).length) setAnalyses((all) => ({ ...all, ...fresh }));
+  }, [tab, summary, settings]);
+
+  const handleAnalyze = useCallback(async (p: ProviderId) => {
+    const l = analysesRef.current[p];
+    if (!l?.scorecard || !settings) return;
+    if (l.state === "analyzing") return; // don't stack a second run on a live one
+    if (assistantRunning.includes(p)) return; // this helper is mid-fill; don't run both at once
     if (advisorBusy) return; // the advisor is generating; don't hit the API twice at once
-    if (!computeReady(settings)) {
+    if (!providerIsReady(p)) {
       setTab("settings");
       return;
     }
-    const extraContext = refineFactsRef.current.join("\n\n---\n\n").trim() || undefined;
+    const extraContext = l.refineFacts.join("\n\n---\n\n").trim() || undefined;
     // On a refine re-run (we have facts AND an existing analysis), let the model
     // read what it wrote before so it improves rather than starts blind.
-    const priorSummary = extraContext && analysis ? analysis.summary : undefined;
-    setState("analyzing");
-    setError(null);
-    setProgress(null);
-    setDataReport(null);
-    setNarration("");
+    const priorSummary = extraContext && l.analysis ? l.analysis.summary : undefined;
+    patchLane(p, { state: "analyzing", error: null, progress: null, dataReport: null, narration: "" });
 
     const controller = new AbortController();
-    abortRef.current = controller;
+    abortRefs.current[p] = controller;
+    const sid = sessionIdRef.current;
+    // Updates from a run that belongs to a scorecard no longer open are dropped.
+    const live = (patch: Partial<LaneAnalysis>) => { if (sid === sessionIdRef.current) patchLane(p, patch); };
+    const ps = settingsFor(settings, p);
 
     try {
-      const { result, dataReport: dr } = await runAnalysis(scorecard, settings, {
-        onProgress: setProgress,
-        onDataReport: setDataReport,
-        onNarration: setNarration,
+      const { result, dataReport: dr } = await runAnalysis(l.scorecard, ps, {
+        onProgress: (e) => live({ progress: e }),
+        onDataReport: (d) => live({ dataReport: d }),
+        onNarration: (n) => live({ narration: n }),
         signal: controller.signal,
         extraContext,
         priorSummary,
       });
-      const meta: ExportMeta = {
-        provider: PROVIDER_LABEL[settings.provider],
-        model: modelOf(settings),
-        generatedAt: new Date().toISOString(),
-      };
-      setAnalysis(result);
-      setDataReport(dr);
-      setAnalysisMeta(meta);
-      setState("results");
-      try {
-        localStorage.setItem(ANALYSIS_KEY, JSON.stringify({ result, dataReport: dr, meta }));
-      } catch {
-        /* quota, non-fatal */
-      }
+      if (ps.dataSources?.length) result.dataSources = [...ps.dataSources];
+      const meta: ExportMeta = { provider: PROVIDER_LABEL[p], model: modelOf(ps), generatedAt: new Date().toISOString() };
+      live({ analysis: result, dataReport: dr, meta, state: "results" });
+      // Keep it in the saved analyses library (even if the Assistant has moved on since).
+      saveToLibrary({
+        id: newLibraryId(),
+        savedAt: meta.generatedAt,
+        cityKey: l.cityKey || (l.scorecard.city.name || "unknown").toLowerCase(),
+        placeKey: l.placeKey || l.cityKey || l.scorecard.city.name.toLowerCase(),
+        place: l.place || l.scorecard.city.name,
+        shape: l.shape || { kind: "Scorecard", detail: "" },
+        provider: p,
+        source: l.source || p,
+        scorecard: l.scorecard,
+        result,
+        dataReport: dr,
+        meta,
+      });
     } catch (err) {
       if (controller.signal.aborted) {
-        setState(scorecard ? "ready" : "empty");
+        live({ state: analysesRef.current[p]?.scorecard ? "ready" : "empty" });
         return;
       }
-      setError(err instanceof Error ? err.message : String(err));
-      setState("error");
+      live({ error: err instanceof Error ? err.message : String(err), state: "error" });
     }
-  }, [scorecard, settings, state, assistantRunning, analysis, advisorBusy]);
+  }, [settings, assistantRunning, advisorBusy, patchLane, saveToLibrary]);
 
-  // One-click "Run analysis" from the Assistant: fire once the new scorecard
-  // has been committed (immediately, or after the replace confirmation).
+  // One-click "Run analysis" from a helper's Scorecard tab: fire once its new
+  // scorecard has been committed (immediately, or after the replace confirmation).
   useEffect(() => {
-    if (!autoRunRef.current || state !== "ready" || !scorecard || tab !== "dashboard") return;
-    autoRunRef.current = false;
-    void handleAnalyze();
-  }, [state, scorecard, tab, handleAnalyze]);
+    const p = autoRunRef.current;
+    if (!p || tab !== "dashboard" || analyses[p]?.state !== "ready" || !analyses[p]?.scorecard) return;
+    autoRunRef.current = null;
+    void handleAnalyze(p);
+  }, [analyses, tab, handleAnalyze]);
 
-  // Add a piece of local data the advisor gathered (deduped). The dashboard,
+  // Add a piece of local data the advisor gathered (deduped). The analysis,
   // the advisor banner, and the next re-run all read from this one list.
   const addRefineFact = useCallback((text: string) => {
     const t = text.trim();
     if (!t) return;
-    setRefineFacts((prev) => (prev.includes(t) ? prev : [...prev, t]));
-  }, []);
+    setAnalyses((all) => {
+      const l = all[lane] ?? blankLane();
+      return l.refineFacts.includes(t) ? all : { ...all, [lane]: { ...l, refineFacts: [...l.refineFacts, t] } };
+    });
+  }, [lane]);
 
   const removeRefineFact = useCallback((text: string) => {
-    setRefineFacts((prev) => prev.filter((f) => f !== text));
-  }, []);
+    setAnalyses((all) => {
+      const l = all[lane] ?? blankLane();
+      return { ...all, [lane]: { ...l, refineFacts: l.refineFacts.filter((f) => f !== text) } };
+    });
+  }, [lane]);
 
   // Re-run the analysis folding in everything the user has added so far.
   const rerunWithFacts = useCallback(() => {
     setRefineOpen(false);
-    void handleAnalyze();
-  }, [handleAnalyze]);
+    void handleAnalyze(lane);
+  }, [handleAnalyze, lane]);
 
-  const clearRefineFacts = useCallback(() => {
-    setRefineFacts([]);
-    try { localStorage.removeItem(REFINE_KEY); } catch { /* ignore */ }
-  }, []);
-
+  const clearRefineFacts = useCallback(() => patchLane(lane, { refineFacts: [] }), [lane, patchLane]);
 
   const cancelAnalyze = useCallback(() => {
-    abortRef.current?.abort();
-    setState(scorecard ? "ready" : "empty");
-  }, [scorecard]);
+    abortRefs.current[lane]?.abort();
+    patchLane(lane, { state: scorecard ? "ready" : "empty" });
+  }, [lane, scorecard, patchLane]);
+
+  // While any helper is filling or analysing, the helper choice in Settings is locked.
+  const settingsLock = assistantRunning.length
+    ? `${listLabels(assistantRunning)} ${assistantRunning.length === 1 ? "is" : "are"} currently filling out the scorecard on the Assistant tab. You can change the AI helpers once ${assistantRunning.length === 1 ? "it finishes" : "they finish"} or ${assistantRunning.length === 1 ? "is" : "are"} stopped.`
+    : analyzingLanes.length
+    ? `The analysis is being performed on the Analysis tab by ${listLabels(analyzingLanes)}. You can change the AI helpers once it finishes or is cancelled.`
+    : advisorBusy
+    ? "The analysis advisor is writing a reply on the Analysis tab. You can change the AI helpers once it finishes."
+    : null;
+  // Helpers that can't start a fill right now (their analysis or the advisor is running).
+  const busyProviders = advisorBusy ? [...analyzingLanes, lane] : analyzingLanes;
 
   if (!settings) {
     return (
@@ -447,7 +601,7 @@ export default function Page() {
   }
 
   const pct = scorecard ? Math.round((scorecard.total / scorecard.totalMax) * 100) : 0;
-  const modelName = modelOf(settings);
+  const modelName = modelOf(laneSettings ?? settings);
 
   return (
     <div className="min-h-screen flex flex-col">
@@ -473,7 +627,7 @@ export default function Page() {
               tabs={[
                 { id: "assistant" as const, label: "Assistant", shortLabel: "Build", icon: <Bot size={15} /> },
                 { id: "scorecard" as const, label: "Scorecard", shortLabel: "Card", icon: <ClipboardCheck size={15} /> },
-                { id: "dashboard" as const, label: "Dashboard", shortLabel: "Results", icon: <LayoutDashboard size={15} /> },
+                { id: "dashboard" as const, label: "Analysis", shortLabel: "Results", icon: <LayoutDashboard size={15} /> },
                 { id: "settings" as const, label: "Settings", shortLabel: "Setup", icon: <SettingsIcon size={15} /> },
               ]}
             />
@@ -491,14 +645,14 @@ export default function Page() {
 
             <ThemeToggle />
 
-            {/* Fixed-width slot so switching tabs (button present on Dashboard,
+            {/* Fixed-width slot so switching tabs (button present on Analysis,
                 absent on Settings) doesn't shift the nav / theme toggle. */}
             <div className="flex justify-end items-center min-w-[112px] sm:min-w-[132px] shrink-0">
-            {tab === "dashboard" && (state === "ready" || state === "results") && scorecard && (
+            {tab === "dashboard" && !viewing && (state === "ready" || state === "results") && scorecard && (
               <button
-                onClick={() => handleAnalyze()}
-                disabled={assistantRunning || advisorBusy}
-                title={assistantRunning ? "The Assistant is still working. Let it finish, then run the analysis." : advisorBusy ? "The advisor is still writing. One moment, then you can re-run." : refineFacts.length ? `Re-run, folding in the ${refineFacts.length} piece(s) of data you added` : undefined}
+                onClick={() => handleAnalyze(lane)}
+                disabled={assistantRunning.includes(lane) || advisorBusy}
+                title={assistantRunning.includes(lane) ? `${PROVIDER_LABEL[lane]} is still filling its scorecard. Let it finish, then run the analysis.` : advisorBusy ? "The advisor is still writing. One moment, then you can re-run." : refineFacts.length ? `Re-run, folding in the ${refineFacts.length} piece(s) of data you added` : undefined}
                 className="relative flex items-center gap-2 px-3.5 sm:px-5 py-2 rounded-xl text-sm font-semibold btn-accent transition-all shadow-lg shadow-accent-500/25 active:scale-95 shrink-0 disabled:opacity-40 disabled:cursor-not-allowed"
               >
                 {state === "results" ? <RotateCcw size={16} /> : <Play size={16} />}
@@ -522,7 +676,7 @@ export default function Page() {
 
         <div className="border-t border-border/60 bg-surface/60">
           <div className="max-w-[1600px] mx-auto px-4 sm:px-6 py-1.5">
-            <StatusBar settings={settings} providerReady={providerReady} city={scorecard?.city.name ?? null} tavilyOn={tavilyActive} />
+            <StatusBar settings={settings} city={scorecard?.city.name ?? null} tavilyOn={tavilyActive} />
           </div>
         </div>
       </header>
@@ -537,31 +691,97 @@ export default function Page() {
             view={tab === "scorecard" ? "scorecard" : "assistant"}
             onOpenView={setTab}
             settings={settings}
-            providerReady={providerReady}
+            activeLane={lane}
+            onActiveLaneChange={setActiveLane}
             onLoadIntoAnalyzer={handleLoadFromAssistant}
             onUseProvider={useProvider}
             onRunningChange={setAssistantRunning}
-            externalBusy={state === "analyzing" || advisorBusy}
+            busyProviders={busyProviders}
+            onSessionChange={handleSessionChange}
+            onLaneSummary={setSummary}
+            scorecardSource={scorecardSource}
+            onClearAll={handleClearAll}
+            onSessionDeleted={handleSessionDeleted}
           />
         </div>
 
         <div key={tab} className="tab-enter">
         {tab === "settings" && (
-          <SettingsTab settings={settings} onChange={handleSettingsChange} onReplayTutorial={replayTour} />
+          <SettingsTab settings={settings} onChange={handleSettingsChange} onReplayTutorial={replayTour} lockReason={settingsLock} />
         )}
 
         {tab === "dashboard" && (
           <>
+            {/* One sub-tab per AI helper: each analyses its own copy of the scorecard. */}
+            <div className="flex flex-wrap items-center gap-1.5 mb-4">
+            <div role="tablist" aria-label="AI helpers" className="flex flex-wrap gap-1.5">
+              {selected.map((p) => {
+                const l = analyses[p];
+                const on = p === lane && !viewing;
+                return (
+                  <button key={p} role="tab" aria-selected={on} onClick={() => { setViewing(null); setActiveLane(p); }}
+                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm border transition-colors ${on ? "border-accent-500/60 bg-accent-500/15 text-text-primary font-medium" : "border-border bg-surface-overlay text-text-secondary hover:text-text-primary"}`}>
+                    {l?.state === "analyzing" ? <Loader2 size={13} className="animate-spin text-accent-400" />
+                      : l?.state === "results" ? <CheckCircle2 size={13} className="text-accent-400" />
+                      : l?.state === "error" ? <AlertTriangle size={13} className="text-danger-400" />
+                      : <Bot size={13} className="text-text-secondary" />}
+                    {PROVIDER_LABEL[p]}
+                    {l?.scorecard && <span className="text-xs text-text-secondary truncate max-w-[10rem]">· {l.scorecard.city.name}</span>}
+                  </button>
+                );
+              })}
+            </div>
+              <button onClick={() => setLibraryOpen(true)}
+                title="Every finished analysis, saved in this browser: open, download or delete them"
+                className="ml-auto flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm border border-border bg-surface-overlay text-text-primary hover:border-primary-500/40">
+                <Library size={14} className="text-accent-400" /> Saved analyses
+                <span className="text-xs tabular-nums text-text-secondary">{library.length}</span>
+              </button>
+            </div>
+            {libraryError && (
+              <div className="mb-4 flex items-start gap-2 rounded-xl border border-warn-500/30 bg-warn-500/10 px-3.5 py-2.5 text-sm text-warn-400">
+                <AlertTriangle size={15} className="shrink-0 mt-0.5" />
+                <span className="flex-1">{libraryError}</span>
+                <button onClick={() => setLibraryError(null)} aria-label="Dismiss" className="shrink-0 hover:text-text-primary">✕</button>
+              </div>
+            )}
+            {viewing && (
+              <div className="mb-4 glass-card p-3 sm:p-4 flex flex-wrap items-center gap-3 border-l-4 border-l-accent-500">
+                <Library size={18} className="text-accent-400 shrink-0" />
+                <div className="flex-1 min-w-0 text-sm">
+                  <p className="text-text-primary font-medium">
+                    Saved analysis · {PROVIDER_LABEL[viewing.provider]} · {viewing.place}
+                  </p>
+                  <p className="text-xs text-text-secondary">
+                    {viewing.shape.kind}{viewing.shape.detail ? ` · ${viewing.shape.detail}` : ""} · saved {new Date(viewing.savedAt).toLocaleString()}
+                    {viewing.source !== viewing.provider ? ` · on ${PROVIDER_LABEL[viewing.source]}'s scorecard` : ""} · read-only
+                  </p>
+                </div>
+                <button onClick={() => setViewing(null)}
+                  className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-surface-overlay border border-border text-text-primary hover:border-primary-500/40">
+                  <ArrowLeft size={14} /> Back to current analysis
+                </button>
+              </div>
+            )}
+            {!viewing && (
             <div className="mb-6">
               <SystemStatus
                 scorecard={scorecard}
                 fileName={scFileName}
-                onRemove={requestRemove}
-                settings={settings}
+                sources={(() => {
+                  const ids = [...(summary?.complete ?? [])];
+                  if (cur.source && scorecard && !ids.includes(cur.source)) ids.push(cur.source);
+                  return ids.map((id) => ({ id, label: `${PROVIDER_LABEL[id]}: ${summary?.place ?? scorecard?.city.name ?? ""}` }));
+                })()}
+                selectedSource={scorecard ? cur.source : null}
+                onSelectSource={(id) => selectSource(id as ProviderId)}
+                sourceDisabled={state === "analyzing"}
+                settings={laneSettings ?? settings}
                 providerReady={providerReady}
                 modelName={modelName}
               />
             </div>
+            )}
             {state === "error" && (
               <div className="flex items-center justify-center py-16 sm:py-24">
                 <div className="glass-card p-6 sm:p-8 max-w-md text-center">
@@ -570,7 +790,7 @@ export default function Page() {
                   <p className="text-sm text-text-secondary mb-4">{error}</p>
                   <div className="flex gap-2 justify-center">
                     <button
-                      onClick={() => { setError(null); setState(scorecard ? "ready" : "empty"); }}
+                      onClick={() => patchLane(lane, { error: null, state: scorecard ? "ready" : "empty" })}
                       className="px-4 py-2 text-sm rounded-lg bg-primary-700 text-white hover:bg-primary-600 transition-colors"
                     >
                       Back
@@ -594,10 +814,11 @@ export default function Page() {
                 )}
                 <div className="max-w-2xl mx-auto glass-card p-8 text-center">
                   <Bot size={32} className="text-accent-400 mx-auto mb-3" />
-                  <h2 className="text-lg font-semibold text-text-primary mb-1">No scorecard to analyze yet</h2>
+                  <h2 className="text-lg font-semibold text-text-primary mb-1">No {PROVIDER_LABEL[lane]} analysis for this scorecard yet</h2>
                   <p className="text-sm text-text-secondary mb-4">
-                    Upload a completed scorecard on the Scorecard tab, or have the Assistant fill one out for a city or
-                    an area you draw. Then press Run analysis on the Scorecard tab and the results appear here.
+                    {summary?.complete.length
+                      ? <>Choose a finished scorecard for {summary.place} in the box above, then press Run Analysis.</>
+                      : <>Once a helper finishes its scorecard for {summary?.place ?? "this city"} on the Assistant tab, pick it in the box above (or press Run analysis on its Scorecard tab) and {PROVIDER_LABEL[lane]}&apos;s results appear here.</>}
                   </p>
                   <div className="flex flex-wrap gap-2 justify-center">
                     <button onClick={() => setTab("scorecard")} className="inline-flex items-center gap-2 px-4 py-2 rounded-xl text-sm font-semibold btn-accent">
@@ -618,9 +839,9 @@ export default function Page() {
                 )}
 
                 <ModelSuggestion
-                  show={settings.provider !== "gemini" && state !== "analyzing"}
+                  show={!selected.includes("gemini") && state !== "analyzing" && !viewing}
                   title="Tip: Gemini is the fastest pick for analysis"
-                  body="For the Dashboard, Google Gemini runs straight from your browser (no timeouts) and is quick and capable. Great for reading a scorecard."
+                  body="For the Analysis tab, Google Gemini runs straight from your browser (no timeouts) and is quick and capable. Great for reading a scorecard."
                   cta="Use Gemini"
                   onUse={() => useProvider("gemini")}
                   storageKey="undrr-suggest-gemini-dashboard"
@@ -681,15 +902,17 @@ export default function Page() {
                     )}
                   </div>
 
+                  {!viewing && (
                   <div className="lg:col-span-2 glass-card p-5 flex flex-col justify-center gap-3">
                     <p className="text-sm text-text-secondary">
-                      To change answers or analyze a different scorecard, edit or upload it on the Scorecard tab, then
-                      press Run analysis there.
+                      To analyze a different helper&apos;s finished scorecard, pick it in the box above. To change
+                      answers, edit them on the Scorecard tab, then press Run analysis there.
                     </p>
                     <button onClick={() => setTab("scorecard")} className="self-start inline-flex items-center gap-2 px-3.5 py-2 rounded-xl text-sm font-medium bg-surface-overlay border border-border text-text-primary hover:border-primary-500/40">
                       <ClipboardCheck size={15} /> Open the Scorecard
                     </button>
                   </div>
+                  )}
                 </div>
 
                 {/* Radar */}
@@ -777,6 +1000,7 @@ export default function Page() {
                       >
                         <FileJson size={16} /> Download data
                       </button>
+                      {!viewing && (<>
                       <div className="w-px h-7 bg-border mx-0.5 hidden sm:block" />
                       <button
                         onClick={() => setRefineOpen(true)}
@@ -792,6 +1016,7 @@ export default function Page() {
                       >
                         <Eraser size={15} /> <span className="hidden sm:inline">Clear</span>
                       </button>
+                      </>)}
                     </div>
 
                     <DataSourcesPanel report={dataReport} />
@@ -831,6 +1056,8 @@ export default function Page() {
                         </div>
                       )}
 
+                      <AnalysisSourceUse result={analysis} />
+
                       <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-5">
                         <div>
                           <h3 className="text-sm font-semibold text-accent-400 flex items-center gap-1.5 mb-2">
@@ -868,7 +1095,7 @@ export default function Page() {
                     </div>
 
                     <div className="grid grid-cols-1 xl:grid-cols-2 gap-6">
-                      <ImpactDifficultyMatrix actions={analysis.actions} />
+                      <ImpactDifficultyMatrix actions={analysis.actions} estimated={analysis.actionsEstimated} />
                       <ScoreProjection
                         currentScore={analysis.projection.current}
                         maxScore={scorecard.totalMax}
@@ -899,7 +1126,7 @@ export default function Page() {
       <ConfirmModal
         open={!!pendingUpload}
         title="Replace what's loaded?"
-        onClose={() => { autoRunRef.current = false; setPendingUpload(null); }}
+        onClose={() => { autoRunRef.current = null; setPendingUpload(null); }}
         actions={[
           ...(analysis ? [{
             label: "Download report, then replace",
@@ -907,7 +1134,7 @@ export default function Page() {
             onClick: () => {
               const p = buildPayload();
               if (p) downloadReport(p);
-              if (pendingUpload) commitUpload(pendingUpload.sc, pendingUpload.name);
+              if (pendingUpload) commitUpload(pendingUpload.p, pendingUpload.sc, pendingUpload.name, pendingUpload.source);
               setPendingUpload(null);
             },
           }] : []),
@@ -915,50 +1142,18 @@ export default function Page() {
             label: analysis ? "Replace & discard" : "Replace",
             variant: analysis ? "danger" as const : "primary" as const,
             onClick: () => {
-              if (pendingUpload) commitUpload(pendingUpload.sc, pendingUpload.name);
+              if (pendingUpload) commitUpload(pendingUpload.p, pendingUpload.sc, pendingUpload.name, pendingUpload.source);
               setPendingUpload(null);
             },
           },
-          { label: "Cancel", variant: "ghost", onClick: () => { autoRunRef.current = false; setPendingUpload(null); } },
+          { label: "Cancel", variant: "ghost", onClick: () => { autoRunRef.current = null; setPendingUpload(null); } },
         ]}
       >
-        Loading <strong className="text-text-primary">{pendingUpload?.name}</strong> will replace the
+        Loading <strong className="text-text-primary">{pendingUpload?.name}</strong> will replace {pendingUpload ? PROVIDER_LABEL[pendingUpload.p] : ""}&apos;s
         {state === "analyzing" ? " analysis that's currently running" : analysis ? " current analysis results" : " scorecard currently loaded"} for{" "}
         <strong className="text-text-primary">{scorecard?.city.name}</strong>. Any data you added and your saved advisor
-        conversations for that city are cleared too.
+        conversations for that city are cleared too. The other helpers&apos; analyses stay.
         {analysis ? " You can download the current report first, otherwise it's discarded." : " This can't be undone."}
-      </ConfirmModal>
-
-      {/* ── Remove-scorecard warning modal ─────── */}
-      <ConfirmModal
-        open={confirmRemove}
-        title="Remove this scorecard?"
-        onClose={() => setConfirmRemove(false)}
-        actions={[
-          {
-            label: "Download results, then remove",
-            variant: "primary",
-            onClick: () => {
-              const p = buildPayload();
-              if (p) downloadReport(p);
-              setConfirmRemove(false);
-              handleRemove();
-            },
-          },
-          {
-            label: "Remove & discard",
-            variant: "danger",
-            onClick: () => {
-              setConfirmRemove(false);
-              handleRemove();
-            },
-          },
-          { label: "Cancel", variant: "ghost", onClick: () => setConfirmRemove(false) },
-        ]}
-      >
-        Removing <strong className="text-text-primary">{scorecard?.city.name}</strong> will erase its completed
-        analysis, any data you added, and your saved advisor conversations for it. This can&apos;t be undone, download
-        them first if you want to keep a copy.
       </ConfirmModal>
 
       {/* ── Clear-results warning modal ─────────── */}
@@ -991,31 +1186,79 @@ export default function Page() {
         report first if you want to keep it.
       </ConfirmModal>
 
+      {/* ── Saved analyses library ─────────────── */}
+      <AnalysisLibrary
+        open={libraryOpen}
+        entries={library}
+        viewingId={viewing?.id ?? null}
+        onOpen={(e) => { setViewing(e); setLibraryOpen(false); setRefineOpen(false); setTab("dashboard"); window.scrollTo({ top: 0 }); }}
+        onDownloadReport={(e) => downloadReport({ scorecard: e.scorecard, analysis: e.result, dataReport: e.dataReport, meta: e.meta })}
+        onDownloadData={(e) => downloadJson({ scorecard: e.scorecard, analysis: e.result, dataReport: e.dataReport, meta: e.meta })}
+        onDelete={deleteFromLibrary}
+        onClose={() => setLibraryOpen(false)}
+      />
+
+      {/* ── Same city, another outline: replace the earlier analysis or keep both ─ */}
+      <ConfirmModal
+        open={pendingSaves.length > 0}
+        title="Replace the earlier analysis?"
+        onClose={() => resolvePendingSave("keep")}
+        actions={[
+          { label: "Replace previous", variant: "danger", onClick: () => resolvePendingSave("replace") },
+          { label: "Keep both", variant: "primary", onClick: () => resolvePendingSave("keep") },
+        ]}
+      >
+        {pendingSaves[0] && (() => {
+          const { entry, others } = pendingSaves[0];
+          return (
+            <>
+              <p>
+                You already have a saved {PROVIDER_LABEL[entry.provider]} analysis for <strong className="text-text-primary">{entry.scorecard.city.name}</strong>{" "}
+                made with a different outline:
+              </p>
+              <ul className="my-2 space-y-1">
+                {others.map((o) => (
+                  <li key={o.id} className="text-xs rounded-lg border border-border bg-surface-overlay/40 px-2.5 py-1.5">
+                    <span className="text-text-primary">{o.shape.kind}</span>{o.shape.detail ? ` · ${o.shape.detail}` : ""} · {new Date(o.savedAt).toLocaleString()}
+                  </li>
+                ))}
+              </ul>
+              <p>
+                This new one used: <span className="text-text-primary">{entry.shape.kind}</span>{entry.shape.detail ? ` · ${entry.shape.detail}` : ""}.
+                Replace the earlier analysis with this one, or keep both in Saved analyses?
+                {pendingSaves.length > 1 ? " Your answer also applies to the other helpers' analyses of this outline." : ""}
+              </p>
+            </>
+          );
+        })()}
+      </ConfirmModal>
+
       {/* ── First-visit / replayable tour ──────── */}
       <Onboarding open={showTour} onClose={closeTour} />
 
       {/* ── Analysis advisor (opens from the results toolbar or the floating button) ─ */}
-      {scorecard && analysis && (
+      {scorecard && analysis && laneSettings && !viewing && (
         <AnalysisAdvisor
+          key={`${sessionId}:${lane}`}
           open={refineOpen}
           onClose={() => setRefineOpen(false)}
           scorecard={scorecard}
           analysis={analysis}
           dataReport={dataReport}
-          settings={settings}
+          settings={laneSettings}
           contextFacts={refineFacts}
           onAddContext={addRefineFact}
           onRemoveContext={removeRefineFact}
           onRerun={rerunWithFacts}
           onClearContext={clearRefineFacts}
           onBusyChange={setAdvisorBusy}
-          externalBusy={state === "analyzing" || assistantRunning}
+          externalBusy={state === "analyzing" || assistantRunning.includes(lane)}
         />
       )}
 
       {/* ── Floating actions (bottom-right): the advisor sits prominently above Help ─ */}
       <div className="fixed bottom-5 right-5 z-40 flex flex-col items-end gap-3">
-        {tab === "dashboard" && state === "results" && analysis && scorecard && !refineOpen && (
+        {tab === "dashboard" && state === "results" && analysis && scorecard && !refineOpen && !viewing && (
           <button
             onClick={() => setRefineOpen(true)}
             title="Ask the analysis advisor to help sharpen this analysis"

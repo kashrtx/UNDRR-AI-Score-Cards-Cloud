@@ -1,12 +1,15 @@
 /**
  * Assistant chat sessions — saved in the browser so you can leave, come back,
- * and pick up any scorecard you were working on. Each session holds its chat,
- * the agent transcript, the working draft, any attached reference docs, and the
- * city. Nothing leaves the browser.
+ * and pick up any scorecard you were working on. Each session holds the place
+ * (city or area), notes and attached reference docs, plus one "lane" per AI
+ * helper: that helper's chat, agent transcript, working draft and City
+ * Information. Nothing leaves the browser.
  */
 
 import type { Draft, CityInfo } from "./draft";
 import type { TranscriptItem } from "./agent";
+import type { FillRecord } from "./usageLog";
+import type { SourceRegistry } from "./sources";
 import { filledCount } from "./draft";
 import { formatKm2, type AreaSelection } from "@/lib/geo/area";
 
@@ -15,11 +18,27 @@ export type ChatItem =
   | { kind: "assistant"; text: string }
   | { kind: "thought"; text: string }
   | { kind: "reasoning"; summary: string; detail?: string; seconds?: number }
-  | { kind: "tool"; label: string; detail?: string };
+  | { kind: "tool"; label: string; detail?: string; /** Ids of chosen data sources this step cites (shown as chips). */ sources?: string[] };
 
 export interface Attachment {
   name: string;
   text: string;
+}
+
+/** One AI helper's own copy of the scorecard and its conversation. */
+export interface LaneData {
+  chat: ChatItem[];
+  transcript: TranscriptItem[];
+  draft: Draft;
+  profile?: CityInfo;
+  /** Requests, tokens and cost of this helper's current fill (see usageLog). */
+  fill?: FillRecord | null;
+  /** The tagged sources this helper was shown, so its answers' links survive a reload. */
+  sources?: SourceRegistry;
+}
+
+export function emptyLane(): LaneData {
+  return { chat: [], transcript: [], draft: {} };
 }
 
 export interface AssistantSession {
@@ -32,9 +51,12 @@ export interface AssistantSession {
   /** State/province name, for countries that have them. */
   region?: string;
   info: string;
-  chat: ChatItem[];
-  transcript: TranscriptItem[];
-  draft: Draft;
+  /** Each AI helper's lane, keyed by provider id. */
+  lanes?: Record<string, LaneData>;
+  /** Single-helper sessions saved before lanes existed (read once, then moved into a lane). */
+  chat?: ChatItem[];
+  transcript?: TranscriptItem[];
+  draft?: Draft;
   profile?: CityInfo;
   attachments: Attachment[];
   /** "area" when the scorecard is for a drawn/loaded area rather than a whole city. */
@@ -100,9 +122,7 @@ export function createSession(partial?: Partial<AssistantSession>): AssistantSes
     city: "",
     country: "",
     info: "",
-    chat: [],
-    transcript: [],
-    draft: {},
+    lanes: {},
     attachments: [],
     createdAt: now,
     updatedAt: now,
@@ -127,11 +147,26 @@ export function saveSession(s: AssistantSession): void {
     s.title = titleFor(s);
     localStorage.setItem(sessionKey(s.id), JSON.stringify(s));
     const idx = (safeGet<SessionMeta[]>(INDEX_KEY) ?? []).filter((m) => m.id !== s.id);
-    idx.push({ id: s.id, title: s.title, updatedAt: s.updatedAt, filled: filledCount(s.draft), preview: previewOf(s.chat || []) });
+    const lanes = Object.values(s.lanes || {});
+    const filled = Math.max(0, filledCount(s.draft || {}), ...lanes.map((l) => filledCount(l.draft || {})));
+    const busiest = lanes.reduce<LaneData | undefined>((a, l) => ((l.chat?.length || 0) > (a?.chat?.length || 0) ? l : a), undefined);
+    idx.push({ id: s.id, title: s.title, updatedAt: s.updatedAt, filled, preview: previewOf(busiest?.chat || s.chat || []) });
     localStorage.setItem(INDEX_KEY, JSON.stringify(idx));
   } catch {
     /* quota — non-fatal */
   }
+}
+
+/**
+ * The session's lanes, moving a pre-lanes session's single chat and draft into
+ * the lane of `fallbackProvider` (the first helper picked in Settings).
+ */
+export function lanesOf(s: AssistantSession, fallbackProvider: string): Record<string, LaneData> {
+  if (s.lanes && Object.keys(s.lanes).length) return s.lanes;
+  if (s.chat?.length || Object.keys(s.draft || {}).length) {
+    return { [fallbackProvider]: { chat: s.chat || [], transcript: s.transcript || [], draft: s.draft || {}, profile: s.profile } };
+  }
+  return {};
 }
 
 export function deleteSession(id: string): void {

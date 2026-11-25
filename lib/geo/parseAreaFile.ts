@@ -4,6 +4,7 @@
  *   • GeoJSON (.geojson / .json) — Polygon or MultiPolygon, any Feature wrapper.
  *   • KML / KMZ — the first <Polygon>'s outer boundary.
  *   • Shapefile (.zip containing .shp/.dbf/.prj) — reprojected to lat/lon via its .prj.
+ *   • Any of the above gzipped (.gz), or zipped on its own (.zip without a .shp).
  *   • GeoTIFF (.tif / .tiff) — only the raster's EXTENT becomes the area (first
  *     version); the pixel values are not read. WGS84, Web Mercator and UTM
  *     (WGS84 / NAD83) are reprojected; other projections explain themselves.
@@ -15,7 +16,19 @@
 
 import { makeArea, ringAreaKm2, type AreaSelection, type LonLat } from "./area";
 
-export const AREA_FILE_ACCEPT = ".geojson,.json,.kml,.kmz,.zip,.tif,.tiff";
+export const AREA_FILE_ACCEPT = ".geojson,.json,.kml,.kmz,.zip,.tif,.tiff,.gz";
+
+/** Plain-language list of what "Load area from file" accepts. */
+export const AREA_FILE_TYPES: Array<[string, string]> = [
+  ["GeoJSON (.geojson, .json)", "a Polygon or MultiPolygon in latitude/longitude (WGS84)"],
+  ["KML / KMZ (.kml, .kmz)", "e.g. exported from Google Earth"],
+  ["Zipped Shapefile (.zip)", "the .shp, .shx, .dbf and .prj files zipped together"],
+  ["GeoTIFF (.tif, .tiff)", "only its outline (extent) is used"],
+  ["Compressed (.gz, .zip)", "any of the above gzipped, or zipped on its own"],
+];
+
+/** The file isn't one of the supported kinds (as opposed to a supported file with no usable area). */
+export class UnsupportedAreaFileError extends Error {}
 
 export interface ParsedAreaFile {
   area: AreaSelection;
@@ -119,9 +132,13 @@ async function parseKmz(buf: ArrayBuffer): Promise<{ ring: LonLat[]; notes: stri
 
 async function parseShapefileZip(buf: ArrayBuffer): Promise<{ ring: LonLat[]; notes: string[] }> {
   const { unzipSync } = await import("fflate");
-  const names = Object.keys(unzipSync(new Uint8Array(buf.slice(0))));
+  const files = unzipSync(new Uint8Array(buf.slice(0)));
+  const names = Object.keys(files);
   if (!names.some((n) => /\.shp$/i.test(n))) {
-    throw new Error("This .zip doesn't contain a Shapefile (.shp). Zip the .shp, .shx, .dbf and .prj files together.");
+    // A single GeoJSON / KML / KMZ / GeoTIFF zipped on its own.
+    const inner = names.find((n) => !n.startsWith("__MACOSX/") && SINGLE_FILE.test(n));
+    if (inner) return parseByName(inner, files[inner]);
+    throw new UnsupportedAreaFileError("This .zip doesn't contain a Shapefile (.shp) or another supported area file.");
   }
   const notes: string[] = [];
   if (!names.some((n) => /\.prj$/i.test(n))) {
@@ -193,16 +210,31 @@ async function parseGeoTiff(buf: ArrayBuffer): Promise<{ ring: LonLat[]; notes: 
   return { ring, notes };
 }
 
-export async function parseAreaFile(file: File): Promise<ParsedAreaFile> {
-  const name = file.name.toLowerCase();
-  let parsed: { ring: LonLat[]; notes: string[] };
-  if (/\.(geo)?json$/.test(name)) parsed = parseGeoJson(await file.text());
-  else if (name.endsWith(".kml")) parsed = parseKml(await file.text());
-  else if (name.endsWith(".kmz")) parsed = await parseKmz(await file.arrayBuffer());
-  else if (name.endsWith(".zip")) parsed = await parseShapefileZip(await file.arrayBuffer());
-  else if (/\.tiff?$/.test(name)) parsed = await parseGeoTiff(await file.arrayBuffer());
-  else {
-    throw new Error("Supported area files: GeoJSON, KML/KMZ, a zipped Shapefile, or a GeoTIFF.");
+const SINGLE_FILE = /\.(geo)?json$|\.kml$|\.kmz$|\.tiff?$/i;
+
+async function parseByName(name: string, data: Uint8Array): Promise<{ ring: LonLat[]; notes: string[] }> {
+  const n = name.toLowerCase();
+  const buf = () => data.buffer.slice(data.byteOffset, data.byteOffset + data.byteLength) as ArrayBuffer;
+  const text = () => new TextDecoder().decode(data);
+  if (/\.(geo)?json$/.test(n)) return parseGeoJson(text());
+  if (n.endsWith(".kml")) return parseKml(text());
+  if (n.endsWith(".kmz")) return parseKmz(buf());
+  if (n.endsWith(".zip")) return parseShapefileZip(buf());
+  if (/\.tiff?$/.test(n)) return parseGeoTiff(buf());
+  if (n.endsWith(".gz")) {
+    const { gunzipSync } = await import("fflate");
+    let inner: Uint8Array;
+    try {
+      inner = gunzipSync(data);
+    } catch {
+      throw new Error("This .gz file couldn't be decompressed.");
+    }
+    return parseByName(name.slice(0, -3), inner);
   }
+  throw new UnsupportedAreaFileError("Supported area files: GeoJSON, KML/KMZ, a zipped Shapefile, or a GeoTIFF.");
+}
+
+export async function parseAreaFile(file: File): Promise<ParsedAreaFile> {
+  const parsed = await parseByName(file.name, new Uint8Array(await file.arrayBuffer()));
   return { area: makeArea(parsed.ring, "file", file.name), notes: parsed.notes };
 }

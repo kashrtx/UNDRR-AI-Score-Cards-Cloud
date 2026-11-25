@@ -119,12 +119,94 @@ export function computeTemplateEdits(
     }
   }
 
-  // Results summary: cache the 0-3 score next to each code (first occurrence).
+  // ── Results sheet: store the values its formulas will produce ──
+  // Excel recalculates on open (fullCalcOnLoad), but Protected View — how Excel
+  // opens every downloaded file — and viewers such as Preview/Quick Look show
+  // the values saved in the file instead. The overall-score sentence is a text
+  // box linked to a CONCATENATE cell, fed by per-Essential SUMIFS over a hidden
+  // per-indicator table. If only the answers change, all of that still reads 0
+  // ("The overall score for this assessment is 0 / 141"), so we write the
+  // results of each formula in the chain as well (formulas are kept).
   const res = wb.Sheets["Results"];
   if (res && res["!ref"]) {
     const range = XLSX.utils.decode_range(res["!ref"]);
+    const at = (r: number, c: number) => res[XLSX.utils.encode_cell({ r, c })] as XLSX.CellObject | undefined;
+    const txt = (r: number, c: number) => {
+      const cell = at(r, c);
+      const s = cell ? (cell.w ?? cell.v) : undefined;
+      return typeof s === "string" ? s.trim() : "";
+    };
+    const ref = (r: number, c: number) => XLSX.utils.encode_cell({ r, c });
+
+    // Per-Essential totals ("E1" → sum of its answered scores).
+    const essTotal = new Map<string, number>();
+    for (const [code, entry] of Object.entries(draft)) {
+      const m = /^P(\d+)\.\d+$/i.exec(code);
+      if (m && entry && entry.score != null) {
+        const key = `E${parseInt(m[1], 10)}`;
+        essTotal.set(key, (essTotal.get(key) ?? 0) + entry.score);
+      }
+    }
+    let total = 0;
+    for (const v of essTotal.values()) total += v;
+
+    // Hidden per-indicator table (B = "E1", C = "P1.1", F = score, G = the
+    // answer cell's 1–4 value) and the per-Essential summary (F = "E1",
+    // G = SUMIFS total, H = max).
+    const handled = new Set<number>();
+    let max = 0;
+    let sumFirst = -1;
+    let sumLast = -1;
+    for (let r = range.s.r; r <= range.e.r; r++) {
+      const code = /^E\d+$/i.test(txt(r, 1)) ? (txt(r, 2).match(/^P\d+\.\d+$/i)?.[0] ?? "").toUpperCase() : "";
+      if (code) {
+        handled.add(r);
+        const entry = draft[code];
+        if (entry && entry.score != null) {
+          push("Results", ref(r, 5), entry.score, true); // F: the score
+          push("Results", ref(r, 6), 4 - entry.score, true); // G: answer cell value (1–4)
+        }
+        continue;
+      }
+      const ess = txt(r, 5);
+      if (/^E\d+$/i.test(ess) && at(r, 6)?.f) {
+        handled.add(r);
+        push("Results", ref(r, 6), essTotal.get(ess.toUpperCase()) ?? 0, true);
+        max += Number(at(r, 7)?.v) || 0;
+        if (sumFirst < 0) sumFirst = r;
+        sumLast = r;
+      }
+    }
+
+    // The overall total, its share of the maximum, and the sentence.
+    if (sumFirst >= 0 && max > 0) {
+      const gRange = `G${sumFirst + 1}:G${sumLast + 1}`;
+      for (const key of Object.keys(res)) {
+        if (key.startsWith("!")) continue;
+        const f = (res[key] as XLSX.CellObject).f?.replace(/\$/g, "");
+        if (!f) continue;
+        if (/^CONCATENATE\("The overall score/i.test(f)) {
+          push("Results", key, `The overall score for this assessment is ${total} / ${max}`, true);
+        } else if (f === `SUM(${gRange})`) {
+          push("Results", key, total, true);
+          const { r, c } = XLSX.utils.decode_cell(key);
+          // L163 = K163/K164 and L164 = 1-L163 (the share achieved / remaining).
+          const shareRef = ref(r, c + 1);
+          if ((res[shareRef] as XLSX.CellObject | undefined)?.f?.replace(/\$/g, "") === `${key}/${ref(r + 1, c)}`) {
+            push("Results", shareRef, total / max, true);
+            const restRef = ref(r + 1, c + 1);
+            if ((res[restRef] as XLSX.CellObject | undefined)?.f?.replace(/\$/g, "") === `1-${shareRef}`) {
+              push("Results", restRef, 1 - total / max, true);
+            }
+          }
+        }
+      }
+    }
+
+    // Visible per-Essential tables: the 0-3 score next to each code (first occurrence).
     const seen = new Set<string>();
     for (let r = range.s.r; r <= range.e.r; r++) {
+      if (handled.has(r)) continue;
       for (let c = range.s.c; c <= Math.min(range.s.c + 4, range.e.c); c++) {
         const cell = res[XLSX.utils.encode_cell({ r, c })];
         const s = cell ? (cell.w ?? cell.v) : undefined;
@@ -307,7 +389,7 @@ function insertCellXml(xml: string, ref: string, cellXml: string): string {
       if (colToNum(cm[1]) > colN) { insertAt = cm.index; break; }
     }
     const newBody = body.slice(0, insertAt) + cellXml + body.slice(insertAt);
-    return xml.replace(rowRe, `${rm[1]}${newBody}${rm[3]}`);
+    return xml.replace(rowRe, () => `${rm[1]}${newBody}${rm[3]}`);
   }
   const rowTag = /<row r="(\d+)"[^>]*>/g;
   let insertAt = -1;
@@ -333,7 +415,7 @@ function setCellValue(xml: string, ref: string, value: number, keepFormula?: boo
     } else {
       newInner = `<v>${value}</v>`;
     }
-    return xml.replace(cellRe, `<c r="${ref}"${attrs}>${newInner}</c>`);
+    return xml.replace(cellRe, () => `<c r="${ref}"${attrs}>${newInner}</c>`); // function: formulas contain "$1"-like text
   }
   return insertCellXml(xml, ref, `<c r="${ref}"><v>${value}</v></c>`);
 }
@@ -345,9 +427,64 @@ function setSharedCell(xml: string, ref: string, index: number): string {
   const m = xml.match(cellRe);
   if (m) {
     const attrs = (m[1] || "").replace(/\s+t="[^"]*"/g, "");
-    return xml.replace(cellRe, `<c r="${ref}"${attrs} t="s"><v>${index}</v></c>`);
+    return xml.replace(cellRe, () => `<c r="${ref}"${attrs} t="s"><v>${index}</v></c>`);
   }
   return insertCellXml(xml, ref, `<c r="${ref}" t="s"><v>${index}</v></c>`);
+}
+
+// The text a formula produces, stored next to the kept formula (t="str").
+function setFormulaText(xml: string, ref: string, text: string): string {
+  const cellRe = new RegExp(`<c r="${ref}"([^>]*?)(?:/>|>([\\s\\S]*?)</c>)`);
+  const m = xml.match(cellRe);
+  if (!m) return xml;
+  const attrs = (m[1] || "").replace(/\s+t="[^"]*"/g, "");
+  const f = (m[2] || "").match(/<f[\s\S]*?<\/f>|<f[^>]*\/>/);
+  return xml.replace(cellRe, () => `<c r="${ref}"${attrs} t="str">${f ? f[0] : ""}<v>${xmlEsc(text)}</v></c>`);
+}
+
+// ── Cached text of cell-linked text boxes ────────────────────
+// A text box linked to a cell (textlink="$M$163" / "Info!D4") stores the
+// cell's text in an <a:fld type="TxLink">; viewers that don't recalculate show
+// that stored text. `known` maps "Sheet!A1" to the value now in that cell.
+function refreshLinkedText(drawingXml: string, sheetName: string, known: Map<string, number | string>): string {
+  return drawingXml.replace(/<xdr:sp\b[\s\S]*?<\/xdr:sp>/g, (sp) => {
+    const link = /textlink="([^"]+)"/.exec(sp)?.[1];
+    if (!link) return sp;
+    const bang = link.lastIndexOf("!");
+    const sheet = bang >= 0 ? link.slice(0, bang).replace(/^'|'$/g, "") : sheetName;
+    const val = known.get(`${sheet}!${link.slice(bang + 1).replace(/\$/g, "")}`);
+    if (val === undefined) return sp;
+    return sp.replace(
+      /(<a:fld [^>]*type="TxLink">[\s\S]*?<a:t>)[\s\S]*?(<\/a:t>)/,
+      (_all, open: string, close: string) => `${open}${xmlEsc(String(val))}${close}`
+    );
+  });
+}
+
+// ── Cached values of chart series ────────────────────────────
+// Charts also store the numbers they plot (<c:numCache>); refresh the points
+// whose source cells we just wrote, so the charts match without a recalc.
+function refreshChartCache(chartXml: string, known: Map<string, number | string>): string {
+  return chartXml.replace(
+    /(<c:numRef>\s*<c:f>)([^<]+)(<\/c:f>\s*<c:numCache>)([\s\S]*?)(<\/c:numCache>)/g,
+    (all, a: string, formula: string, b: string, cache: string, z: string) => {
+      const m = /^(?:'([^']+)'|([^!]+))!\$?([A-Z]+)\$?(\d+)(?::\$?([A-Z]+)\$?(\d+))?$/.exec(formula.trim());
+      if (!m) return all;
+      const sheet = m[1] ?? m[2];
+      const rg = XLSX.utils.decode_range(`${m[3]}${m[4]}:${m[5] ?? m[3]}${m[6] ?? m[4]}`);
+      const cells: string[] = [];
+      for (let r = rg.s.r; r <= rg.e.r; r++)
+        for (let c = rg.s.c; c <= rg.e.c; c++) cells.push(XLSX.utils.encode_cell({ r, c }));
+      let changed = false;
+      const next = cache.replace(/<c:pt idx="(\d+)">\s*<c:v>[^<]*<\/c:v>/g, (pt, idx: string) => {
+        const v = known.get(`${sheet}!${cells[parseInt(idx, 10)]}`);
+        if (typeof v !== "number") return pt;
+        changed = true;
+        return `<c:pt idx="${idx}"><c:v>${v}</c:v>`;
+      });
+      return changed ? `${a}${formula}${b}${next}${z}` : all;
+    }
+  );
 }
 
 function setFullCalc(wbXml: string): string {
@@ -503,7 +640,7 @@ export async function fillOfficialTemplate(
   const strIndex = new Map<string, number>();
   const allStrings: string[] = [];
   for (const eds of editsBySheet.values())
-    for (const ed of eds) if (typeof ed.value === "string") allStrings.push(ed.value);
+    for (const ed of eds) if (typeof ed.value === "string" && !ed.keepFormula) allStrings.push(ed.value);
   const sstEntry = byName.get("xl/sharedStrings.xml");
   if (allStrings.length && sstEntry) {
     let sst = await getText(sstEntry);
@@ -540,7 +677,9 @@ export async function fillOfficialTemplate(
     let xml = await getText(entry);
     const origSheetXml = xml;
     for (const ed of edits) {
-      if (typeof ed.value === "string") {
+      if (typeof ed.value === "string" && ed.keepFormula) {
+        xml = setFormulaText(xml, ed.ref, ed.value);
+      } else if (typeof ed.value === "string") {
         const idx = strIndex.get(ed.value);
         if (idx != null) xml = setSharedCell(xml, ed.ref, idx);
       } else {
@@ -584,6 +723,34 @@ export async function fillOfficialTemplate(
           for (const [p, data] of cpMods) modified.set(p, data);
         }
       }
+    }
+  }
+
+  // Stored text of cell-linked text boxes and stored chart values, so a viewer
+  // that doesn't recalculate (Excel Protected View, Preview) shows the scores.
+  const known = new Map<string, number | string>();
+  for (const [sheetName, edits] of editsBySheet)
+    for (const ed of edits) known.set(`${sheetName}!${ed.ref}`, ed.value);
+  if (known.size) {
+    for (const [sheetName, rid] of Object.entries(nameToRid)) {
+      const target = ridToTarget[rid];
+      const m = target && /worksheets\/(sheet\d+)\.xml$/.exec(target);
+      const relsE = m ? byName.get(`xl/worksheets/_rels/${m[1]}.xml.rels`) : undefined;
+      if (!relsE) continue;
+      const dm = /Target="[^"]*drawings\/(drawing\d+\.xml)"/.exec(await getText(relsE));
+      const dPath = dm ? `xl/drawings/${dm[1]}` : "";
+      const dEntry = dPath ? byName.get(dPath) : undefined;
+      if (!dEntry) continue;
+      const dXml = await getText(dEntry);
+      if (!dXml.includes('type="TxLink"')) continue;
+      const next = refreshLinkedText(dXml, sheetName, known);
+      if (next !== dXml) modified.set(dPath, encoder.encode(next));
+    }
+    for (const e of entries) {
+      if (!/^xl\/charts\/chart\d+\.xml$/.test(e.name)) continue;
+      const cXml = await getText(e);
+      const next = refreshChartCache(cXml, known);
+      if (next !== cXml) modified.set(e.name, encoder.encode(next));
     }
   }
 

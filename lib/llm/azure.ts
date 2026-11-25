@@ -13,7 +13,7 @@
  * reuse the same streaming reader as the other providers.
  */
 
-import { LLMProvider, LLMStreamHandlers, readSSE } from "./types";
+import { LLMProvider, LLMStreamHandlers, readSSE, fromOpenAIUsage, type OpenAIStyleUsage } from "./types";
 
 export interface AzureConfig {
   endpoint: string;   // e.g. https://my-resource.openai.azure.com
@@ -37,6 +37,7 @@ export class AzureOpenAIProvider implements LLMProvider {
       stream,
       temperature: 0.3,
       max_tokens: maxTokens,
+      ...(stream ? { stream_options: { include_usage: true } } : {}),
     };
   }
 
@@ -69,14 +70,17 @@ export class AzureOpenAIProvider implements LLMProvider {
     let full = "";
     let reasoningFull = "";
     let finishReason: string | undefined;
+    let usage: OpenAIStyleUsage | undefined;
     await readSSE(res, (data) => {
       if (data === "[DONE]") return;
       let evt: {
         choices?: Array<{ delta?: { content?: string; reasoning?: string; reasoning_content?: string }; finish_reason?: string }>;
+        usage?: OpenAIStyleUsage;
         error?: { message?: string };
       };
       try { evt = JSON.parse(data); } catch { return; }
       if (evt.error) throw new Error(`Azure OpenAI error: ${evt.error.message ?? "unknown"}`);
+      if (evt.usage) usage = evt.usage;
       const choice = evt.choices?.[0];
       if (choice?.finish_reason) finishReason = choice.finish_reason;
       const delta = choice?.delta;
@@ -86,6 +90,7 @@ export class AzureOpenAIProvider implements LLMProvider {
     });
 
     const answer = full.trim() ? full : reasoningFull;
+    if (usage) handlers?.onUsage?.(fromOpenAIUsage(usage));
     if (!answer.trim()) {
       if (finishReason === "length") throw new Error("Azure OpenAI hit its output-token limit before finishing. Try again or pick a lighter model.");
       throw new Error(`Azure OpenAI returned no text${finishReason ? ` (finish_reason: ${finishReason})` : ""}. Try again, or check the deployment name.`);

@@ -12,6 +12,7 @@
  * - Plain language for non-technical city officials
  */
 
+import { dataSourcesPrompt } from "@/lib/data/catalog";
 import type { NormalizedScorecard } from "@/lib/scorecard/schema";
 import type { NormalizedDatum, ReferenceFacts } from "@/lib/types";
 import { ESSENTIAL_NAMES } from "@/lib/scorecard/schema";
@@ -107,9 +108,12 @@ export function buildUserPrompt(
   enrichmentData: NormalizedDatum[],
   reference?: ReferenceFacts | null,
   extraContext?: string,
-  priorSummary?: string
+  priorSummary?: string,
+  dataSources?: string[]
 ): string {
   const parts: string[] = [];
+  const picked = dataSourcesPrompt(dataSources, "analysis");
+  if (picked) parts.push(`## ${picked}`);
 
   // User-supplied local facts take priority: surface them at the very top so
   // the model treats them as authoritative and factors them into the analysis.

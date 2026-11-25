@@ -75,6 +75,10 @@ export const AnalysisResultSchema = z.object({
   strengths: z.array(SourcedStatementSchema),
   weaknesses: z.array(SourcedStatementSchema),
   actions: z.array(ActionSchema),
+  /** True when the actions were built by the app (the AI's weren't usable), so their impact/difficulty are rough estimates. */
+  actionsEstimated: z.boolean().optional(),
+  /** The data sources chosen in Settings (Step 3) when this analysis ran (set by the app). */
+  dataSources: z.array(z.string()).optional(),
   projection: z.object({
     current: z.number(),
     potential: z.number(),

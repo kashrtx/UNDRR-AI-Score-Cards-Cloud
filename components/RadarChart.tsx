@@ -56,8 +56,14 @@ export function RadarChart({ essentials }: RadarChartProps) {
     <div className="glass-card p-6">
       <h2 className="text-xl font-bold text-text-primary mb-1">Ten Essentials Radar</h2>
       <p className="text-base text-text-secondary mb-4">
-        Score for each Essential on a 0 to 30 scale. Grey is the maximum possible, green is this city.
-        It matches the UNDRR tool.
+        Raw score for each Essential (3 points per indicator). Grey is that Essential&apos;s maximum possible, green is this city.
+        The axis runs to 30 because the largest Essential, E8 (9 indicators), can reach 27; the UNDRR Excel tool&apos;s radar
+        rounds its axis up the same way.{" "}
+        <a href="https://mcr2030.undrr.org/disaster-resilience-scorecard-cities" target="_blank" rel="noopener noreferrer"
+          className="text-primary-300 underline underline-offset-2">UNDRR Scorecard and scoring guide</a>
+        {" · "}
+        <a href="https://mcr2030.undrr.org/media/73009/download" target="_blank" rel="noopener noreferrer"
+          className="text-primary-300 underline underline-offset-2">Preliminary Excel tool (radar on its Results sheet)</a>
       </p>
 
       <ResponsiveContainer width="100%" height={400}>

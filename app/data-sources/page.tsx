@@ -117,7 +117,7 @@ export default function DataSourcesPage() {
           <p className="text-text-secondary max-w-2xl leading-relaxed">
             The best scorecards are backed by real numbers. Here are {total} free, credible places to look, from the UN,
             World Bank, NASA, Copernicus and more. Find something relevant, copy it, and paste it into the advisor on the
-            Dashboard or into the Assistant. The AI will fold it in and tell you how it changes the picture.
+            Analysis tab or into the Assistant. The AI will fold it in and tell you how it changes the picture.
           </p>
           <div className="mt-4 inline-flex items-center gap-2 text-sm text-accent-300 bg-accent-500/10 border border-accent-500/25 rounded-xl px-3.5 py-2">
             <ClipboardCheck size={16} /> Tip: fact-check the AI, then paste what you find. Real local data beats any guess.

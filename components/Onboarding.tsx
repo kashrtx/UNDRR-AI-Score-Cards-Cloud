@@ -41,8 +41,8 @@ const STEPS: Step[] = [
   },
   {
     icon: <BarChart3 size={26} />,
-    title: "The Dashboard shows the analysis",
-    body: "Press Run analysis on the Scorecard tab and the results open on the Dashboard.",
+    title: "The Analysis tab shows the results",
+    body: "Press Run analysis on the Scorecard tab and the results open on the Analysis tab, one sub-tab per AI helper.",
     bullets: [
       "It quietly gathers free public data about your city while it works.",
       "You get a plain language summary, a clear picture of strong and weak areas, an action plan, and where your score could go.",
