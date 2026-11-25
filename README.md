@@ -19,7 +19,13 @@ The app has four tabs, in the order you use them: **Assistant**, **Scorecard**, 
 - **By city name.** Type the city and pick the Country and, where the country has them, the State or Province from dropdowns. The app checks that the place exists (a popup says so if it does not, and the boxes clear) and looks up the city's official boundary.
 - **Draw an area.** Use a map instead (see *Area mode* below). City, Country and State or Province fill in from whatever you pick.
 
-You can add anything you already know in the notes box and attach reference documents (PDF or text). Then **Fill it out for me** sends every AI helper chosen in Settings off at once, in parallel. Each helper has its own sub-tab with its own chat and its own copy of the scorecard, so you can watch each one think in real time, stop it, steer it with a message, or continue later (even after switching model). A **Scorecard** button in the session bar fills green as answers come in and lists every helper's progress. **Clear all Information** (red) resets the place, notes, documents, every helper's answers and chat, after a Proceed/Cancel confirmation.
+You can add anything you already know in the notes box and attach reference documents (PDF or text). Then **Fill it out for me** sends every AI helper chosen in Settings off at once, in parallel. Each helper has its own sub-tab with its own chat and its own copy of the scorecard, so you can watch each one think in real time, stop it, steer it with a message, or continue later (even after switching model). A **Scorecard** button in the session bar fills green as answers come in and lists every helper's progress. If a model pauses or sends a reply the app can't read, the helper corrects course and carries on by itself; **Continue** only appears after three failed attempts in a row. **Clear all Information** (red) resets the place, notes, documents, every helper's answers and chat, after a Proceed/Cancel confirmation.
+
+**The research view.** A second after you press **Fill it out for me**, a window opens over each helper's chat showing the place being researched: a slowly turning **3D city** (buildings from OpenStreetMap) for cities of 100,000 people or more, or a still, flat **2D map** with the outline for smaller places and anywhere with few mapped buildings. The map takes turns with **photos** of the place and its landmarks (up to ten, as many as are available, from Wikipedia articles inside the city's outline whose lead image is freely licensed on Wikimedia Commons), each shown for 10 seconds (as is the map), captioned with what it shows and credited with links to the image and the article (`lib/geo/cityPhotos.ts`). Above the map is the Essential the helper is working on, with ten progress segments. The map highlights what that Essential is about (rivers and green space for natural buffers, main roads and hospitals for infrastructure, and so on). Below it, the facts the research actually found for that Essential rotate, each with its blue source tag. Nothing there is made up: until something is found, it shows what the helper is doing ("Searching for …", "Reading …", "Thinking about the next step…"). Click outside it (or press Escape) and it shrinks to a small window at the bottom right; its X closes it for the rest of the run. It closes by itself when the fill finishes, pauses or fails. The **Reduce motion** setting (Settings, Display) keeps it still. The pieces are `components/ResearchVisual.tsx` and `components/ResearchMap.tsx` (MapLibre GL on free OpenFreeMap tiles, no key).
+
+**Every answer is traceable.** Each web page, dataset and attached document a helper is shown gets a short tag (S1, S2…), and each answer names the tags it rests on; the Scorecard shows them as blue links. An answer with no source must say what it rests on instead: general knowledge or something you told it. When nothing supports an answer, it is left blank with the reason, unless you allow **educated guesses** in Settings, in which case they are labelled "AI's educated guess". Before guessing or leaving an Essential blank, the helper must search for it first. Research covers the county and state too (many hazard and emergency plans are county or state level), and a helper can read an official page or PDF in full (`read_document`, `lib/data/document.ts`) rather than relying on a search snippet. The Scorecard's "Your data sources" box counts how many answers rest on each kind of source and how many have none.
+
+**What it costs.** Each fill records its requests, tokens and, where the provider reports prices, its cost (`lib/agent/usageLog.ts`, `lib/llm/pricing.ts`). **Compare AI costs** on the Scorecard opens a comparison of every helper's fills side by side.
 
 Every scorecard is saved in your browser, and the history list lets you switch between them, start a new one, or delete one. Each scorecard belongs to one city:
 
@@ -50,13 +56,13 @@ Whichever way you choose the place, the outline in use is saved as a zipped **Sh
 - download the **real official .xlsm** or a plain .xlsx;
 - press **Run analysis**.
 
-The .xlsm download fills the actual UNDRR template (every sheet, all the formatting, and the macros) by setting the answer cells, so it opens and totals correctly in Excel just like a hand-filled one. **Run analysis** and **Clear Scorecard** (red, confirmed first, clears only that helper's answers) stay greyed out until at least one indicator is answered.
+The .xlsm download fills the actual UNDRR template (every sheet, all the formatting, and the macros) by setting the answer cells, so it opens and totals correctly in Excel just like a hand-filled one. It also stores the results of the template's own formulas (the per-Essential totals, the "overall score" sentence, the linked text boxes and the charts' numbers), so the score shows correctly even where nothing is recalculated: Excel's Protected View for downloaded files, Mac Preview and Quick Look. **Run analysis** and **Clear Scorecard** (red, confirmed first, clears only that helper's answers) stay greyed out until at least one indicator is answered.
 
 **Analysis** *shows the analysis* of a scorecard. On its Impact vs Difficulty chart each dot carries its Action Plan number; dots with identical ratings are spread apart, and when the AI's action plan couldn't be read the chart says its placements are the app's rough estimates. **Run analysis** opens the scorecard here and starts the analysis right away. Each helper's analysis appears under its own sub-tab. Every finished analysis is kept in a **saved analyses library**, grouped by city and labelled with the outline used, the helper and the date, so you can reopen, download or delete it even after the Assistant has moved on to another city. Analysing the same city with a different outline asks whether to replace the earlier analysis or keep both. This tab is the part described in most of this guide.
 
 **Analysis advisor** (on the Analysis tab, once you have results) helps you *improve* it. It already knows the scores and the analysis, so you can ask what looks thin, question a score, or share real data you found. Anything substantial you share is saved automatically, and one press of Re-run rebuilds the analysis with it, while also showing the model its previous answer so it refines rather than starting over. Conversations are remembered per city, with a History list so you can keep several threads and pick any of them back up. If your model is a thinking model, its internal reasoning stays behind a quiet "Thinking it through" line instead of spilling into the reply.
 
-**Settings** is where you pick one or more AI helpers, add their keys, and test the connection (Steps 1 and 2). **Step 3, Choose data sources** (all off by default, and remembered like the AI helpers) lists 26 free global datasets from a researcher's catalogue of hazard, exposure and vulnerability data (`lib/data/catalog.ts`), grouped as hazard datasets by hazard (drought, wildfire, inland flood, earthquake, storm surge and coastal flooding, sea-level rise, severe weather, tropical cyclones), exposure, vulnerability and coping capacity, historical impacts, multi-hazard risk models, and discovery portals. Ticked datasets are given to the AI helpers for both "Fill it out for me" and "Run analysis" as their primary evidence (general sources only supplement them or fill gaps they don't cover), with each dataset's caveat; the app does not download the datasets themselves. The app shows where they were used: the chat says which sources a fill is using, each answer on the Scorecard carries a green link for every chosen dataset its note cites (or a "general source" tag), and the Analysis tab has a "Your data sources" card with how often each was cited, plus links beside each statement that cites one. Step 4 is the optional Tavily web search.
+**Settings** is where you pick one or more AI helpers, add their keys, and test the connection (Steps 1 and 2). **Step 3, Choose data sources** (all off by default, and remembered like the AI helpers) lists 26 free global datasets from a researcher's catalogue of hazard, exposure and vulnerability data (`lib/data/catalog.ts`), grouped as hazard datasets by hazard (drought, wildfire, inland flood, earthquake, storm surge and coastal flooding, sea-level rise, severe weather, tropical cyclones), exposure, vulnerability and coping capacity, historical impacts, multi-hazard risk models, and discovery portals. Ticked datasets are given to the AI helpers for both "Fill it out for me" and "Run analysis" as their primary evidence (general sources only supplement them or fill gaps they don't cover), with each dataset's caveat; the app does not download the datasets themselves. The app shows where they were used: the chat says which sources a fill is using, each answer on the Scorecard carries a green link for every chosen dataset its note cites (or a "general source" tag), and the Analysis tab has a "Your data sources" card with how often each was cited, plus links beside each statement that cites one. **Step 4, Web search** has three switches that apply to every helper: let the AI model search the web itself (cloud models that can, through their provider), use Tavily for the app's own research searches (fuller results, and it can read pages that block other readers; needs a free key), and let the AI make educated guesses (off by default). A **Display** section has **Reduce motion**, which follows your device's setting until you change it.
 
 **Find data** (a link in the header) opens a directory of free, credible places to get real numbers: the UN, World Bank, NASA, Copernicus, EM-DAT, ThinkHazard and more. The whole point is to make fact-checking easy: grab a real figure, paste it into the advisor or the Assistant, and let it shape the result.
 
@@ -111,7 +117,9 @@ Here is the life of one "Run analysis" click, in order:
 
 ## The tech, in one minute
 
-It is a single [Next.js](https://nextjs.org) app (the App Router style) written in TypeScript and React, styled with Tailwind CSS, with charts drawn by Recharts. It deploys to Vercel with no configuration. There is no database and no login. Everything you would want to keep (your settings and encrypted keys, every saved scorecard with each helper's chat, the saved analyses library, and advisor conversations) is saved in your browser's local storage, on your own machine. It stays until you delete it in the app. Browsers allow each site only a few megabytes there, so very heavy use could eventually fill it.
+It is a single [Next.js](https://nextjs.org) 16 app (the App Router style, built with Turbopack) written in TypeScript and React 19, styled with Tailwind CSS, with charts drawn by Recharts, maps by Leaflet (area picking) and MapLibre GL (the research view), PDF text by unpdf, data checks by zod 4, and spreadsheets by SheetJS. It deploys to Vercel with no configuration. There is no database and no login. Everything you would want to keep (your settings and encrypted keys, every saved scorecard with each helper's chat, the saved analyses library, and advisor conversations) is saved in your browser's local storage, on your own machine. It stays until you delete it in the app. Browsers allow each site only a few megabytes there, so very heavy use could eventually fill it.
+
+One dependency is kept in the repository: SheetJS (`xlsx`) 0.20.3 lives in `vendor/xlsx-0.20.3.tgz`, because SheetJS publishes its patched versions on its own site rather than on npm. Keep `vendor/` committed. To update it, download the new `.tgz` from cdn.sheetjs.com into `vendor/` and run `npm install ./vendor/<file>.tgz`.
 
 You do not need to know all of these to help. If you know a little React, you can already be useful in the `components` folder.
 
@@ -127,19 +135,20 @@ You do not need to know all of these to help. If you know a little React, you ca
 | `app/api/` | Server routes: parse the file, fetch data, do research, proxy some AI calls | The back office |
 | `components/` | The visual building blocks (the Assistant and Scorecard tabs, each helper's lane, the area map, charts, panels, the settings screen) | The furniture |
 | `lib/` | The actual logic, with no UI in it | The brains |
+| `vendor/` | The SheetJS package the app installs from (see above) | The pantry |
 
 Inside `lib/`, the brains are split by job:
 
 | Folder | Job |
 |---|---|
 | `lib/scorecard/` | Turn the messy Excel file into clean, typed data |
-| `lib/data/` | Fetch open data (each source is its own small file) and do web research |
-| `lib/agent/` | The Assistant's fill-out agent, its working draft, and the saved scorecards |
+| `lib/data/` | Fetch open data (each source is its own small file), do web research, and read whole pages and PDFs |
+| `lib/agent/` | The Assistant's fill-out agent, its working draft, the saved scorecards, source tags (`sources.ts`) and the usage log |
 | `lib/geo/` | Countries and states, area geometry, map files in and out (GeoJSON, KML, Shapefile, GeoTIFF), place lookup |
 | `lib/llm/` | One file per AI provider, plus a factory that picks the right one |
 | `lib/analysis/` | Build the prompt, run the model, validate the result, and keep the saved analyses library |
 | `lib/settings/` | Save your choices and encrypt your API keys |
-| `lib/export/` | Build the downloadable report and JSON |
+| `lib/export/` | Build the downloads: the filled official .xlsm, the plain .xlsx, the report and JSON |
 | `lib/theme.ts` | Light and dark mode |
 
 A nice detail worth knowing: the AI providers all share one small interface, so adding a new one is mostly copying a pattern, not inventing anything.
@@ -181,8 +190,12 @@ You pick one or more providers in Settings and paste their keys. Every provider 
 
 **Web research** (for extra context):
 
-- If you turn on Tavily and add its free key, Tavily does the searching and is trusted on its own.
-- If not, the app uses Wikipedia and Wikidata plus a light keyless web search.
+- If you turn on Tavily and add its free key, Tavily does the searching and is trusted on its own. Tavily Extract also reads pages and PDFs for the helpers when a site refuses a direct read.
+- If not, the app uses Wikipedia and Wikidata plus a light keyless web search (DuckDuckGo).
+- Research also finds the county and state the place is in (OpenStreetMap) and searches for their plans.
+- Helpers can read an official page or PDF in full (up to 15 MB and 400 pages) through `/api/document`. It only fetches public addresses, never local or private network ones, and it does not pretend to be a browser, so some government sites refuse it (Tavily Extract then helps).
+
+**The research view** uses OpenFreeMap tiles (OpenStreetMap data, free, no key) for its map, and Wikipedia and Wikimedia Commons for its photos (free licences only; logos, maps and diagrams are skipped). It is only a picture for you and never feeds the AI.
 
 The AI is always told to treat the scorecard as the truth and to cross-check these extras rather than trust any single number.
 
@@ -204,6 +217,7 @@ A few deliberate guardrails, mostly learned the hard way:
 
 - **No helper runs twice at once.** A helper filling a scorecard cannot also be analyzing, and while the advisor is writing, the helper it uses waits. Whichever is busy disables the others and says why, so you cannot accidentally fire two calls to the same model at the same time.
 - **Nothing loops forever.** The Assistant's agent has a hard step ceiling, and it also stops itself if it repeats the same action or stops making progress. Some models (search-focused ones especially) do not know when to stop, so the app decides for them. Every step also carries a short "work so far" list of what has already been researched (with excerpts once the originals scroll out of the prompt). A search or city research that was already done returns its earlier result instead of running again, and after six lookups in a row without a new answer the Assistant is told to score with what it has. This matters because a runaway loop quietly eats your quota.
+- **Pauses fix themselves.** When a model is busy, rate-limited or replies in a form the app can't read, the Assistant waits, tells the model what went wrong and continues on its own. It hands over to you (with a Continue button) only after three failed attempts in a row, or when a provider's spending or daily limit is reached.
 - **Every call path is bounded.** Retries are capped and only happen on rate limits, the analysis makes at most a few calls before falling back gracefully, and long conversations are trimmed so prompts do not balloon into the model's context limit.
 - **Switching model mid-run is safe.** Each run captures its model when it starts, so a switch applies to the next run instead of corrupting the one in flight.
 - **Nothing is deleted without asking.** All of these confirm first:
@@ -220,7 +234,7 @@ A few deliberate guardrails, mostly learned the hard way:
 
 ## Run it on your own computer
 
-You will need [Node.js](https://nodejs.org) version 18.18 or newer.
+You will need [Node.js](https://nodejs.org) version 20.9 or newer (Next.js 16 requires it).
 
 ```bash
 # 1. get the code, then from the project folder:
@@ -231,6 +245,8 @@ npm run dev
 ```
 
 `npm run dev` first stops any dev server of this project left running from an earlier run (only this folder's, on ports 3000-3010), then starts a fresh one and opens it in your browser. Set `NO_OPEN=1` to skip opening the browser, or use `npm run dev:plain` for bare `next dev`.
+
+Your settings, keys and scorecards are saved per address, so `localhost:3000` and `localhost:3001` each have their own. If the app opens on a different port than usual (because 3000 was busy), it will look empty. Close whatever holds port 3000 and start it again.
 
 Go to **Settings**, pick a provider, paste a key, and hit **Test connection**. Then build a scorecard on the **Assistant** tab (or upload a completed one on the **Scorecard** tab) and click **Run analysis** on the Scorecard tab.
 
@@ -257,7 +273,7 @@ Neither is required.
 
 Yes, by design. Your API keys are encrypted and kept in your own browser, and they are never sent to this app's server or saved in the code. The app writes no files on the server: uploaded scorecards are read in memory and dropped, and generated downloads (Shapefile, .xlsm, report) are built in your browser. The only things that ever reach a server are:
 
-- the open-data, place and research lookups, which are about the city or area, not about you;
+- the open-data, place and research lookups (and the research view's map tiles and photo lookups), which are about the city or area, not about you;
 - for the few providers that need it, the one forwarded AI request, whose key is used immediately and then dropped.
 
 Outside services (OpenStreetMap, Open-Meteo, your AI provider) may keep their own logs of what they receive. For fully private AI, use Ollama or LM Studio.
@@ -280,6 +296,7 @@ A quick map so you do not have to go hunting:
 - **Add a simple new data source:** often you only edit `lib/data/adapters/data-sources.json`, no code needed. For a trickier source, add a small adapter next to the others.
 - **Change how the web research behaves:** edit `lib/data/research.ts`.
 - **Change how the fill-out Assistant thinks or which tools it can call:** edit `lib/agent/agent.ts` (its instructions and the tool loop) and `lib/agent/draft.ts` (the draft it builds). Saved scorecards live in `lib/agent/sessions.ts`. The Assistant and Scorecard tabs, and the save and reload prompts when the city changes, are in `components/AssistantTab.tsx`; each helper's chat and scorecard are in `components/AgentLane.tsx`.
+- **Change the research view (the city map and facts shown while a fill runs):** `components/ResearchVisual.tsx` and `components/ResearchMap.tsx`; the facts and the Essential in focus come from the `focus` and `facts` events in `lib/agent/agent.ts`.
 - **Change the area map or what it accepts:** `components/AreaPicker.tsx`, `components/AreaMap.tsx`, and `lib/geo/`.
 - **Change the look, colors, or charts:** the pieces are in `components/`, and the color and theme tokens live in `app/globals.css`.
 - **Change how the advisor behaves:** edit `components/AnalysisAdvisor.tsx` (its instructions, and the rule that decides what gets saved for a re-run).
@@ -293,7 +310,7 @@ A quick map so you do not have to go hunting:
 npm run dev     # stop old local runs, start with live reload, open the browser
 npm run build   # make a production build
 npm run start   # run that production build
-npm run lint    # check the code style
+npm run lint    # type-check the code (Next.js 16 dropped its own lint command)
 npm run build:regions  # regenerate the Country / State-or-Province lists (lib/geo/regions.json)
 npm run build:cities   # regenerate the clickable place names on the area map (public/cities.json + public/cities/detail/ tiles)
 ```

@@ -54,6 +54,17 @@ export interface AppSettings {
   useTavily: boolean;
   /** Optional data sources (lib/data/catalog.ts ids) the AI should prefer; none by default. */
   dataSources: string[];
+  /**
+   * Calmer animations (the research view stops rotating, facts fade in place).
+   * Unset: follow the device's "reduce motion" setting.
+   */
+  reduceMotion?: boolean;
+}
+
+/** Whether to reduce motion: the user's choice, else the device setting. */
+export function prefersReducedMotion(s: Pick<AppSettings, "reduceMotion">): boolean {
+  if (typeof s.reduceMotion === "boolean") return s.reduceMotion;
+  return typeof window !== "undefined" && !!window.matchMedia?.("(prefers-reduced-motion: reduce)").matches;
 }
 
 export const DEFAULT_SETTINGS: AppSettings = {

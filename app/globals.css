@@ -377,3 +377,11 @@ html .leaflet-container .leaflet-tile-pane img.leaflet-tile { mix-blend-mode: no
 .basemap-satellite .leaflet-interactive .city-label:hover .city-name,
 .basemap-satellite .city-label.selected .city-name { color: #6ee7b7; }
 @media (prefers-reduced-motion: reduce) { .city-name { transition: none; } }
+
+/* Research view (components/ResearchVisual.tsx): headings and facts slide in. */
+@keyframes rv-in {
+  from { opacity: 0; transform: translateY(6px); }
+  to { opacity: 1; transform: none; }
+}
+.rv-in { animation: rv-in 0.45s ease both; }
+@media (prefers-reduced-motion: reduce) { .rv-in { animation: none; } }

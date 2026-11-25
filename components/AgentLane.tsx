@@ -19,7 +19,7 @@ import {
   ClipboardCheck, Lightbulb, Paperclip, X, Play, AlertTriangle, ChevronDown, Coins,
 } from "lucide-react";
 import {
-  getSearchKey, hasSearchKey, settingsFor, providerIsReady, modelForSettings, PROVIDER_LABEL,
+  getSearchKey, hasSearchKey, settingsFor, providerIsReady, modelForSettings, PROVIDER_LABEL, prefersReducedMotion,
   type AppSettings, type ProviderId,
 } from "@/lib/settings/store";
 import { newFillRecord, addUsage, saveFillRecord, type FillRecord } from "@/lib/agent/usageLog";
@@ -32,7 +32,8 @@ import {
   emptyDraft, filledCount, blankCount, resolvedCount, draftToScorecard, mergeScorecardIntoDraft,
   type Draft, type Score, type CityInfo,
 } from "@/lib/agent/draft";
-import { runAgentTurn, type AgentContext, type AgentEvent, type TranscriptItem } from "@/lib/agent/agent";
+import { runAgentTurn, factsFromTranscript, type AgentContext, type AgentEvent, type TranscriptItem, type ResearchFact } from "@/lib/agent/agent";
+import { ResearchVisual } from "@/components/ResearchVisual";
 import { exportScorecardXlsx } from "@/lib/export/scorecardXlsx";
 import { renderMarkdown, deEmDash } from "@/lib/ui/markdown";
 import { UserMessageBubble } from "@/components/UserMessageBubble";
@@ -226,6 +227,13 @@ export const AgentLane = forwardRef<LaneHandle, {
   // Essentials already sent back for a search before guessing (kept across Continue).
   const lookAskedRef = useRef<Set<number>>(new Set());
   const fillRef = useRef<FillRecord | null>(fill);
+  // The research view shown during "Fill it out for me" (components/ResearchVisual).
+  const [rv, setRv] = useState<"off" | "pending" | "open" | "min">("off");
+  const [rvFocus, setRvFocus] = useState(0);
+  const [rvFacts, setRvFacts] = useState<ResearchFact[]>([]);
+  const [rvStatus, setRvStatus] = useState("");
+  const rvTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const fillRunRef = useRef(false);
   const lastEndRef = useRef<FillRecord["status"] | null>(null);
   const priceCat = usePriceCatalog();
   const updateFill = useCallback((r: FillRecord | null) => {
@@ -303,6 +311,17 @@ export const AgentLane = forwardRef<LaneHandle, {
     return t;
   }, [draft, chosenIds]);
 
+  // Essentials whose every indicator is answered or left blank with a reason (research view).
+  const essentialDone = useMemo(() => {
+    const done = Array<boolean>(11).fill(true);
+    done[0] = false;
+    for (const ind of PRELIMINARY_INDICATORS) {
+      const e = draft[ind.code];
+      if (e?.score == null && !e?.blank) done[ind.essential] = false;
+    }
+    return done;
+  }, [draft]);
+
   // Report progress and data up to the Assistant tab (it saves the session).
   useEffect(() => { onStatus(provider, { running, filled, blank: blanks, continuable, fill }); }, [provider, running, filled, blanks, continuable, fill, onStatus]);
   useEffect(() => {
@@ -315,6 +334,7 @@ export const AgentLane = forwardRef<LaneHandle, {
     return () => {
       mountedRef.current = false;
       abortRef.current?.abort();
+      if (rvTimerRef.current) clearTimeout(rvTimerRef.current);
     };
   }, []);
 
@@ -408,6 +428,7 @@ export const AgentLane = forwardRef<LaneHandle, {
     switch (e.type) {
       case "thinking":
         setThinking(e.on);
+        if (e.on) setRvStatus("Thinking about the next step…");
         if (e.on) { streamBuf.current = ""; setStream(""); stepStartRef.current = Date.now(); }
         break;
       case "stream":
@@ -431,10 +452,25 @@ export const AgentLane = forwardRef<LaneHandle, {
         setChat((c) => [...c, { kind: "assistant", text: e.text }]);
         break;
       case "tool": {
+        setRvStatus(
+          e.label === "Searching the web for" && e.detail ? `Searching for “${e.detail}”…`
+            : e.label === "Reading in full" && e.detail ? `Reading ${e.detail}…`
+            : e.detail ? `${e.label}: ${e.detail}` : e.label
+        );
         const cited = citedSources(`${e.label} ${e.detail ?? ""}`, chosenRef.current).map((d) => d.id);
         setChat((c) => [...c, { kind: "tool", label: e.label, detail: e.detail, ...(cited.length ? { sources: cited } : {}) }]);
         break;
       }
+      case "focus":
+        setRvFocus(e.essential);
+        break;
+      case "facts":
+        setRvFacts((prev) => {
+          const seen = new Set(prev.map((f) => `${f.essential}|${f.text}`));
+          const add = e.facts.filter((f) => !seen.has(`${f.essential}|${f.text}`));
+          return add.length ? [...prev, ...add].slice(-300) : prev;
+        });
+        break;
       case "draft":
         // Read the live object the agent is mutating (ctx.draft), not the last
         // rendered copy, so the scorecard fills in as the run goes.
@@ -555,6 +591,12 @@ export const AgentLane = forwardRef<LaneHandle, {
           const endRecord = { ...r, status, filledEnd: resolvedCount(ctx.draft), activeMs: r.activeMs + (Date.now() - runStartedAt), updatedAt: new Date().toISOString() };
           if (mountedRef.current) updateFill(endRecord); else saveFillRecord(endRecord);
         }
+        if (fillRunRef.current) {
+          // "Fill it out for me" is over (finished, paused or failed): close its research view.
+          fillRunRef.current = false;
+          if (rvTimerRef.current) clearTimeout(rvTimerRef.current);
+          if (mountedRef.current) setRv("off");
+        }
         if (mountedRef.current) {
           setRunning(false);
           setThinking(false);
@@ -585,7 +627,23 @@ export const AgentLane = forwardRef<LaneHandle, {
         (info ? `Here is what I know about ${areaActive ? "the area" : "the city"}: ${info}. ` : "") +
         `Research ${areaActive ? "the area and its city" : "the city"} as needed, set every indicator with a short note, and only ask me if something truly cannot be researched.`;
       setChat((c) => [...c, { kind: "user", text: already > 0 ? `Complete the rest for ${cityLine}.` : `Fill it out for ${cityLine}.` }]);
-      void runTurn(msg, { mode: "autonomous", area, newFill: true });
+      // The research view opens a second after the click, once the run is under way.
+      setRvFocus(0);
+      setRvFacts(factsFromTranscript(transcriptRef.current, sourcesRef.current, getShared().city || cityLine));
+      setRvStatus("Getting started…");
+      setRv("pending");
+      fillRunRef.current = true;
+      if (rvTimerRef.current) clearTimeout(rvTimerRef.current);
+      const openWhenRunning = () => {
+        if (!fillRunRef.current) return; // the fill already ended
+        if (runningRef.current) setRv((v) => (v === "pending" ? "open" : v));
+        else rvTimerRef.current = setTimeout(openWhenRunning, 300); // still starting up (e.g. a local model)
+      };
+      rvTimerRef.current = setTimeout(openWhenRunning, 1000);
+      void runTurn(msg, { mode: "autonomous", area, newFill: true }).finally(() => {
+        // The run never started (no key, another run busy): no view to show.
+        if (!runningRef.current && fillRunRef.current) { fillRunRef.current = false; setRv("off"); }
+      });
     },
     stop,
     note(item) {
@@ -1184,6 +1242,23 @@ export const AgentLane = forwardRef<LaneHandle, {
     <>
       {assistantHost && createPortal(chatView, assistantHost)}
       {scorecardHost && createPortal(scorecardView, scorecardHost)}
+      {showing && (rv === "open" || rv === "min") && (
+        <ResearchVisual
+          state={rv}
+          place={shared.place}
+          cityName={shared.city}
+          helper={label}
+          area={shared.area}
+          focus={rvFocus}
+          facts={rvFacts}
+          status={rvStatus}
+          essentialDone={essentialDone}
+          reduceMotion={prefersReducedMotion(settings)}
+          onMinimize={() => setRv("min")}
+          onRestore={() => setRv("open")}
+          onClose={() => setRv("off")}
+        />
+      )}
     </>
   );
 });

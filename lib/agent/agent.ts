@@ -41,7 +41,22 @@ export type AgentEvent =
   /** One model request finished: its tokens (and exact cost, where reported). */
   | { type: "usage"; usage: LLMUsage }
   /** The model that answered (first request of a run, then whenever it changes). */
-  | { type: "model"; model: string; requested: string; reported: boolean };
+  | { type: "model"; model: string; requested: string; reported: boolean }
+  /** Which Essential the AI is working on now (0 = getting to know the place). */
+  | { type: "focus"; essential: number }
+  /** Facts a lookup actually returned (for the research view), with their source tags. */
+  | { type: "facts"; facts: ResearchFact[] };
+
+/** One retrieved fact for the research view: real text from a lookup, never made up. */
+export interface ResearchFact {
+  text: string;
+  /** The source tag ("S3") the AI can cite, when the fact came from a tagged page. */
+  tag?: string;
+  /** Short site name ("fema.gov") or data source name. */
+  site?: string;
+  /** The Essential it relates to (1-10), or 0 for a general fact about the place. */
+  essential: number;
+}
 
 export interface AgentContext {
   provider: LLMProvider;
@@ -303,6 +318,78 @@ function searchedEssentials(transcript: TranscriptItem[]): Set<number> {
   return out;
 }
 
+/** The Essentials a query or topic is about, by keyword (most specific first). */
+export function essentialsOf(text: string): number[] {
+  const out: number[] = [];
+  for (const [e, v] of Object.entries(ESSENTIAL_SEARCH)) if (v.words.test(text)) out.push(Number(e));
+  return out;
+}
+
+/**
+ * A short, readable fact from retrieved text: its first complete sentence (or a
+ * trimmed opening), skipping page furniture. Null when nothing readable is left.
+ */
+function factText(raw: string, max = 170): string | null {
+  let t = raw.replace(/\[(S\d+)\]\s*/g, "").replace(/\s+/g, " ").replace(/^[-–•*#>\s|]+/, "").trim();
+  if (t.length < 25) return null;
+  if (/cookie|javascript|subscribe|sign in|log in|privacy policy|skip to (main )?content|all rights reserved/i.test(t.slice(0, 200))) return null;
+  if ((t.match(/\|/g) || []).length > 3) return null; // menus and breadcrumbs
+  if (/^[{[<]/.test(t) || (t.match(/"\s*:/g) || []).length > 1 || /[{}]/.test(t.slice(0, 80))) return null; // raw data (JSON, markup)
+  if ((t.match(/[a-z]/gi) || []).length < t.length * 0.55) return null; // mostly numbers or symbols
+  const m = /^(.{25,}?[.!?])(\s|$)/.exec(t);
+  if (m && m[1].length <= max) t = m[1];
+  else if (t.length > max) t = t.slice(0, t.lastIndexOf(" ", max - 1) > 60 ? t.lastIndexOf(" ", max - 1) : max - 1).replace(/[,;:\s]+$/, "") + "…";
+  return t;
+}
+
+/**
+ * Facts from lookups already in the conversation (research, searches, reads),
+ * so the research view has real content when a fill reuses earlier results.
+ */
+export function factsFromTranscript(transcript: TranscriptItem[], reg?: SourceRegistry, city?: string): ResearchFact[] {
+  const out: ResearchFact[] = [];
+  const seen = new Set<string>();
+  let done = researchDone(transcript);
+  if (city !== undefined) {
+    // Only what was looked up for this place: from its latest research_city on
+    // (a scorecard's conversation can hold an earlier city's lookups too).
+    const want = city.split(",")[0].trim().toLowerCase();
+    let from = -1;
+    done.forEach((d, i) => { if (d.kind === "research" && want && d.what.toLowerCase().includes(want)) from = i; });
+    if (from < 0) return [];
+    done = done.slice(from).filter((d) => d.kind !== "research" || d.what.toLowerCase().includes(want));
+  }
+  for (const d of done) {
+    const about = d.kind === "research" ? undefined : essentialsOf(d.what)[0] ?? 0;
+    for (const raw of d.result.split("\n")) {
+      const m = /^- \[(S\d+)\]\s*(.*)$/.exec(raw.trim());
+      if (!m) continue;
+      let body = m[2];
+      if (d.kind === "search") { const i = body.indexOf("): "); if (i >= 0) body = body.slice(i + 3); }
+      body = body.replace(/^\((?:p\. \d+|[^)]*level)\)\s*/i, "");
+      const isData = d.kind === "research" && /^[^:]{3,90}: [^:]{1,60}$/.test(body); // "Population: 175,826"
+      const text = isData ? body : factText(body);
+      if (!text) continue;
+      const essential = about ?? (isData ? 0 : essentialsOf(body)[0] ?? 0);
+      const key = `${essential}|${text}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      const src = reg?.byTag[m[1]];
+      out.push({ text, tag: m[1], site: src ? siteName(src.url) : undefined, essential });
+    }
+  }
+  return out;
+}
+
+/** Tag ("S3") out of a Tagger's "[S3] " prefix. */
+const tagOf = (prefix: string) => /\[(S\d+)\]/.exec(prefix)?.[1];
+
+/** The Essential the next unfilled indicators belong to (where a fill goes next). */
+function nextEssential(draft: Draft): number {
+  const code = unfilledCodes(draft)[0];
+  return PRELIMINARY_INDICATORS.find((i) => i.code === code)?.essential ?? 0;
+}
+
 /** How a read is named in the transcript: "S7: early warning and evacuation". */
 function readLabel(source: string | undefined, topic: string | undefined): string {
   const tag = (source || "?").trim().replace(/^\[|\]$/g, "").toUpperCase();
@@ -327,7 +414,7 @@ function readingHint(text: string, reg: SourceRegistry | undefined, canReadPdf =
 }
 
 /** read_document: fetch the page and return its most relevant passages, tagged. */
-async function documentTool(url: string, topic: string, tag: string, searchKey?: string | null): Promise<string> {
+async function documentTool(url: string, topic: string, tag: string, searchKey?: string | null, facts: ResearchFact[] = [], essential = 0): Promise<string> {
   try {
     const res = await fetch("/api/document", {
       method: "POST",
@@ -336,6 +423,10 @@ async function documentTool(url: string, topic: string, tag: string, searchKey?:
     });
     const d = (await res.json()) as { ok: boolean; title?: string; totalChars?: number; passages?: Array<{ page?: number; text: string }>; error?: string; via?: string };
     if (!d.ok || !d.passages?.length) return `Couldn't read [${tag}]: ${d.error || "no readable text"}. Use its search snippet, or search for another version.`;
+    for (const p of d.passages.slice(0, 4)) {
+      const f = factText(p.text);
+      if (f) facts.push({ text: f, tag, site: siteName(url), essential });
+    }
     const head = `[${tag}] ${d.title ? squash(d.title, 90) : siteName(url)} (${siteName(url)}${d.totalChars ? `, ${Math.round(d.totalChars / 1000)}k characters` : ""}). Passages most relevant to "${topic || "general"}":`;
     return [head, ...d.passages.map((p) => `- [${tag}]${p.page ? ` (p. ${p.page})` : ""} ${p.text.replace(/\s+/g, " ").slice(0, 1000)}`)].join("\n") +
       (d.error ? `\n(${d.error})` : "") +
@@ -414,8 +505,9 @@ async function researchTool(
   searchKey?: string | null,
   area?: AreaSelection | null,
   tag: Tagger = () => ""
-): Promise<{ text: string; method: string; county?: string }> {
+): Promise<{ text: string; method: string; county?: string; facts: ResearchFact[] }> {
   let county: string | undefined;
+  const facts: ResearchFact[] = [];
   try {
     const areaBody = area
       ? { ring: area.ring, label: area.label, countryCode: area.countryCode, source: area.source }
@@ -437,13 +529,17 @@ async function researchTool(
     let method = "open data";
     if (dataRes.status === "fulfilled" && dataRes.value) {
       const dp = dataRes.value as {
-        data?: Array<{ label: string; value: unknown; unit?: string; provenance?: { source?: string; dataset?: string; url?: string } }>;
+        data?: Array<{ label: string; value: unknown; unit?: string; essentialHint?: number; provenance?: { source?: string; dataset?: string; url?: string } }>;
       };
       const pts = (dp.data || [])
         .slice(0, area ? 26 : 18)
         .map((p) => {
           const pv = p.provenance;
           const t = tag(pv?.url, [pv?.source, pv?.dataset].filter(Boolean).join(": ") || p.label);
+          const v = typeof p.value === "number" ? p.value.toLocaleString("en-US", { maximumFractionDigits: 1 }) : String(p.value ?? "");
+          if (v && v.length < 60) {
+            facts.push({ text: `${p.label}: ${v}${p.unit ? " " + p.unit : ""}`, tag: tagOf(t), site: pv?.source || (pv?.url ? siteName(pv.url) : undefined), essential: p.essentialHint ?? 0 });
+          }
           return `- ${t}${p.label}: ${p.value}${p.unit ? " " + p.unit : ""}`;
         });
       if (pts.length) lines.push(area ? "Open data for the SELECTED AREA:" : "Open data:", ...pts);
@@ -465,32 +561,39 @@ async function researchTool(
       const all = rf.passages || [];
       const isLevel = (p: { source?: string }) => /\((county|state) level\)/.test(p.source || "");
       for (const p of [...all.filter((p) => !isLevel(p)).slice(0, 4), ...all.filter(isLevel).slice(0, 4)]) {
-        lines.push(`- ${tag(p.url, p.source || (p.url ? siteName(p.url) : "web page"))}${isLevel(p) ? `(${p.source!.split(":")[0]}) ` : ""}${p.text.slice(0, 240)}`);
+        const t = tag(p.url, p.source || (p.url ? siteName(p.url) : "web page"));
+        lines.push(`- ${t}${isLevel(p) ? `(${p.source!.split(":")[0]}) ` : ""}${p.text.slice(0, 240)}`);
+        const f = factText(p.text);
+        if (f) facts.push({ text: f, tag: tagOf(t), site: p.url ? siteName(p.url) : p.source, essential: essentialsOf(`${p.source ?? ""} ${p.text}`)[0] ?? 0 });
       }
     }
-    return { text: lines.length ? lines.join("\n") : "No open data or web results were found for that city.", method, county };
+    return { text: lines.length ? lines.join("\n") : "No open data or web results were found for that city.", method, county, facts };
   } catch (e) {
-    return { text: `Research failed: ${e instanceof Error ? e.message : String(e)}`, method: "failed" };
+    return { text: `Research failed: ${e instanceof Error ? e.message : String(e)}`, method: "failed", facts };
   }
 }
 
-async function searchTool(query: string, searchKey?: string | null, tag: Tagger = () => ""): Promise<{ text: string; method: string }> {
+async function searchTool(query: string, searchKey?: string | null, tag: Tagger = () => "", essential = 0): Promise<{ text: string; method: string; facts: ResearchFact[] }> {
+  const facts: ResearchFact[] = [];
   try {
     const res = await fetch("/api/search", {
       method: "POST",
       headers: { "content-type": "application/json" },
       body: JSON.stringify({ query, searchApiKey: searchKey || undefined }),
     });
-    if (!res.ok) return { text: `Search failed (HTTP ${res.status}).`, method: "failed" };
+    if (!res.ok) return { text: `Search failed (HTTP ${res.status}).`, method: "failed", facts };
     const r = (await res.json()) as { answer?: string; method?: string; results?: Array<{ title: string; url?: string; content: string }> };
     const lines: string[] = [];
     if (r.answer) lines.push(r.answer.slice(0, 800));
     for (const it of (r.results || []).slice(0, 5)) {
-      lines.push(`- ${tag(it.url, it.title)}${it.title}${it.url ? ` (${siteName(it.url)})` : ""}: ${(it.content || "").slice(0, 200)}`);
+      const t = tag(it.url, it.title);
+      lines.push(`- ${t}${it.title}${it.url ? ` (${siteName(it.url)})` : ""}: ${(it.content || "").slice(0, 200)}`);
+      const f = factText(it.content || "");
+      if (f) facts.push({ text: f, tag: tagOf(t), site: it.url ? siteName(it.url) : undefined, essential });
     }
-    return { text: lines.length ? lines.join("\n") : "No results.", method: r.method || "web" };
+    return { text: lines.length ? lines.join("\n") : "No results.", method: r.method || "web", facts };
   } catch (e) {
-    return { text: `Search failed: ${e instanceof Error ? e.message : String(e)}`, method: "failed" };
+    return { text: `Search failed: ${e instanceof Error ? e.message : String(e)}`, method: "failed", facts };
   }
 }
 
@@ -942,6 +1045,12 @@ async function runAgentAttempt(
             (remaining.length ? `Use it to score: ${next} with set_scores.` : "Use it, then finish."),
         });
         onEvent({ type: "tool", label: "Reused an earlier lookup", detail: squash(earlier.what, 60) });
+        {
+          const facts = factsFromTranscript([earlier.item], ctx.sources);
+          if (facts.length) onEvent({ type: "facts", facts });
+          const ess = isResearch ? 0 : essentialsOf(earlier.what)[0];
+          if (ess !== undefined) onEvent({ type: "focus", essential: ess });
+        }
         continue;
       } else if (autonomous && remaining.length && researchRun >= RESEARCH_BUDGET) {
         refusal =
@@ -971,9 +1080,11 @@ async function runAgentAttempt(
         const sameCity = !action.city || action.city.trim().toLowerCase() === (ctx.city || "").trim().toLowerCase();
         const lookupName = sameCity && ctx.region ? `${cityName}, ${ctx.region}` : cityName;
         const what = ctx.area ? "the selected area" : cityName || "the city";
+        onEvent({ type: "focus", essential: 0 });
         onEvent({ type: "tool", label: `Researching ${what}…` });
-        const { text, method, county } = await researchTool(lookupName, action.country || ctx.country, ctx.searchKey, ctx.area, tagWith(ctx.sources));
+        const { text, method, county, facts } = await researchTool(lookupName, action.country || ctx.country, ctx.searchKey, ctx.area, tagWith(ctx.sources));
         if (county) ctx.county = county;
+        if (facts.length) onEvent({ type: "facts", facts });
         ctx.transcript.push({ role: "tool", content: `research_city(${researchLabel(ctx, cityName)}):\n${text}${readingHint(text, ctx.sources)}` });
         onEvent({ type: "tool", label: `Researched ${what}`, detail: method });
         stagnantScores = 0; stagnantInfo = 0;
@@ -989,8 +1100,12 @@ async function runAgentAttempt(
         } else if (src.url.startsWith("attachment:")) {
           text = `[${tag}] is a document the user attached: its text is already in DOCUMENTS THE USER ATTACHED above. Use that.`;
         } else {
+          const ess = essentialsOf(`${action.topic || ""} ${src.title}`)[0] ?? nextEssential(ctx.draft);
+          if (ess) onEvent({ type: "focus", essential: ess });
           onEvent({ type: "tool", label: "Reading in full", detail: `${siteName(src.url)}: ${squash(src.title, 50)}` });
-          text = await documentTool(src.url, action.topic || "", tag, ctx.searchKey);
+          const facts: ResearchFact[] = [];
+          text = await documentTool(src.url, action.topic || "", tag, ctx.searchKey, facts, ess);
+          if (facts.length) onEvent({ type: "facts", facts });
           onEvent({ type: "tool", label: text.startsWith("Couldn't") ? "Couldn't read it" : "Read the document", detail: siteName(src.url) });
         }
         ctx.transcript.push({ role: "tool", content: `read_document(${label}):\n${text}` });
@@ -999,8 +1114,11 @@ async function runAgentAttempt(
       }
       case "web_search": {
         const q = action.query || "";
+        const ess = essentialsOf(q)[0] ?? nextEssential(ctx.draft);
+        if (ess) onEvent({ type: "focus", essential: ess });
         onEvent({ type: "tool", label: "Searching the web for", detail: q.slice(0, 70) });
-        const { text, method } = await searchTool(q, ctx.searchKey, tagWith(ctx.sources));
+        const { text, method, facts } = await searchTool(q, ctx.searchKey, tagWith(ctx.sources), ess);
+        if (facts.length) onEvent({ type: "facts", facts });
         ctx.transcript.push({ role: "tool", content: `web_search(${q}):\n${text}${readingHint(text, ctx.sources)}` });
         onEvent({ type: "tool", label: `Searched (${method})`, detail: q.slice(0, 60) });
         stagnantScores = 0; stagnantInfo = 0;
@@ -1078,6 +1196,12 @@ async function runAgentAttempt(
           if (ctx.draft[c]?.blank) wasBlank.add(c);
         }
         const n = applyScores(ctx.draft, reqs, (refs) => resolveSources(ctx.sources, refs));
+        {
+          // The research view follows the Essential just scored, then where the fill goes next.
+          const scoredE = PRELIMINARY_INDICATORS.find((i) => i.code === norm(reqs[0]?.code))?.essential;
+          const ess = unfilledCodes(ctx.draft).length ? nextEssential(ctx.draft) : scoredE;
+          if (ess) onEvent({ type: "focus", essential: ess });
+        }
         // Build an ACCURATE list of what actually changed, so the model's own
         // summary reflects reality instead of what it intended.
         const scoreChanges: string[] = [];

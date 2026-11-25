@@ -11,10 +11,10 @@ import { useEffect, useState, useRef, type ReactNode } from "react";
 import {
   Cloud, Cpu, Sparkles, Boxes, MonitorSmartphone, Save, Loader2,
   CheckCircle2, XCircle, KeyRound, Trash2, Plug, Globe, Search, Compass, BookCheck, GraduationCap, RefreshCw, Database, ChevronDown,
-  Lightbulb,
+  Lightbulb, Pause,
 } from "lucide-react";
 import {
-  type AppSettings, type ProviderId, type CloudProviderId, selectedProviders, PROVIDER_LABEL,
+  type AppSettings, type ProviderId, type CloudProviderId, selectedProviders, PROVIDER_LABEL, prefersReducedMotion,
   setApiKey, hasApiKey, clearApiKey, isCloudProvider,
   setSearchKey, hasSearchKey, clearSearchKey,
 } from "@/lib/settings/store";
@@ -144,6 +144,37 @@ const PROVIDER_META: Record<ProviderId, { title: string; subtitle: string; icon:
 
 // Display order, cloud first (the friction-free path), then local.
 const ORDER: ProviderId[] = ["gemini", "openrouter", "createai", "nvidia", "perplexity", "zai", "claude", "openai", "xai", "meta", "azure", "lmstudio", "ollama"];
+
+/** A small switch with a title and its description underneath (Settings toggles). */
+function ToggleRow({
+  on, onClick, icon, title, children, disabled, color = "bg-accent-500",
+}: {
+  on: boolean; onClick: () => void; icon: ReactNode; title: string; children: ReactNode;
+  disabled?: boolean; color?: string;
+}) {
+  return (
+    <button
+      type="button"
+      role="switch"
+      aria-checked={on}
+      disabled={disabled}
+      onClick={onClick}
+      className={`w-full flex items-start gap-3 text-left ${disabled ? "opacity-60 cursor-not-allowed" : ""}`}
+    >
+      <span
+        className={`mt-0.5 shrink-0 w-9 h-5 rounded-full transition-colors relative ${
+          on ? color : "bg-surface-overlay border border-border"
+        }`}
+      >
+        <span className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${on ? "left-[18px]" : "left-0.5"}`} />
+      </span>
+      <span>
+        <span className="text-sm text-text-primary flex items-center gap-1.5">{icon} {title}</span>
+        <span className="text-xs text-text-secondary block mt-0.5">{children}</span>
+      </span>
+    </button>
+  );
+}
 
 /** Step 3: optional data sources, grouped as in the source catalogue, all off by default. */
 function DataSourcePicker({ selected, onChange }: { selected: string[]; onChange: (ids: string[]) => void }) {
@@ -409,6 +440,7 @@ export function SettingsTab({
           { id: "settings-setup", label: "2. Add your key" },
           { id: "settings-sources", label: "3. Data sources" },
           { id: "settings-search", label: "4. Web search" },
+          { id: "settings-display", label: "Display" },
           { id: "settings-data", label: "Find data" },
         ].map((x) => (
           <button
@@ -789,78 +821,6 @@ export function SettingsTab({
           </>
         )}
 
-        {/* Web research toggle */}
-        <div className="pt-1">
-          <button
-            type="button"
-            onClick={() => setDraft({ ...draft, webSearch: !draft.webSearch })}
-            className="w-full flex items-start gap-3 text-left"
-          >
-            <span
-              className={`mt-0.5 shrink-0 w-9 h-5 rounded-full transition-colors relative ${
-                draft.webSearch ? "bg-accent-500" : "bg-surface-overlay border border-border"
-              }`}
-            >
-              <span
-                className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${
-                  draft.webSearch ? "left-[18px]" : "left-0.5"
-                }`}
-              />
-            </span>
-            <span>
-              <span className="text-sm text-text-primary flex items-center gap-1.5">
-                <Globe size={14} className="text-accent-400" /> Let the AI model search the web itself
-              </span>
-              <span className="text-xs text-text-secondary block mt-0.5">
-                {isCloud
-                  ? "Separate from the research step below: the model itself runs live web searches via its provider (Gemini, Claude, OpenRouter) to verify facts and cite sources, then still receives the research context. If a search-enabled run fails, it automatically retries without it."
-                  : "Local models can't browse the web, this applies to cloud providers. Either way, every analysis gets the server-side research context (Wikipedia + web search) below."}
-              </span>
-              {provider === "openrouter" && (
-                <span className="text-xs text-warn-400 block mt-1">
-                  {/:free$/.test(draft.openrouterModel)
-                    ? "OpenRouter charges for its web search even on free models, so it's skipped for this :free model to keep it free. The app's own free research still runs."
-                    : "OpenRouter charges about $0.007 per request for its web search, on top of the model's own price."}
-                </span>
-              )}
-            </span>
-          </button>
-        </div>
-
-        {/* Educated guesses (applies to every helper) */}
-        <div className="pt-1">
-          <button
-            type="button"
-            role="switch"
-            aria-checked={draft.allowGuesses}
-            onClick={() => setDraft({ ...draft, allowGuesses: !draft.allowGuesses })}
-            className="w-full flex items-start gap-3 text-left"
-          >
-            <span
-              className={`mt-0.5 shrink-0 w-9 h-5 rounded-full transition-colors relative ${
-                draft.allowGuesses ? "bg-warn-500" : "bg-surface-overlay border border-border"
-              }`}
-            >
-              <span
-                className={`absolute top-0.5 w-4 h-4 rounded-full bg-white transition-all ${
-                  draft.allowGuesses ? "left-[18px]" : "left-0.5"
-                }`}
-              />
-            </span>
-            <span>
-              <span className="text-sm text-text-primary flex items-center gap-1.5">
-                <Lightbulb size={14} className="text-warn-400" /> Let the AI make educated guesses
-              </span>
-              <span className="text-xs text-text-secondary block mt-0.5">
-                {draft.allowGuesses
-                  ? "On: when nothing supports an answer (no source, none of your data sources, and nothing the AI knows), the AI may make an educated guess. Those answers are labelled \"AI's educated guess\" on the Scorecard so you can check them."
-                  : "Off: every answer must rest on a source, one of your data sources, or the AI's general knowledge. When none of these supports an answer, it is left blank with the reason, instead of guessed."}
-                {" "}Applies to every AI helper.
-              </span>
-            </span>
-          </button>
-        </div>
-
         {/* Test connection */}
         <div className="flex items-center gap-3 pt-1">
           <button
@@ -893,47 +853,64 @@ export function SettingsTab({
             <span className="text-accent-400">Step 4.</span> <Search size={17} className="text-accent-400" /> Web search <span className="text-xs font-normal text-text-secondary">(optional)</span>
           </h2>
           <p className="text-sm text-text-secondary mt-1">
-            The tool always checks your city against Wikipedia for free, so the AI works from real
-            facts. You can also switch on Tavily for richer live web results.
+            How the AI looks things up on the web, and what it does when it can&apos;t find an answer.
+            These apply to every AI helper.
           </p>
         </div>
 
+        {/* 1. The model's own (provider-side) web search */}
+        <ToggleRow
+          on={draft.webSearch}
+          onClick={() => setDraft({ ...draft, webSearch: !draft.webSearch })}
+          icon={<Globe size={14} className="text-accent-400" />}
+          title="Let the AI model search the web itself"
+        >
+          Cloud helpers (Gemini, Claude, OpenRouter and others) run their own live web searches
+          through their provider to check facts and cite sources, on top of the research step.
+          Local models (Ollama, LM Studio) can&apos;t browse, so this doesn&apos;t apply to them. If a
+          search-enabled run fails, it automatically retries without it.
+          {picked.includes("openrouter") && (
+            <span className="text-warn-400 block mt-1">
+              {/:free$/.test(draft.openrouterModel)
+                ? "OpenRouter charges for its web search even on free models, so it's skipped for this :free model to keep it free. The app's own free research still runs."
+                : "OpenRouter charges about $0.007 per request for its web search, on top of the model's own price."}
+            </span>
+          )}
+        </ToggleRow>
+
+        {/* 2. Tavily for the app's own research searches */}
         {(() => {
           const tavilyReady = searchKeyPresent || searchKeyInput.trim().length > 0;
           const on = draft.useTavily && tavilyReady;
           return (
-            <button
-              type="button"
+            <ToggleRow
+              on={on}
               disabled={!tavilyReady}
               onClick={() => setDraft({ ...draft, useTavily: !draft.useTavily })}
-              className={`w-full flex items-center gap-3 text-left ${tavilyReady ? "" : "opacity-60 cursor-not-allowed"}`}
+              icon={<Search size={14} className="text-accent-400" />}
+              title="Use Tavily for web search"
             >
-              <span
-                className={`shrink-0 w-11 h-6 rounded-full relative ${
-                  on ? "bg-accent-500" : "bg-surface-overlay border border-border"
-                }`}
-              >
-                <span
-                  className={`absolute top-0.5 w-5 h-5 rounded-full bg-white transition-all ${
-                    on ? "left-[22px]" : "left-0.5"
-                  }`}
-                />
-              </span>
-              <span>
-                <span className="text-base font-semibold text-text-primary block">
-                  Use Tavily for web search
-                </span>
-                <span className="text-sm text-text-secondary block">
-                  {tavilyReady
-                    ? on
-                      ? "On. Tavily runs the live web search."
-                      : "Off. Live web search uses the free DuckDuckGo option."
-                    : "Add a Tavily key below to switch this on."}
-                </span>
-              </span>
-            </button>
+              {!tavilyReady
+                ? "Add a Tavily key below to switch this on. Until then, the research step searches the web with free DuckDuckGo."
+                : on
+                  ? "On: the research step searches the web with Tavily, which returns fuller, more relevant results and can read pages and PDFs that block other readers. It uses your free Tavily allowance."
+                  : "Off: the research step searches the web with free DuckDuckGo. Turn this on for fuller, more relevant results from Tavily."}
+            </ToggleRow>
           );
         })()}
+
+        {/* 3. Educated guesses */}
+        <ToggleRow
+          on={draft.allowGuesses}
+          onClick={() => setDraft({ ...draft, allowGuesses: !draft.allowGuesses })}
+          icon={<Lightbulb size={14} className="text-warn-400" />}
+          title="Let the AI make educated guesses"
+          color="bg-warn-500"
+        >
+          {draft.allowGuesses
+            ? "On: when nothing supports an answer (no source, none of your data sources, and nothing the AI knows), the AI may make an educated guess. Those answers are labelled \"AI's educated guess\" on the Scorecard so you can check them."
+            : "Off: every answer must rest on a source, one of your data sources, or the AI's general knowledge. When none of these supports an answer, it is left blank with the reason, instead of guessed."}
+        </ToggleRow>
 
         <label className="block">
           <span className="text-sm font-semibold text-text-primary flex items-center gap-1.5">
@@ -985,6 +962,24 @@ export function SettingsTab({
             </p>
           </div>
         </details>
+      </div>
+
+      {/* Display */}
+      <div id="settings-display" className="glass-card p-5 space-y-4 scroll-mt-24">
+        <h2 className="text-lg font-semibold text-text-primary flex items-center gap-2">
+          <Sparkles size={17} className="text-accent-400" /> Display
+        </h2>
+        <ToggleRow
+          on={prefersReducedMotion(draft)}
+          onClick={() => setDraft({ ...draft, reduceMotion: !prefersReducedMotion(draft) })}
+          icon={<Pause size={14} className="text-accent-400" />}
+          title="Reduce motion"
+        >
+          {prefersReducedMotion(draft)
+            ? "On: the city view shown while the AI researches stays still, and facts change without sliding."
+            : "Off: the city view slowly turns while the AI researches, and facts slide in as they arrive."}
+          {draft.reduceMotion === undefined && " This follows your device's reduce-motion setting until you change it."}
+        </ToggleRow>
       </div>
 
       {/* Save, sticks to the bottom of the screen so it's always in view and
